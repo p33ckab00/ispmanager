@@ -65,11 +65,19 @@ def get_interface_traffic(router, interface_name):
         raise RuntimeError(f"Failed to get traffic for {interface_name}: {str(e)}")
 
 
-def get_ppp_active(router):
+def get_ppp_active(router, include_stats=False):
     api, conn = get_connection(router)
     try:
         resource = api.get_resource('/ppp/active')
-        sessions = resource.get()
+        if include_stats:
+            try:
+                sessions = resource.call('print', {'stats': ''})
+            except Exception:
+                sessions = resource.get()
+            if not sessions:
+                sessions = resource.get()
+        else:
+            sessions = resource.get()
         conn.disconnect()
         return sessions
     except Exception as e:

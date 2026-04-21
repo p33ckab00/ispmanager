@@ -115,13 +115,18 @@ def job_mark_overdue():
 
 
 def job_sample_usage():
-    from apps.subscribers.services import sample_subscriber_usage, purge_old_usage_samples
+    from apps.subscribers.services import (
+        sample_subscriber_usage,
+        purge_old_usage_samples,
+        create_cutoff_usage_snapshots,
+    )
     from apps.routers.models import Router
     try:
         routers = Router.objects.filter(is_active=True, status='online')
         total = 0
         for router in routers:
             total += sample_subscriber_usage(router)
+        create_cutoff_usage_snapshots()
         purge_old_usage_samples()
         if total:
             logger.debug(f"Usage sampled: {total} sessions")

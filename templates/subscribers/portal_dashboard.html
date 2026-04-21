@@ -102,12 +102,12 @@
       <div class="grid grid-cols-3 gap-3 mb-4 text-center">
         <div class="bg-blue-50 rounded-xl p-3">
           <p class="text-xs text-blue-500">Download</p>
-          <p class="text-lg font-bold text-blue-700">{{ usage_data.rx|last|default:'0' }}</p>
+          <p class="text-lg font-bold text-blue-700">{{ usage_rx_today|default:'0' }}</p>
           <p class="text-xs text-blue-400">GB today</p>
         </div>
         <div class="bg-green-50 rounded-xl p-3">
           <p class="text-xs text-green-500">Upload</p>
-          <p class="text-lg font-bold text-green-700">{{ usage_data.tx|last|default:'0' }}</p>
+          <p class="text-lg font-bold text-green-700">{{ usage_tx_today|default:'0' }}</p>
           <p class="text-xs text-green-400">GB today</p>
         </div>
         <div class="bg-gray-50 rounded-xl p-3">

@@ -1,6 +1,12 @@
 from datetime import date
 from django.utils import timezone
-from apps.subscribers.models import Subscriber, RateHistory, SubscriberUsageSample, SubscriberUsageDaily
+from apps.subscribers.models import (
+    Subscriber,
+    RateHistory,
+    SubscriberUsageSample,
+    SubscriberUsageDaily,
+    SubscriberUsageCutoffSnapshot,
+)
 from apps.routers import mikrotik
 
 
@@ -199,7 +205,7 @@ def sample_subscriber_usage(router):
         return 0
 
     try:
-        sessions = mikrotik.get_ppp_active(router)
+        sessions = mikrotik.get_ppp_active(router, include_stats=True)
     except Exception:
         return 0
 
@@ -214,13 +220,14 @@ def sample_subscriber_usage(router):
         except Subscriber.DoesNotExist:
             continue
 
-        rx_bytes = int(session.get('bytes-in', 0))
-        tx_bytes = int(session.get('bytes-out', 0))
+        rx_bytes = _parse_counter(session, 'bytes-in', 'rx-byte', 'rx-bytes')
+        tx_bytes = _parse_counter(session, 'bytes-out', 'tx-byte', 'tx-bytes')
         session_id = session.get('session-id', '') or session.get('.id', '')
 
-        last_sample = SubscriberUsageSample.objects.filter(
-            subscriber=subscriber
-        ).order_by('-sampled_at').first()
+        last_sample_qs = SubscriberUsageSample.objects.filter(subscriber=subscriber)
+        if session_id:
+            last_sample_qs = last_sample_qs.filter(session_key=str(session_id))
+        last_sample = last_sample_qs.order_by('-sampled_at').first()
 
         is_reset = False
         rx_delta = 0
@@ -249,6 +256,7 @@ def sample_subscriber_usage(router):
             tx_bytes=tx_bytes,
             rx_delta=rx_delta,
             tx_delta=tx_delta,
+            uptime_seconds=_parse_counter(session, 'uptime', default=0),
             is_reset=is_reset,
         )
 
@@ -256,6 +264,18 @@ def sample_subscriber_usage(router):
         sampled += 1
 
     return sampled
+
+
+def _parse_counter(payload, *keys, default=0):
+    for key in keys:
+        value = payload.get(key)
+        if value in (None, ''):
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return default
 
 
 def _update_daily_rollup(subscriber, rx_delta, tx_delta, is_reset):
@@ -273,6 +293,58 @@ def _update_daily_rollup(subscriber, rx_delta, tx_delta, is_reset):
     rollup.save(update_fields=['rx_bytes', 'tx_bytes', 'total_bytes', 'reset_count', 'updated_at'])
 
 
+def create_cutoff_usage_snapshots(reference_date=None):
+    from apps.settings_app.models import UsageSettings
+    from apps.billing.services import get_next_cutoff_period
+    from datetime import timedelta
+
+    settings = UsageSettings.get_settings()
+    if not settings.cutoff_snapshot_enabled:
+        return 0
+
+    today = reference_date or date.today()
+    created = 0
+
+    subscribers = Subscriber.objects.filter(
+        status__in=['active', 'suspended'],
+        is_billable=True,
+        cutoff_day=today.day,
+    )
+
+    for subscriber in subscribers:
+        if SubscriberUsageCutoffSnapshot.objects.filter(
+            subscriber=subscriber,
+            cutoff_date=today,
+        ).exists():
+            continue
+
+        usage_period_start, usage_period_end = get_next_cutoff_period(
+            subscriber.cutoff_day or 1,
+            today - timedelta(days=1),
+        )
+
+        rollups = SubscriberUsageDaily.objects.filter(
+            subscriber=subscriber,
+            date__gte=usage_period_start,
+            date__lte=usage_period_end,
+        )
+        rx_total = sum(item.rx_bytes for item in rollups)
+        tx_total = sum(item.tx_bytes for item in rollups)
+
+        SubscriberUsageCutoffSnapshot.objects.create(
+            subscriber=subscriber,
+            cutoff_date=today,
+            period_start=usage_period_start,
+            period_end=usage_period_end,
+            rx_bytes=rx_total,
+            tx_bytes=tx_total,
+            total_bytes=rx_total + tx_total,
+        )
+        created += 1
+
+    return created
+
+
 def purge_old_usage_samples():
     from datetime import timedelta
     from apps.settings_app.models import UsageSettings
@@ -283,8 +355,8 @@ def purge_old_usage_samples():
 
 
 def get_usage_chart_data(subscriber, view='this_cycle'):
-    from apps.billing.models import Invoice
     from datetime import timedelta
+    from apps.billing.services import resolve_billing_profile
 
     today = date.today()
     labels = []
@@ -292,14 +364,8 @@ def get_usage_chart_data(subscriber, view='this_cycle'):
     tx_data = []
 
     if view == 'this_cycle':
-        cutoff_day = subscriber.cutoff_day or 1
-        if today.day >= cutoff_day:
-            start = today.replace(day=cutoff_day)
-        else:
-            if today.month == 1:
-                start = today.replace(year=today.year - 1, month=12, day=cutoff_day)
-            else:
-                start = today.replace(month=today.month - 1, day=cutoff_day)
+        profile = resolve_billing_profile(subscriber, reference_date=today)
+        start = profile['period_start']
 
         current = start
         while current <= today:
@@ -326,11 +392,14 @@ def get_usage_chart_data(subscriber, view='this_cycle'):
             tx_data.append(round((daily.tx_bytes if daily else 0) / (1024**3), 3))
 
     elif view == 'by_cycle':
-        snapshots = subscriber.usage_cutoff_snapshots.order_by('cutoff_date')[:12]
+        snapshots = subscriber.usage_cutoff_snapshots.order_by('-cutoff_date')[:12]
         for snap in snapshots:
             labels.append(snap.cutoff_date.strftime('%b %Y'))
             rx_data.append(round(snap.rx_bytes / (1024**3), 3))
             tx_data.append(round(snap.tx_bytes / (1024**3), 3))
+        labels.reverse()
+        rx_data.reverse()
+        tx_data.reverse()
 
     cumulative = []
     running = 0
