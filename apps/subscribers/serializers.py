@@ -37,7 +37,7 @@ class SubscriberSerializer(serializers.ModelSerializer):
             'full_name', 'phone', 'address', 'email',
             'latitude', 'longitude', 'plan', 'plan_name',
             'monthly_rate', 'billing_effective_from', 'cutoff_day',
-            'start_date', 'status', 'notes', 'sms_opt_out',
+            'billing_due_days', 'is_billable', 'start_date', 'status', 'notes', 'sms_opt_out',
             'display_name', 'effective_rate', 'is_on_map',
             'created_at', 'updated_at',
         ]

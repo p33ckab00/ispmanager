@@ -94,6 +94,29 @@ def send_bulk_billing_sms(sent_by='system'):
     return results
 
 
+def send_subscriber_billing_sms(subscriber, sent_by='system'):
+    from apps.billing.models import BillingSnapshot
+    from apps.billing.services import generate_snapshot_for_subscriber
+
+    snapshot = BillingSnapshot.objects.filter(
+        subscriber=subscriber,
+        status__in=['frozen', 'issued'],
+    ).order_by('-cutoff_date', '-created_at').first()
+
+    if snapshot is None:
+        snapshot = BillingSnapshot.objects.filter(
+            subscriber=subscriber
+        ).order_by('-cutoff_date', '-created_at').first()
+
+    if snapshot is None:
+        snapshot, err = generate_snapshot_for_subscriber(subscriber, created_by=sent_by)
+        if err:
+            return None, err, None
+
+    log, err = send_billing_sms(snapshot, sent_by=sent_by)
+    return log, err, snapshot
+
+
 def get_semaphore_balance():
     from apps.settings_app.models import SMSSettings
     import requests

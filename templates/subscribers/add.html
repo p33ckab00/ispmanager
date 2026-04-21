@@ -47,6 +47,29 @@
         <input type="text" name="phone" value="{{ form.phone.value|default:'' }}"
           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Cutoff Day</label>
+        <input type="number" name="cutoff_day" min="1" max="28" value="{{ form.cutoff_day.value|default:1 }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Billing Effective From</label>
+        <input type="date" name="billing_effective_from" value="{{ form.billing_effective_from.value|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Due Offset Override</label>
+        <input type="number" name="billing_due_days" min="0" value="{{ form.billing_due_days.value|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Use default if blank">
+      </div>
+      <div class="flex items-center">
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input type="checkbox" name="is_billable" {% if form.is_billable.value or form.is_billable.value == None %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span class="text-sm text-gray-700">Billable account</span>
+        </label>
+      </div>
     </div>
     <div class="flex gap-3 pt-2">
       <button type="submit"

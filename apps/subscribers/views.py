@@ -20,6 +20,7 @@ from apps.billing.services import apply_rate_change
 from apps.subscribers.otp import create_otp, verify_otp
 from apps.routers.models import Router
 from apps.core.models import AuditLog
+from apps.sms.services import send_subscriber_billing_sms
 
 
 # ── Subscriber List ────────────────────────────────────────────────────────────
@@ -97,6 +98,33 @@ def subscriber_detail(request, pk):
         'nodes': NetworkNode.objects.filter(is_active=True).order_by('name'),
         'usage_views': usage_views,
     })
+
+
+@login_required
+def subscriber_send_billing_sms(request, pk):
+    subscriber = get_object_or_404(Subscriber, pk=pk)
+    if request.method != 'POST':
+        return redirect('subscriber-detail', pk=pk)
+
+    log, err, snapshot = send_subscriber_billing_sms(
+        subscriber=subscriber,
+        sent_by=request.user.username,
+    )
+    if err:
+        messages.error(request, f"Billing SMS failed: {err}")
+        return redirect('subscriber-detail', pk=pk)
+
+    AuditLog.log(
+        'send',
+        'sms',
+        f"Billing SMS sent to {subscriber.username} using snapshot {snapshot.snapshot_number}",
+        user=request.user,
+    )
+    messages.success(
+        request,
+        f"Billing SMS sent to {subscriber.display_name} for {snapshot.snapshot_number}."
+    )
+    return redirect('subscriber-detail', pk=pk)
 
 
 # ── Edit Admin Fields ──────────────────────────────────────────────────────────
@@ -394,8 +422,9 @@ def portal_request_otp(request):
             try:
                 from apps.sms.semaphore import send_sms
                 send_sms(phone, f"Your ISP Manager login code is: {otp.code}. Valid for 10 minutes.")
-            except Exception:
-                pass
+            except Exception as e:
+                messages.error(request, f"OTP created but SMS delivery failed: {e}")
+                return render(request, 'subscribers/portal_otp_request.html', {'form': form})
 
             request.session['portal_phone'] = phone
             messages.success(request, 'OTP sent to your phone.')

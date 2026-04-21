@@ -69,6 +69,15 @@ class Subscriber(models.Model):
     monthly_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     billing_effective_from = models.DateField(null=True, blank=True)
     cutoff_day = models.IntegerField(default=1, help_text='Day of month for billing cutoff (1-28)')
+    billing_due_days = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text='Optional per-subscriber due offset in days after cutoff.'
+    )
+    is_billable = models.BooleanField(
+        default=True,
+        help_text='If disabled, invoices and snapshots will not be generated for this subscriber.'
+    )
     start_date = models.DateField(null=True, blank=True, help_text='Service start date')
 
     # Status
@@ -119,7 +128,7 @@ class Subscriber(models.Model):
 
     @property
     def can_generate_billing(self):
-        return self.status in ('active', 'suspended')
+        return self.is_billable and self.status in ('active', 'suspended')
 
 
 class RateHistory(models.Model):

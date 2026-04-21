@@ -66,6 +66,13 @@
       </button>
     </form>
 
+    <form method="post" action="/subscribers/{{ subscriber.pk }}/send-billing-sms/" class="inline">
+      {% csrf_token %}
+      <button type="submit" class="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
+        <i class="fa fa-sms mr-1"></i> Send Billing SMS
+      </button>
+    </form>
+
     <a href="/sms/send/?subscriber={{ subscriber.pk }}"
       class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
       <i class="fa fa-sms mr-1"></i> Send SMS
@@ -218,6 +225,8 @@
             <div><dt class="text-xs text-gray-400">Monthly Rate</dt><dd class="font-bold text-lg mt-0.5 text-blue-700">{% if subscriber.effective_rate %}PHP {{ subscriber.effective_rate }}{% else %}-{% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Effective From</dt><dd class="font-medium mt-0.5">{{ subscriber.billing_effective_from|default:'-' }}</dd></div>
             <div><dt class="text-xs text-gray-400">Cutoff Day</dt><dd class="font-medium mt-0.5">Day {{ subscriber.cutoff_day }}</dd></div>
+            <div><dt class="text-xs text-gray-400">Due Offset</dt><dd class="font-medium mt-0.5">{% if subscriber.billing_due_days is not None %}{{ subscriber.billing_due_days }} day(s){% else %}Default{% endif %}</dd></div>
+            <div><dt class="text-xs text-gray-400">Billable</dt><dd class="font-medium mt-0.5">{% if subscriber.is_billable %}Yes{% else %}No{% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Open Balance</dt><dd class="font-bold mt-0.5 {% if open_balance > 0 %}text-red-600{% else %}text-green-600{% endif %}">PHP {{ open_balance }}</dd></div>
           </dl>
         </div>
@@ -367,6 +376,9 @@
           <div class="relative h-64">
             <canvas id="usageChart"></canvas>
           </div>
+          <p id="usage-empty-state" class="text-xs text-gray-400 mt-3 text-center hidden">
+            No usage data yet. Make sure the router is online and the usage sampler has run at least once.
+          </p>
           <p class="text-xs text-gray-400 mt-2 text-center">Values in GB. Bars = daily usage. Line = cumulative.</p>
         </div>
 
@@ -437,6 +449,14 @@
         <div class="flex justify-between">
           <dt class="text-gray-400">Cutoff Day</dt>
           <dd class="font-medium">{{ subscriber.cutoff_day }}</dd>
+        </div>
+        <div class="flex justify-between">
+          <dt class="text-gray-400">Due Offset</dt>
+          <dd class="font-medium">{% if subscriber.billing_due_days is not None %}{{ subscriber.billing_due_days }} day(s){% else %}Default{% endif %}</dd>
+        </div>
+        <div class="flex justify-between">
+          <dt class="text-gray-400">Billable</dt>
+          <dd class="font-medium">{% if subscriber.is_billable %}Yes{% else %}No{% endif %}</dd>
         </div>
         <div class="flex justify-between">
           <dt class="text-gray-400">Plan</dt>
@@ -514,59 +534,65 @@ function loadUsage(view) {
     .then(data => {
       const ctx = document.getElementById('usageChart')
       if (!ctx) return
+      const emptyState = document.getElementById('usage-empty-state')
 
       if (usageChart) usageChart.destroy()
 
-      usageChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: data.labels,
-          datasets: [
-            {
-              label: 'Download (GB)',
-              data: data.rx,
-              backgroundColor: 'rgba(59,130,246,0.7)',
-              yAxisID: 'y',
-              order: 2,
-            },
-            {
-              label: 'Upload (GB)',
-              data: data.tx,
-              backgroundColor: 'rgba(34,197,94,0.7)',
-              yAxisID: 'y',
-              order: 2,
-            },
-            {
-              label: 'Cumulative (GB)',
-              data: data.cumulative,
-              type: 'line',
-              borderColor: 'rgba(239,68,68,0.8)',
-              backgroundColor: 'transparent',
-              borderWidth: 2,
-              pointRadius: 3,
-              yAxisID: 'y2',
-              order: 1,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: { position: 'top', labels: { font: { size: 11 } } },
-            tooltip: {
-              callbacks: {
-                label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y} GB`
-              }
-            }
+      if (data.has_data) {
+        if (emptyState) emptyState.classList.add('hidden')
+        usageChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: data.labels,
+            datasets: [
+              {
+                label: 'Download (GB)',
+                data: data.rx,
+                backgroundColor: 'rgba(59,130,246,0.7)',
+                yAxisID: 'y',
+                order: 2,
+              },
+              {
+                label: 'Upload (GB)',
+                data: data.tx,
+                backgroundColor: 'rgba(34,197,94,0.7)',
+                yAxisID: 'y',
+                order: 2,
+              },
+              {
+                label: 'Cumulative (GB)',
+                data: data.cumulative,
+                type: 'line',
+                borderColor: 'rgba(239,68,68,0.8)',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                pointRadius: 3,
+                yAxisID: 'y2',
+                order: 1,
+              },
+            ],
           },
-          scales: {
-            y: { position: 'left', title: { display: true, text: 'GB', font: { size: 10 } } },
-            y2: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Cumulative GB', font: { size: 10 } } },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { position: 'top', labels: { font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y} GB`
+                }
+              }
+            },
+            scales: {
+              y: { position: 'left', title: { display: true, text: 'GB', font: { size: 10 } } },
+              y2: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Cumulative GB', font: { size: 10 } } },
+            }
           }
-        }
-      })
+        })
+      } else if (emptyState) {
+        emptyState.classList.remove('hidden')
+      }
 
       const rxTotal = data.rx.reduce((a,b) => a+b, 0)
       const txTotal = data.tx.reduce((a,b) => a+b, 0)

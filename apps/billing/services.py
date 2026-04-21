@@ -41,6 +41,34 @@ def get_effective_rate_at(subscriber, as_of_date=None):
     return RateHistory.get_effective_rate(subscriber, as_of_date)
 
 
+def resolve_billing_profile(subscriber, billing_settings=None, reference_date=None):
+    if billing_settings is None:
+        billing_settings = BillingSettings.get_settings()
+
+    today = reference_date or date.today()
+    cutoff_day = subscriber.cutoff_day or billing_settings.billing_day
+    period_start, period_end = get_next_cutoff_period(cutoff_day, today)
+    cutoff_date = period_start - timedelta(days=1)
+
+    due_offset = (
+        subscriber.billing_due_days
+        if subscriber.billing_due_days is not None
+        else (billing_settings.billing_due_offset_days or billing_settings.due_days)
+    )
+    due_date = cutoff_date + timedelta(days=due_offset)
+    effective_from = subscriber.billing_effective_from or subscriber.start_date
+
+    return {
+        'cutoff_day': cutoff_day,
+        'period_start': period_start,
+        'period_end': period_end,
+        'cutoff_date': cutoff_date,
+        'due_offset_days': due_offset,
+        'due_date': due_date,
+        'effective_from': effective_from,
+    }
+
+
 # ── Invoice Generation ─────────────────────────────────────────────────────────
 
 @transaction.atomic
@@ -52,14 +80,18 @@ def generate_invoice_for_subscriber(subscriber, billing_settings=None, reference
         return None, f"Subscriber {subscriber.username} is {subscriber.status}, billing skipped."
 
     today = reference_date or date.today()
+    profile = resolve_billing_profile(subscriber, billing_settings, today)
+    if profile['effective_from'] and today < profile['effective_from']:
+        return None, f"Billing for {subscriber.username} starts on {profile['effective_from']}."
+
     rate = get_effective_rate_at(subscriber, today)
 
     if rate is None:
         return None, f"No rate set for {subscriber.username}."
 
-    cutoff_day = subscriber.cutoff_day or billing_settings.billing_day
-    period_start, period_end = get_next_cutoff_period(cutoff_day, today)
-    due_date = today + timedelta(days=billing_settings.billing_due_offset_days)
+    period_start = profile['period_start']
+    period_end = profile['period_end']
+    due_date = profile['due_date']
 
     existing = Invoice.objects.filter(
         subscriber=subscriber,
@@ -87,7 +119,10 @@ def generate_invoices_for_all(billing_settings=None):
     if not billing_settings:
         billing_settings = BillingSettings.get_settings()
 
-    subscribers = Subscriber.objects.filter(status__in=['active', 'suspended']).select_related('plan')
+    subscribers = Subscriber.objects.filter(
+        status__in=['active', 'suspended'],
+        is_billable=True,
+    ).select_related('plan')
     created = 0
     skipped = 0
     errors = []
@@ -169,9 +204,13 @@ def generate_snapshot_for_subscriber(subscriber, billing_settings=None,
         return None, f"Subscriber {subscriber.username} cannot generate billing."
 
     today = reference_date or date.today()
-    cutoff_day = subscriber.cutoff_day or billing_settings.billing_day
-    period_start, period_end = get_next_cutoff_period(cutoff_day, today)
-    due_date = today + timedelta(days=billing_settings.billing_due_offset_days)
+    profile = resolve_billing_profile(subscriber, billing_settings, today)
+    if profile['effective_from'] and today < profile['effective_from']:
+        return None, f"Billing for {subscriber.username} starts on {profile['effective_from']}."
+
+    period_start = profile['period_start']
+    period_end = profile['period_end']
+    due_date = profile['due_date']
     rate = get_effective_rate_at(subscriber, today)
 
     if rate is None:
@@ -195,7 +234,7 @@ def generate_snapshot_for_subscriber(subscriber, billing_settings=None,
 
     snapshot = BillingSnapshot.objects.create(
         subscriber=subscriber,
-        cutoff_date=today,
+        cutoff_date=profile['cutoff_date'],
         issue_date=today,
         due_date=due_date,
         period_start=period_start,
@@ -281,10 +320,12 @@ def apply_rate_change(subscriber, new_plan, new_rate, effective_date,
 # ── Mark Overdue ───────────────────────────────────────────────────────────────
 
 def mark_overdue_invoices():
+    settings = BillingSettings.get_settings()
     today = date.today()
+    cutoff = today - timedelta(days=settings.grace_period_days)
     count = Invoice.objects.filter(
         status__in=['open', 'partial'],
-        due_date__lt=today,
+        due_date__lt=cutoff,
     ).update(status='overdue')
     return count
 

@@ -8,13 +8,14 @@ class SubscriberAdminForm(forms.ModelForm):
         model = Subscriber
         fields = [
             'full_name', 'phone', 'address', 'email',
-            'latitude', 'longitude', 'cutoff_day',
-            'start_date', 'status', 'notes', 'sms_opt_out',
+            'latitude', 'longitude', 'cutoff_day', 'billing_effective_from',
+            'billing_due_days', 'is_billable', 'start_date', 'status', 'notes', 'sms_opt_out',
         ]
         widgets = {
             'address': forms.Textarea(attrs={'rows': 2}),
             'notes': forms.Textarea(attrs={'rows': 2}),
             'start_date': forms.DateInput(attrs={'type': 'date', 'format': '%Y-%m-%d'}),
+            'billing_effective_from': forms.DateInput(attrs={'type': 'date', 'format': '%Y-%m-%d'}),
         }
 
     def clean_cutoff_day(self):
@@ -74,13 +75,15 @@ class ManualSubscriberForm(forms.ModelForm):
         fields = [
             'username', 'mt_password', 'mt_profile', 'service_type',
             'full_name', 'phone', 'address', 'email',
-            'cutoff_day', 'start_date', 'status', 'notes',
+            'cutoff_day', 'billing_effective_from', 'billing_due_days',
+            'is_billable', 'start_date', 'status', 'notes',
         ]
         widgets = {
             'mt_password': forms.PasswordInput(render_value=True),
             'address': forms.Textarea(attrs={'rows': 2}),
             'notes': forms.Textarea(attrs={'rows': 2}),
             'start_date': forms.DateInput(attrs={'type': 'date'}),
+            'billing_effective_from': forms.DateInput(attrs={'type': 'date'}),
         }
 
 

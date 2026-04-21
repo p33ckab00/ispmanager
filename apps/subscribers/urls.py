@@ -7,6 +7,7 @@ urlpatterns = [
     path('sync/', views.subscriber_sync, name='subscriber-sync'),
     path('<int:pk>/', views.subscriber_detail, name='subscriber-detail'),
     path('<int:pk>/edit/', views.subscriber_edit, name='subscriber-edit'),
+    path('<int:pk>/send-billing-sms/', views.subscriber_send_billing_sms, name='subscriber-send-billing-sms'),
     path('<int:pk>/rate/', views.subscriber_rate_change, name='subscriber-rate-change'),
     path('<int:pk>/suspend/', views.subscriber_suspend, name='subscriber-suspend'),
     path('<int:pk>/reconnect/', views.subscriber_reconnect, name='subscriber-reconnect'),
