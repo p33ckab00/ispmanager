@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{{ isp_name }}{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  {% block extra_css %}{% endblock %}
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+
+  {% if user.is_authenticated %}
+    {% include "partials/sidebar.html" %}
+    {% include "partials/topbar.html" %}
+
+    <div class="ml-64 pt-16 min-h-screen">
+      <main class="p-6">
+        {% include "partials/messages.html" %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+
+  {% else %}
+    {% block auth_content %}{% endblock %}
+  {% endif %}
+
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4"><a href="/accounting/income/" class="text-sm text-blue-600 hover:underline"><i class="fa fa-arrow-left mr-1"></i> Back</a></div>
+<div class="mb-6"><h2 class="text-2xl font-bold text-gray-800">{{ title }}</h2></div>
+{% include "partials/messages.html" %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-lg">
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {% for field in form %}
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">{{ field.label }}</label>
+      {{ field }}
+      {% if field.errors %}<p class="text-red-500 text-xs mt-1">{{ field.errors.0 }}</p>{% endif %}
+    </div>
+    {% endfor %}
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">Save</button>
+  </form>
+</div>
+{% endblock %}

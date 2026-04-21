@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ page.get_page_type_display }} - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <a href="/landing/" class="text-sm text-blue-600 hover:underline"><i class="fa fa-arrow-left mr-1"></i> Back</a>
+</div>
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-bold text-gray-800">Edit: {{ page.get_page_type_display }}</h2>
+  <a href="/landing/{{ page_type }}/publish/"
+    class="{% if page.is_published %}bg-yellow-500 hover:bg-yellow-600{% else %}bg-green-600 hover:bg-green-700{% endif %} text-white text-sm font-semibold px-4 py-2 rounded-lg transition">
+    {% if page.is_published %}Unpublish{% else %}Publish{% endif %}
+  </a>
+</div>
+{% include "partials/messages.html" %}
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+    <h3 class="font-semibold text-gray-700 mb-4">Page Content</h3>
+    <form method="post" class="space-y-4">
+      {% csrf_token %}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Hero Title</label>
+        <input type="text" name="hero_title" value="{{ page.hero_title }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Fast, Reliable Internet">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Hero Subtitle</label>
+        <textarea name="hero_subtitle" rows="2"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ page.hero_subtitle }}</textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Announcement</label>
+        <textarea name="announcement" rows="2"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Maintenance on Sunday 12am...">{{ page.announcement }}</textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">About / Description</label>
+        <textarea name="about_text" rows="4"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ page.about_text }}</textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Contact Phone</label>
+          <input type="text" name="contact_phone" value="{{ page.contact_phone }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
+          <input type="email" name="contact_email" value="{{ page.contact_email }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Contact Address</label>
+        <textarea name="contact_address" rows="2"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ page.contact_address }}</textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Footer Text</label>
+        <input type="text" name="footer_text" value="{{ page.footer_text }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Primary Color</label>
+        <input type="color" name="primary_color" value="{{ page.primary_color }}"
+          class="h-10 w-20 border border-gray-300 rounded-lg cursor-pointer">
+      </div>
+      <button type="submit"
+        class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+        Save Content
+      </button>
+    </form>
+  </div>
+
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+    <h3 class="font-semibold text-gray-700 mb-4">Plans ({{ plans|length }})</h3>
+    {% for plan in plans %}
+    <div class="border border-gray-100 rounded-lg p-3 mb-3 flex items-start justify-between">
+      <div>
+        <p class="font-medium text-sm">{{ plan.name }}</p>
+        <p class="text-xs text-gray-500">{{ plan.speed }} | {{ plan.price }}</p>
+        {% if plan.is_featured %}<span class="text-xs text-blue-600">Featured</span>{% endif %}
+      </div>
+      <a href="/landing/plans/{{ plan.pk }}/delete/"
+        onclick="return confirm('Remove this plan?')"
+        class="text-red-400 hover:text-red-600 text-xs">Remove</a>
+    </div>
+    {% empty %}
+    <p class="text-sm text-gray-400 mb-4">No plans added yet.</p>
+    {% endfor %}
+
+    <form method="post" action="/landing/{{ page_type }}/plans/add/" class="space-y-3 border-t border-gray-100 pt-4 mt-4">
+      {% csrf_token %}
+      <p class="text-sm font-medium text-gray-700">Add Plan</p>
+      <div class="grid grid-cols-2 gap-2">
+        <input type="text" name="name" placeholder="Plan Name" required
+          class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="text" name="speed" placeholder="e.g. 15 Mbps"
+          class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="text" name="price" placeholder="e.g. PHP 899/mo"
+          class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="number" name="sort_order" placeholder="Order" value="0"
+          class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <textarea name="features" rows="3" placeholder="Feature per line..."
+        class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+      <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+        <input type="checkbox" name="is_featured" class="rounded"> Featured plan
+      </label>
+      <button type="submit"
+        class="bg-gray-700 hover:bg-gray-800 text-white font-semibold px-4 py-1.5 rounded-lg text-sm transition">
+        Add Plan
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

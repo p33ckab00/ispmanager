@@ -1,0 +1,346 @@
+from datetime import date
+from django.utils import timezone
+from apps.subscribers.models import Subscriber, RateHistory, SubscriberUsageSample, SubscriberUsageDaily
+from apps.routers import mikrotik
+
+
+MIKROTIK_FIELDS = ['mt_password', 'mt_profile', 'mac_address', 'ip_address', 'mt_status', 'service_type']
+
+
+# ── Sync ───────────────────────────────────────────────────────────────────────
+
+def sync_ppp_secrets(router):
+    try:
+        secrets = mikrotik.get_ppp_secrets(router)
+    except Exception as e:
+        return 0, 0, str(e)
+
+    added = 0
+    updated = 0
+
+    for secret in secrets:
+        username = secret.get('name', '').strip()
+        if not username:
+            continue
+
+        service = secret.get('service', 'pppoe')
+        profile = secret.get('profile', 'default')
+        password = secret.get('password', '')
+        existing = Subscriber.objects.filter(username=username).first()
+
+        if existing:
+            existing.mt_password = password
+            existing.mt_profile = profile
+            existing.service_type = service if service in ['pppoe', 'hotspot', 'dhcp'] else 'pppoe'
+            existing.router = router
+            existing.last_synced = timezone.now()
+            existing.save(update_fields=['mt_password', 'mt_profile', 'service_type', 'router', 'last_synced'])
+            updated += 1
+        else:
+            Subscriber.objects.create(
+                router=router,
+                username=username,
+                mt_password=password,
+                mt_profile=profile,
+                service_type=service if service in ['pppoe', 'hotspot', 'dhcp'] else 'pppoe',
+                last_synced=timezone.now(),
+            )
+            added += 1
+
+    return added, updated, None
+
+
+def sync_active_sessions(router):
+    try:
+        sessions = mikrotik.get_ppp_active(router)
+    except Exception as e:
+        return str(e)
+
+    active_usernames = set()
+    for session in sessions:
+        username = session.get('name', '').strip()
+        if not username:
+            continue
+        active_usernames.add(username)
+        ip = session.get('address', None)
+        Subscriber.objects.filter(username=username).update(ip_address=ip, mt_status='online')
+
+    Subscriber.objects.filter(router=router).exclude(username__in=active_usernames).update(mt_status='offline')
+    return None
+
+
+# ── MikroTik PPP Suspend / Reconnect ──────────────────────────────────────────
+
+def suspend_on_mikrotik(subscriber):
+    from apps.settings_app.models import SubscriberSettings
+    settings = SubscriberSettings.get_settings()
+
+    if not settings.mikrotik_auto_suspend:
+        return False, 'MikroTik auto-suspend is disabled in Settings.'
+
+    if not subscriber.router:
+        return False, 'No router assigned to subscriber.'
+
+    try:
+        api, conn = mikrotik.get_connection(subscriber.router)
+        resource = api.get_resource('/ppp/secret')
+        secrets = resource.get(name=subscriber.username)
+        if secrets:
+            resource.set(id=secrets[0]['id'], disabled='yes')
+        conn.disconnect()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def reconnect_on_mikrotik(subscriber):
+    from apps.settings_app.models import SubscriberSettings
+    settings = SubscriberSettings.get_settings()
+
+    if not settings.mikrotik_auto_reconnect:
+        return False, 'MikroTik auto-reconnect is disabled in Settings.'
+
+    if not subscriber.router:
+        return False, 'No router assigned to subscriber.'
+
+    try:
+        api, conn = mikrotik.get_connection(subscriber.router)
+        resource = api.get_resource('/ppp/secret')
+        secrets = resource.get(name=subscriber.username)
+        if secrets:
+            resource.set(id=secrets[0]['id'], disabled='no')
+        conn.disconnect()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+# ── Subscriber Status Lifecycle ────────────────────────────────────────────────
+
+def suspend_subscriber(subscriber, suspended_by='admin'):
+    ok, err = suspend_on_mikrotik(subscriber)
+    subscriber.status = 'suspended'
+    subscriber.save(update_fields=['status', 'updated_at'])
+
+    from apps.core.models import AuditLog
+    AuditLog.log('update', 'subscribers', f"{subscriber.username} suspended by {suspended_by}", )
+
+    from apps.notifications.telegram import notify_event
+    notify_event('subscriber_status', f"Subscriber Suspended",
+                 f"{subscriber.display_name} ({subscriber.username}) has been suspended.")
+
+    return ok, err
+
+
+def reconnect_subscriber(subscriber, reconnected_by='admin'):
+    ok, err = reconnect_on_mikrotik(subscriber)
+    subscriber.status = 'active'
+    subscriber.save(update_fields=['status', 'updated_at'])
+
+    from apps.core.models import AuditLog
+    AuditLog.log('update', 'subscribers', f"{subscriber.username} reconnected by {reconnected_by}")
+
+    from apps.notifications.telegram import notify_event
+    notify_event('subscriber_status', 'Subscriber Reconnected',
+                 f"{subscriber.display_name} ({subscriber.username}) has been reconnected.")
+
+    return ok, err
+
+
+def disconnect_subscriber(subscriber, reason='', disconnected_by='admin'):
+    suspend_on_mikrotik(subscriber)
+    subscriber.status = 'disconnected'
+    subscriber.disconnected_date = date.today()
+    subscriber.disconnected_reason = reason
+    subscriber.save(update_fields=['status', 'disconnected_date', 'disconnected_reason', 'updated_at'])
+
+    from apps.core.models import AuditLog
+    AuditLog.log('update', 'subscribers', f"{subscriber.username} disconnected: {reason}")
+
+    from apps.notifications.telegram import notify_event
+    notify_event('subscriber_status', 'Subscriber Disconnected',
+                 f"{subscriber.display_name} ({subscriber.username}) has been disconnected. Reason: {reason}")
+
+
+def mark_deceased(subscriber, deceased_date=None, note='', marked_by='admin'):
+    from apps.billing.services import void_invoices_for_deceased
+    suspend_on_mikrotik(subscriber)
+    subscriber.status = 'deceased'
+    subscriber.deceased_date = deceased_date or date.today()
+    subscriber.deceased_note = note
+    subscriber.save(update_fields=['status', 'deceased_date', 'deceased_note', 'updated_at'])
+    voided = void_invoices_for_deceased(subscriber, voided_by=marked_by)
+
+    from apps.core.models import AuditLog
+    AuditLog.log('update', 'subscribers',
+                 f"{subscriber.username} marked deceased. {voided} invoices voided.")
+
+    from apps.notifications.telegram import notify_event
+    notify_event('subscriber_status', 'Subscriber Deceased',
+                 f"{subscriber.display_name} ({subscriber.username}) marked as deceased. {voided} open invoices voided.")
+
+
+def archive_subscriber(subscriber):
+    subscriber.status = 'archived'
+    subscriber.save(update_fields=['status', 'updated_at'])
+
+
+# ── Usage Sampling ─────────────────────────────────────────────────────────────
+
+def sample_subscriber_usage(router):
+    """
+    Called by scheduler every 5 minutes.
+    Pulls PPP active sessions and records usage deltas.
+    Handles brownout/reset detection.
+    """
+    from apps.settings_app.models import UsageSettings
+    settings = UsageSettings.get_settings()
+    if not settings.enabled:
+        return 0
+
+    try:
+        sessions = mikrotik.get_ppp_active(router)
+    except Exception:
+        return 0
+
+    sampled = 0
+    for session in sessions:
+        username = session.get('name', '').strip()
+        if not username:
+            continue
+
+        try:
+            subscriber = Subscriber.objects.get(username=username)
+        except Subscriber.DoesNotExist:
+            continue
+
+        rx_bytes = int(session.get('bytes-in', 0))
+        tx_bytes = int(session.get('bytes-out', 0))
+        session_id = session.get('session-id', '') or session.get('.id', '')
+
+        last_sample = SubscriberUsageSample.objects.filter(
+            subscriber=subscriber
+        ).order_by('-sampled_at').first()
+
+        is_reset = False
+        rx_delta = 0
+        tx_delta = 0
+
+        if last_sample:
+            if session_id and last_sample.session_key and session_id != last_sample.session_key:
+                is_reset = True
+            elif rx_bytes < last_sample.rx_bytes or tx_bytes < last_sample.tx_bytes:
+                is_reset = True
+
+            if is_reset:
+                rx_delta = rx_bytes
+                tx_delta = tx_bytes
+            else:
+                rx_delta = max(0, rx_bytes - last_sample.rx_bytes)
+                tx_delta = max(0, tx_bytes - last_sample.tx_bytes)
+        else:
+            rx_delta = rx_bytes
+            tx_delta = tx_bytes
+
+        SubscriberUsageSample.objects.create(
+            subscriber=subscriber,
+            session_key=str(session_id),
+            rx_bytes=rx_bytes,
+            tx_bytes=tx_bytes,
+            rx_delta=rx_delta,
+            tx_delta=tx_delta,
+            is_reset=is_reset,
+        )
+
+        _update_daily_rollup(subscriber, rx_delta, tx_delta, is_reset)
+        sampled += 1
+
+    return sampled
+
+
+def _update_daily_rollup(subscriber, rx_delta, tx_delta, is_reset):
+    today = date.today()
+    rollup, _ = SubscriberUsageDaily.objects.get_or_create(
+        subscriber=subscriber,
+        date=today,
+        defaults={'rx_bytes': 0, 'tx_bytes': 0, 'total_bytes': 0, 'reset_count': 0}
+    )
+    rollup.rx_bytes += rx_delta
+    rollup.tx_bytes += tx_delta
+    rollup.total_bytes += (rx_delta + tx_delta)
+    if is_reset:
+        rollup.reset_count += 1
+    rollup.save(update_fields=['rx_bytes', 'tx_bytes', 'total_bytes', 'reset_count', 'updated_at'])
+
+
+def purge_old_usage_samples():
+    from datetime import timedelta
+    from apps.settings_app.models import UsageSettings
+    settings = UsageSettings.get_settings()
+    cutoff = timezone.now() - timedelta(days=settings.raw_retention_days)
+    deleted, _ = SubscriberUsageSample.objects.filter(sampled_at__lt=cutoff).delete()
+    return deleted
+
+
+def get_usage_chart_data(subscriber, view='this_cycle'):
+    from apps.billing.models import Invoice
+    from datetime import timedelta
+
+    today = date.today()
+    labels = []
+    rx_data = []
+    tx_data = []
+
+    if view == 'this_cycle':
+        cutoff_day = subscriber.cutoff_day or 1
+        if today.day >= cutoff_day:
+            start = today.replace(day=cutoff_day)
+        else:
+            if today.month == 1:
+                start = today.replace(year=today.year - 1, month=12, day=cutoff_day)
+            else:
+                start = today.replace(month=today.month - 1, day=cutoff_day)
+
+        current = start
+        while current <= today:
+            labels.append(current.strftime('%b %d'))
+            daily = SubscriberUsageDaily.objects.filter(subscriber=subscriber, date=current).first()
+            rx_data.append(round((daily.rx_bytes if daily else 0) / (1024**3), 3))
+            tx_data.append(round((daily.tx_bytes if daily else 0) / (1024**3), 3))
+            current += timedelta(days=1)
+
+    elif view == 'last_7':
+        for i in range(6, -1, -1):
+            d = today - timedelta(days=i)
+            labels.append(d.strftime('%b %d'))
+            daily = SubscriberUsageDaily.objects.filter(subscriber=subscriber, date=d).first()
+            rx_data.append(round((daily.rx_bytes if daily else 0) / (1024**3), 3))
+            tx_data.append(round((daily.tx_bytes if daily else 0) / (1024**3), 3))
+
+    elif view == 'last_30':
+        for i in range(29, -1, -1):
+            d = today - timedelta(days=i)
+            labels.append(d.strftime('%b %d'))
+            daily = SubscriberUsageDaily.objects.filter(subscriber=subscriber, date=d).first()
+            rx_data.append(round((daily.rx_bytes if daily else 0) / (1024**3), 3))
+            tx_data.append(round((daily.tx_bytes if daily else 0) / (1024**3), 3))
+
+    elif view == 'by_cycle':
+        snapshots = subscriber.usage_cutoff_snapshots.order_by('cutoff_date')[:12]
+        for snap in snapshots:
+            labels.append(snap.cutoff_date.strftime('%b %Y'))
+            rx_data.append(round(snap.rx_bytes / (1024**3), 3))
+            tx_data.append(round(snap.tx_bytes / (1024**3), 3))
+
+    cumulative = []
+    running = 0
+    for rx, tx in zip(rx_data, tx_data):
+        running += rx + tx
+        cumulative.append(round(running, 3))
+
+    return {
+        'labels': labels,
+        'rx': rx_data,
+        'tx': tx_data,
+        'cumulative': cumulative,
+    }

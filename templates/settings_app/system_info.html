@@ -1,0 +1,40 @@
+{% extends "settings_app/base_settings.html" %}
+{% block settings_content %}
+<div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+  <h3 class="font-semibold text-gray-700 mb-6">System Information</h3>
+  <form method="post" enctype="multipart/form-data" class="space-y-4 max-w-lg">
+    {% csrf_token %}
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">ISP Name</label>
+      <input type="text" name="isp_name" value="{{ form.isp_name.value|default:'' }}"
+        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Address</label>
+      <textarea name="isp_address" rows="3"
+        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ form.isp_address.value|default:'' }}</textarea>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+        <input type="text" name="isp_phone" value="{{ form.isp_phone.value|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+        <input type="email" name="isp_email" value="{{ form.isp_email.value|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Logo</label>
+      <input type="file" name="isp_logo" accept="image/*"
+        class="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+    </div>
+    <button type="submit"
+      class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+      Save Changes
+    </button>
+  </form>
+</div>
+{% endblock %}

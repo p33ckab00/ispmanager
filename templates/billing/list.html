@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Billing - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Billing</h2>
+    <p class="text-gray-500 text-sm mt-1">Manage subscriber bills and payments.</p>
+  </div>
+  <a href="/billing/generate/"
+    class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+    <i class="fa fa-file-invoice-dollar"></i> Generate Bills
+  </a>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="grid grid-cols-3 gap-4 mb-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 text-center">
+    <p class="text-2xl font-bold text-yellow-600">{{ summary.unpaid }}</p>
+    <p class="text-sm text-gray-500 mt-1">Unpaid</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 text-center">
+    <p class="text-2xl font-bold text-red-600">{{ summary.overdue }}</p>
+    <p class="text-sm text-gray-500 mt-1">Overdue</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 text-center">
+    <p class="text-2xl font-bold text-green-600">{{ summary.paid }}</p>
+    <p class="text-sm text-gray-500 mt-1">Paid</p>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
+  <form method="get" class="flex gap-3 p-4">
+    <input type="text" name="q" value="{{ search }}" placeholder="Search subscriber..."
+      class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <select name="status"
+      class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option value="">All Status</option>
+      <option value="unpaid" {% if status == 'unpaid' %}selected{% endif %}>Unpaid</option>
+      <option value="paid" {% if status == 'paid' %}selected{% endif %}>Paid</option>
+      <option value="overdue" {% if status == 'overdue' %}selected{% endif %}>Overdue</option>
+      <option value="waived" {% if status == 'waived' %}selected{% endif %}>Waived</option>
+    </select>
+    <button type="submit"
+      class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Search</button>
+  </form>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Subscriber</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Period</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Due Date</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Amount</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Plan</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Short URL</th>
+        <th class="px-4 py-3"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for bill in page_obj %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3">
+          <p class="font-medium text-gray-800">{{ bill.subscriber.display_name }}</p>
+          <p class="text-xs text-gray-400 font-mono">{{ bill.subscriber.username }}</p>
+        </td>
+        <td class="px-4 py-3 text-xs text-gray-600">{{ bill.period_start }} to {{ bill.period_end }}</td>
+        <td class="px-4 py-3 text-xs {% if bill.is_overdue %}text-red-600 font-medium{% else %}text-gray-600{% endif %}">
+          {{ bill.due_date }}
+        </td>
+        <td class="px-4 py-3 font-semibold">PHP {{ bill.amount }}</td>
+        <td class="px-4 py-3 text-xs text-gray-500">{{ bill.plan_snapshot|default:'-' }}</td>
+        <td class="px-4 py-3">
+          <span class="px-2 py-0.5 rounded-full text-xs
+            {% if bill.status == 'paid' %}bg-green-100 text-green-700
+            {% elif bill.status == 'overdue' %}bg-red-100 text-red-600
+            {% elif bill.status == 'waived' %}bg-gray-100 text-gray-500
+            {% else %}bg-yellow-100 text-yellow-700{% endif %}">
+            {{ bill.get_status_display }}
+          </span>
+        </td>
+        <td class="px-4 py-3">
+          <span class="font-mono text-xs text-blue-600">/b/{{ bill.short_code }}/</span>
+        </td>
+        <td class="px-4 py-3 text-right">
+          <a href="/billing/{{ bill.pk }}/" class="text-blue-600 hover:underline text-xs">View</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="8" class="px-4 py-12 text-center text-gray-400 text-sm">
+          No bills yet. Click "Generate Bills" to create them.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if page_obj.has_other_pages %}
+  <div class="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+    <p class="text-xs text-gray-500">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</p>
+    <div class="flex gap-1">
+      {% if page_obj.has_previous %}
+      <a href="?page={{ page_obj.previous_page_number }}&q={{ search }}&status={{ status }}"
+        class="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50">Prev</a>
+      {% endif %}
+      {% if page_obj.has_next %}
+      <a href="?page={{ page_obj.next_page_number }}&q={{ search }}&status={{ status }}"
+        class="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50">Next</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}{{ router.name }} - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-start justify-between mb-6">
+  <div>
+    <div class="flex items-center gap-3">
+      <h2 class="text-2xl font-bold text-gray-800">{{ router.name }}</h2>
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+        {% if router.status == 'online' %}bg-green-100 text-green-700
+        {% elif router.status == 'offline' %}bg-red-100 text-red-700
+        {% else %}bg-gray-100 text-gray-500{% endif %}">
+        {{ router.get_status_display }}
+      </span>
+    </div>
+    <p class="text-gray-500 text-sm mt-1">{{ router.host }}:{{ router.api_port }}</p>
+  </div>
+  <div class="flex gap-2">
+    <a href="/routers/{{ router.pk }}/sync/"
+      class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+      <i class="fa fa-rotate"></i> Sync Interfaces
+    </a>
+    <a href="/routers/{{ router.pk }}/edit/"
+      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
+      <i class="fa fa-pen"></i> Edit
+    </a>
+    <a href="/routers/{{ router.pk }}/delete/"
+      class="bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold px-4 py-2 rounded-lg transition">
+      <i class="fa fa-trash"></i>
+    </a>
+  </div>
+</div>
+
+{% include "partials/messages.html" %}
+
+<!-- Inline Coordinates Edit -->
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="font-semibold text-gray-700">
+      <i class="fa fa-location-dot text-blue-500 mr-2"></i>Location & Coordinates
+    </h3>
+    {% if router.latitude and router.longitude %}
+    <span class="text-xs text-green-600 font-medium"><i class="fa fa-check-circle mr-1"></i>Appears on NMS map</span>
+    {% else %}
+    <span class="text-xs text-gray-400">Set coordinates to appear on NMS map</span>
+    {% endif %}
+  </div>
+  <form method="post" action="/routers/{{ router.pk }}/coordinates/" class="flex flex-wrap gap-3 items-end">
+    {% csrf_token %}
+    <div>
+      <label class="block text-xs font-medium text-gray-500 mb-1">Location Name</label>
+      <input type="text" name="location" value="{{ router.location|default:'' }}"
+        class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-48"
+        placeholder="e.g. Server Room">
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-gray-500 mb-1">Latitude</label>
+      <input type="number" step="any" name="latitude" value="{{ router.latitude|default:'' }}"
+        class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-36"
+        placeholder="14.5995">
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-gray-500 mb-1">Longitude</label>
+      <input type="number" step="any" name="longitude" value="{{ router.longitude|default:'' }}"
+        class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-36"
+        placeholder="120.9842">
+    </div>
+    <button type="submit"
+      class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition">
+      Save Coordinates
+    </button>
+    {% if router.latitude and router.longitude %}
+    <a href="/nms/" class="text-xs text-blue-600 hover:underline px-2 py-2">View on Map</a>
+    {% endif %}
+  </form>
+</div>
+
+<!-- Physical Ports -->
+<div class="mb-8">
+  <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+    Physical Ports ({{ physical|length }})
+  </h3>
+  {% if physical %}
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+      {% for iface in physical %}
+      <a href="/routers/{{ router.pk }}/interfaces/{{ iface.pk }}/"
+        class="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md hover:border-blue-300 transition cursor-pointer block">
+        <div class="flex items-center justify-between mb-2">
+          <span class="w-2.5 h-2.5 rounded-full {% if iface.is_running %}bg-green-400{% else %}bg-gray-300{% endif %}"></span>
+          <span class="text-xs text-gray-400">{{ iface.get_iface_type_display }}</span>
+        </div>
+        <p class="text-sm font-semibold text-gray-800 truncate">{{ iface.display_name }}</p>
+        {% if iface.label and iface.label != iface.name %}
+          <p class="text-xs text-gray-400 truncate">{{ iface.name }}</p>
+        {% endif %}
+        <div class="mt-2">
+          <span class="inline-block text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
+            {{ iface.get_role_display }}
+          </span>
+        </div>
+        {% if iface.mac_address %}
+          <p class="text-xs text-gray-300 mt-1 font-mono">{{ iface.mac_address }}</p>
+        {% endif %}
+      </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="bg-white rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-400">
+      No interfaces synced yet. Click "Sync Interfaces" above.
+    </div>
+  {% endif %}
+</div>
+
+<!-- PPPoE Active Sessions -->
+{% if sessions %}
+<div class="mb-8">
+  <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">PPPoE Active Sessions ({{ sessions|length }})</h3>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 border-b border-gray-100"><tr>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Interface</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">MAC</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Status</th>
+      </tr></thead>
+      <tbody class="divide-y divide-gray-50">
+        {% for s in sessions %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-2 font-mono text-xs">{{ s.name }}</td>
+          <td class="px-4 py-2 font-mono text-xs text-gray-500">{{ s.mac_address|default:'-' }}</td>
+          <td class="px-4 py-2"><span class="w-2 h-2 rounded-full inline-block {% if s.is_running %}bg-green-400{% else %}bg-gray-300{% endif %}"></span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if vlans %}
+<div class="mb-8">
+  <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">VLANs ({{ vlans|length }})</h3>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 border-b border-gray-100"><tr>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Name</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">MTU</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Status</th>
+      </tr></thead>
+      <tbody class="divide-y divide-gray-50">
+        {% for v in vlans %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-2 font-mono text-xs">{{ v.name }}</td>
+          <td class="px-4 py-2 text-xs text-gray-500">{{ v.actual_mtu|default:'-' }}</td>
+          <td class="px-4 py-2"><span class="w-2 h-2 rounded-full inline-block {% if v.is_running %}bg-green-400{% else %}bg-gray-300{% endif %}"></span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  {% if bridges %}
+  <div>
+    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Bridges ({{ bridges|length }})</h3>
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <table class="w-full text-sm"><tbody class="divide-y divide-gray-50">
+        {% for b in bridges %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-2 font-mono text-xs">{{ b.name }}</td>
+          <td class="px-4 py-2"><span class="w-2 h-2 rounded-full inline-block {% if b.is_running %}bg-green-400{% else %}bg-gray-300{% endif %}"></span></td>
+        </tr>
+        {% endfor %}
+      </tbody></table>
+    </div>
+  </div>
+  {% endif %}
+  {% if tunnels %}
+  <div>
+    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Tunnels ({{ tunnels|length }})</h3>
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <table class="w-full text-sm"><tbody class="divide-y divide-gray-50">
+        {% for t in tunnels %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-2 font-mono text-xs">{{ t.name }}</td>
+          <td class="px-4 py-2 text-xs text-gray-400">{{ t.get_iface_type_display }}</td>
+          <td class="px-4 py-2"><span class="w-2 h-2 rounded-full inline-block {% if t.is_running %}bg-green-400{% else %}bg-gray-300{% endif %}"></span></td>
+        </tr>
+        {% endfor %}
+      </tbody></table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

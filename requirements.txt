@@ -1,0 +1,15 @@
+Django==5.0.6
+djangorestframework==3.15.2
+django-cors-headers==4.4.0
+django-environ==0.11.2
+djangorestframework-simplejwt==5.3.1
+Pillow==10.4.0
+routeros-api==0.17.0
+requests==2.32.3
+python-telegram-bot==21.4
+django-apscheduler==0.6.2
+whitenoise==6.7.0
+django-extensions==3.2.3
+xhtml2pdf
+reportlab
+xhtml2pdf

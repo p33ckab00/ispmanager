@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Invoices - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-bold text-gray-800">Invoices</h2>
+  <div class="flex gap-2">
+    <a href="/billing/invoices/generate/" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+      <i class="fa fa-plus mr-1"></i> Generate Invoices
+    </a>
+    <a href="/billing/snapshots/" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      Statements
+    </a>
+  </div>
+</div>
+{% include "partials/messages.html" %}
+<div class="grid grid-cols-4 gap-4 mb-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 text-center">
+    <p class="text-2xl font-bold text-yellow-600">{{ summary.open }}</p>
+    <p class="text-xs text-gray-400 mt-1">Open</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 text-center">
+    <p class="text-2xl font-bold text-blue-600">{{ summary.partial }}</p>
+    <p class="text-xs text-gray-400 mt-1">Partial</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 text-center">
+    <p class="text-2xl font-bold text-red-600">{{ summary.overdue }}</p>
+    <p class="text-xs text-gray-400 mt-1">Overdue</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 text-center">
+    <p class="text-2xl font-bold text-green-600">{{ summary.paid }}</p>
+    <p class="text-xs text-gray-400 mt-1">Paid</p>
+  </div>
+</div>
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
+  <form method="get" class="flex gap-3 p-4">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search subscriber..."
+      class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <select name="status" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option value="">All Status</option>
+      {% for val, label in status_choices %}
+      <option value="{{ val }}" {% if status == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Search</button>
+  </form>
+</div>
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Invoice</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Subscriber</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Period</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Amount</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Balance</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Due</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-3"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for inv in page_obj %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3 font-mono text-xs text-blue-600">
+          <a href="/billing/invoices/{{ inv.pk }}/">{{ inv.invoice_number }}</a>
+        </td>
+        <td class="px-4 py-3">
+          <a href="/subscribers/{{ inv.subscriber.pk }}/" class="font-medium hover:text-blue-600">{{ inv.subscriber.display_name }}</a>
+          <p class="text-xs text-gray-400 font-mono">{{ inv.subscriber.username }}</p>
+        </td>
+        <td class="px-4 py-3 text-xs text-gray-500">{{ inv.period_start|date:"M d" }} - {{ inv.period_end|date:"M d, Y" }}</td>
+        <td class="px-4 py-3 text-right font-semibold">PHP {{ inv.amount }}</td>
+        <td class="px-4 py-3 text-right text-xs font-semibold {% if inv.remaining_balance > 0 %}text-red-500{% else %}text-gray-300{% endif %}">
+          PHP {{ inv.remaining_balance }}
+        </td>
+        <td class="px-4 py-3 text-xs {% if inv.is_overdue %}text-red-600 font-medium{% else %}text-gray-500{% endif %}">{{ inv.due_date }}</td>
+        <td class="px-4 py-3">
+          <span class="px-2 py-0.5 rounded-full text-xs
+            {% if inv.status == 'paid' %}bg-green-100 text-green-700
+            {% elif inv.status == 'overdue' %}bg-red-100 text-red-600
+            {% elif inv.status == 'partial' %}bg-blue-100 text-blue-700
+            {% elif inv.status == 'voided' %}bg-gray-100 text-gray-400
+            {% else %}bg-yellow-100 text-yellow-700{% endif %}">
+            {{ inv.get_status_display }}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-right">
+          <a href="/billing/invoices/{{ inv.pk }}/" class="text-xs text-blue-600 hover:underline">View</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="px-4 py-12 text-center text-gray-400 text-sm">No invoices found. Generate invoices to start billing.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if page_obj.has_other_pages %}
+  <div class="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+    <p class="text-xs text-gray-500">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</p>
+    <div class="flex gap-1">
+      {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}&q={{ q }}&status={{ status }}" class="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50">Prev</a>{% endif %}
+      {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}&q={{ q }}&status={{ status }}" class="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50">Next</a>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

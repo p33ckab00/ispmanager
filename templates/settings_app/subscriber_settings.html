@@ -1,0 +1,36 @@
+{% extends "settings_app/base_settings.html" %}
+{% block settings_content %}
+<div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+  <h3 class="font-semibold text-gray-700 mb-6">Subscriber Settings</h3>
+  <form method="post" class="space-y-4 max-w-lg">
+    {% csrf_token %}
+    <div class="space-y-3">
+      <label class="flex items-start gap-3 p-4 rounded-xl border border-gray-100 hover:border-blue-200 cursor-pointer transition">
+        <input type="checkbox" name="mikrotik_auto_suspend" {% if obj.mikrotik_auto_suspend %}checked{% endif %}
+          class="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600">
+        <div>
+          <p class="text-sm font-medium text-gray-700">Auto-suspend on MikroTik</p>
+          <p class="text-xs text-gray-400 mt-0.5">When a subscriber is suspended, automatically disable their PPP secret on the router.</p>
+        </div>
+      </label>
+      <label class="flex items-start gap-3 p-4 rounded-xl border border-gray-100 hover:border-blue-200 cursor-pointer transition">
+        <input type="checkbox" name="mikrotik_auto_reconnect" {% if obj.mikrotik_auto_reconnect %}checked{% endif %}
+          class="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600">
+        <div>
+          <p class="text-sm font-medium text-gray-700">Auto-reconnect on MikroTik</p>
+          <p class="text-xs text-gray-400 mt-0.5">When a subscriber is reconnected, automatically re-enable their PPP secret.</p>
+        </div>
+      </label>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Auto-archive after (days)</label>
+      <input type="number" name="archive_after_days" value="{{ obj.archive_after_days }}" min="0"
+        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <p class="text-xs text-gray-400 mt-1">Disconnected and deceased subscribers are auto-archived after this many days. Set 0 to disable.</p>
+    </div>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+      Save Changes
+    </button>
+  </form>
+</div>
+{% endblock %}

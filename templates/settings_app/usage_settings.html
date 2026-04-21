@@ -1,0 +1,39 @@
+{% extends "settings_app/base_settings.html" %}
+{% block settings_content %}
+<div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+  <h3 class="font-semibold text-gray-700 mb-6">Usage Tracking Settings</h3>
+  <form method="post" class="space-y-4 max-w-lg">
+    {% csrf_token %}
+    <label class="flex items-center gap-3 cursor-pointer">
+      <input type="checkbox" name="enabled" {% if obj.enabled %}checked{% endif %}
+        class="w-4 h-4 rounded border-gray-300 text-blue-600">
+      <span class="text-sm font-medium text-gray-700">Enable usage tracking</span>
+    </label>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Sample Interval (minutes)</label>
+        <input type="number" name="sampler_interval_minutes" value="{{ obj.sampler_interval_minutes }}" min="1"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Raw Sample Retention (days)</label>
+        <input type="number" name="raw_retention_days" value="{{ obj.raw_retention_days }}" min="1"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Daily Rollup Retention (days)</label>
+        <input type="number" name="daily_retention_days" value="{{ obj.daily_retention_days }}" min="30"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+    </div>
+    <label class="flex items-center gap-3 cursor-pointer">
+      <input type="checkbox" name="cutoff_snapshot_enabled" {% if obj.cutoff_snapshot_enabled %}checked{% endif %}
+        class="w-4 h-4 rounded border-gray-300 text-blue-600">
+      <span class="text-sm text-gray-700">Create usage snapshot at billing cutoff</span>
+    </label>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+      Save Changes
+    </button>
+  </form>
+</div>
+{% endblock %}

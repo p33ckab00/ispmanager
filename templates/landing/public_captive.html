@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ isp_name }} - WiFi Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center py-10">
+  <div class="bg-white rounded-2xl shadow-lg w-full max-w-sm overflow-hidden">
+    <div class="py-6 px-6 text-white text-center" style="background-color: {{ page.primary_color }}">
+      <h1 class="text-xl font-bold">{{ isp_name }}</h1>
+      <p class="text-sm opacity-80 mt-1">{{ page.hero_subtitle|default:"Connect to our WiFi" }}</p>
+    </div>
+    {% if page.announcement %}
+    <div class="bg-yellow-50 border-b border-yellow-100 px-4 py-3 text-sm text-yellow-800 text-center">
+      {{ page.announcement }}
+    </div>
+    {% endif %}
+    <div class="px-6 py-6">
+      <form method="post" action="$(link-login-only)" class="space-y-4">
+        <input type="hidden" name="dst" value="$(link-orig)">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+          <input type="text" name="username"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+          <input type="password" name="password"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <button type="submit"
+          class="w-full text-white font-semibold py-3 rounded-lg text-sm transition"
+          style="background-color: {{ page.primary_color }}">
+          Connect
+        </button>
+      </form>
+      {% if plans %}
+      <div class="mt-6 border-t border-gray-100 pt-4">
+        <p class="text-xs text-gray-500 text-center mb-3">Available Plans</p>
+        {% for plan in plans %}
+        <div class="flex justify-between text-sm py-1.5 border-b border-gray-50">
+          <span class="font-medium">{{ plan.name }}</span>
+          <span class="text-gray-500">{{ plan.price }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="bg-gray-50 px-6 py-3 text-center text-xs text-gray-400">
+      {{ page.footer_text|default:isp_name }}
+    </div>
+  </div>
+</body>
+</html>

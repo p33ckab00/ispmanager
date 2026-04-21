@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enter OTP - {{ isp_name }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+  <div class="bg-white rounded-2xl shadow-lg w-full max-w-sm p-8">
+    <div class="text-center mb-8">
+      <h1 class="text-xl font-bold text-gray-800">Enter OTP</h1>
+      <p class="text-gray-500 text-sm mt-1">Sent to {{ phone }}</p>
+    </div>
+    {% if messages %}
+      {% for message in messages %}
+        <div class="mb-4 px-4 py-3 rounded-lg text-sm bg-red-50 text-red-700">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="phone" value="{{ phone }}">
+      <div class="mb-6">
+        <label class="block text-sm font-medium text-gray-700 mb-1">6-digit OTP Code</label>
+        <input type="text" name="code" maxlength="6"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-center tracking-widest text-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="000000" autofocus>
+      </div>
+      <button type="submit"
+        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg text-sm transition">
+        Verify
+      </button>
+      <a href="/subscribers/portal/" class="block text-center text-sm text-gray-400 hover:text-gray-600 mt-4">
+        Use a different number
+      </a>
+    </form>
+  </div>
+</body>
+</html>

@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Account - {{ isp_name }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+  <!-- Header -->
+  <div class="bg-blue-600 text-white px-4 py-4 sticky top-0 z-10">
+    <div class="max-w-2xl mx-auto flex items-center justify-between">
+      <div>
+        <h1 class="font-bold text-lg">{{ isp_name }}</h1>
+        <p class="text-blue-200 text-xs">My Account</p>
+      </div>
+      <a href="/subscribers/portal/logout/" class="text-blue-200 hover:text-white text-sm flex items-center gap-1">
+        <i class="fa fa-right-from-bracket"></i> Logout
+      </a>
+    </div>
+  </div>
+
+  <div class="max-w-2xl mx-auto px-4 py-5 space-y-4">
+
+    <!-- Account Summary -->
+    <div class="bg-white rounded-2xl shadow-sm p-5">
+      <div class="flex items-start justify-between">
+        <div>
+          <h2 class="text-lg font-bold text-gray-800">{{ subscriber.display_name }}</h2>
+          <p class="text-xs text-gray-400 font-mono mt-0.5">{{ subscriber.username }}</p>
+        </div>
+        <span class="px-2.5 py-1 rounded-full text-xs font-semibold
+          {% if subscriber.status == 'active' %}bg-green-100 text-green-700
+          {% elif subscriber.status == 'suspended' %}bg-yellow-100 text-yellow-700
+          {% elif subscriber.status == 'disconnected' %}bg-gray-200 text-gray-500
+          {% else %}bg-blue-100 text-blue-700{% endif %}">
+          {{ subscriber.get_status_display }}
+        </span>
+      </div>
+      <div class="grid grid-cols-2 gap-3 mt-4 text-sm">
+        <div><p class="text-xs text-gray-400">Plan</p><p class="font-medium mt-0.5">{{ subscriber.plan.name|default:'No Plan' }}</p></div>
+        <div><p class="text-xs text-gray-400">Speed</p><p class="font-medium mt-0.5">{% if subscriber.plan %}{{ subscriber.plan.speed_down_mbps }}M/{{ subscriber.plan.speed_up_mbps }}M{% else %}-{% endif %}</p></div>
+        <div><p class="text-xs text-gray-400">IP Address</p><p class="font-mono text-xs mt-0.5">{{ subscriber.ip_address|default:'-' }}</p></div>
+        <div><p class="text-xs text-gray-400">Connection</p>
+          <p class="mt-0.5 flex items-center gap-1 text-xs">
+            <span class="w-2 h-2 rounded-full {% if subscriber.mt_status == 'online' %}bg-green-400{% else %}bg-gray-300{% endif %}"></span>
+            {{ subscriber.mt_status|title }}
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Current Bill -->
+    {% if latest_snapshot %}
+    <div class="bg-white rounded-2xl shadow-sm p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-gray-700">Current Bill</h3>
+        <span class="text-xs text-gray-400">Due: {{ latest_snapshot.due_date }}</span>
+      </div>
+      <div class="bg-blue-50 rounded-xl p-4 mb-3">
+        <p class="text-xs text-blue-500 mb-1">Total Amount Due</p>
+        <p class="text-3xl font-bold text-blue-700">PHP {{ latest_snapshot.total_due_amount }}</p>
+        <p class="text-xs text-blue-400 mt-1">{{ latest_snapshot.period_start|date:"M d" }} to {{ latest_snapshot.period_end|date:"M d, Y" }}</p>
+      </div>
+      <div class="space-y-2 text-sm">
+        <div class="flex justify-between text-gray-600">
+          <span>Current Cycle Charge</span>
+          <span class="font-medium">PHP {{ latest_snapshot.current_cycle_amount }}</span>
+        </div>
+        {% if latest_snapshot.previous_balance_amount > 0 %}
+        <div class="flex justify-between text-orange-600">
+          <span>Previous Balance</span>
+          <span class="font-medium">PHP {{ latest_snapshot.previous_balance_amount }}</span>
+        </div>
+        {% endif %}
+        {% if latest_snapshot.credit_amount > 0 %}
+        <div class="flex justify-between text-green-600">
+          <span>Credits</span>
+          <span class="font-medium">-PHP {{ latest_snapshot.credit_amount }}</span>
+        </div>
+        {% endif %}
+      </div>
+      <div class="mt-3 flex gap-2">
+        <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/view/" target="_blank"
+          class="flex-1 text-center bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg transition">
+          <i class="fa fa-eye mr-1"></i> View PDF
+        </a>
+        <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/download/"
+          class="flex-1 text-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold py-2 rounded-lg transition">
+          <i class="fa fa-download mr-1"></i> Download
+        </a>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Data Usage -->
+    <div class="bg-white rounded-2xl shadow-sm p-5">
+      <h3 class="font-semibold text-gray-700 mb-3">Data Usage</h3>
+      <div class="grid grid-cols-3 gap-3 mb-4 text-center">
+        <div class="bg-blue-50 rounded-xl p-3">
+          <p class="text-xs text-blue-500">Download</p>
+          <p class="text-lg font-bold text-blue-700">{{ usage_data.rx|last|default:'0' }}</p>
+          <p class="text-xs text-blue-400">GB today</p>
+        </div>
+        <div class="bg-green-50 rounded-xl p-3">
+          <p class="text-xs text-green-500">Upload</p>
+          <p class="text-lg font-bold text-green-700">{{ usage_data.tx|last|default:'0' }}</p>
+          <p class="text-xs text-green-400">GB today</p>
+        </div>
+        <div class="bg-gray-50 rounded-xl p-3">
+          <p class="text-xs text-gray-400">This Cycle</p>
+          <p class="text-lg font-bold text-gray-700" id="portal-total">--</p>
+          <p class="text-xs text-gray-400">GB total</p>
+        </div>
+      </div>
+      <div class="relative h-40">
+        <canvas id="portalUsageChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Payment History -->
+    <div class="bg-white rounded-2xl shadow-sm p-5">
+      <h3 class="font-semibold text-gray-700 mb-3">Payment History</h3>
+      <div class="space-y-2">
+        {% for payment in payments %}
+        <div class="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+          <div>
+            <p class="text-sm font-medium text-gray-700">PHP {{ payment.amount }}</p>
+            <p class="text-xs text-gray-400">{{ payment.paid_at|date:"M d, Y" }} via {{ payment.get_method_display }}</p>
+          </div>
+          <span class="text-xs text-green-600 font-medium"><i class="fa fa-check-circle mr-1"></i>Received</span>
+        </div>
+        {% empty %}
+        <p class="text-sm text-gray-400 text-center py-4">No payments recorded yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Statement History -->
+    <div class="bg-white rounded-2xl shadow-sm p-5">
+      <h3 class="font-semibold text-gray-700 mb-3">Statement History</h3>
+      <div class="space-y-2">
+        {% for snap in snapshots %}
+        <div class="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
+          <div>
+            <p class="text-sm font-medium text-gray-700">PHP {{ snap.total_due_amount }}</p>
+            <p class="text-xs text-gray-400">{{ snap.period_start|date:"M d" }} - {{ snap.period_end|date:"M d, Y" }}</p>
+          </div>
+          <div class="flex gap-2 items-center">
+            <span class="text-xs {% if snap.status == 'frozen' %}text-blue-600{% else %}text-gray-400{% endif %}">
+              {{ snap.get_status_display }}
+            </span>
+            {% if snap.status == 'frozen' %}
+            <a href="/billing/snapshots/{{ snap.pk }}/pdf/download/" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded">
+              <i class="fa fa-download"></i>
+            </a>
+            {% endif %}
+          </div>
+        </div>
+        {% empty %}
+        <p class="text-sm text-gray-400 text-center py-4">No statements yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+  const data = {{ usage_data|safe }}
+
+  const ctx = document.getElementById('portalUsageChart')
+  if (ctx && data.labels.length) {
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.labels,
+        datasets: [
+          { label: 'Download GB', data: data.rx, backgroundColor: 'rgba(59,130,246,0.7)' },
+          { label: 'Upload GB', data: data.tx, backgroundColor: 'rgba(34,197,94,0.7)' },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } },
+        scales: { x: { ticks: { font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } }
+      }
+    })
+
+    const rxTotal = data.rx.reduce((a,b) => a+b, 0)
+    const txTotal = data.tx.reduce((a,b) => a+b, 0)
+    document.getElementById('portal-total').textContent = (rxTotal + txTotal).toFixed(2)
+  }
+  </script>
+</body>
+</html>

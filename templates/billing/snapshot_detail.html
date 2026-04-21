@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ snapshot.snapshot_number }} - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4"><a href="/billing/snapshots/" class="text-sm text-blue-600 hover:underline"><i class="fa fa-arrow-left mr-1"></i> Back to Statements</a></div>
+<div class="flex items-start justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">{{ snapshot.snapshot_number }}</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ snapshot.subscriber.display_name }} &mdash; {{ snapshot.period_start }} to {{ snapshot.period_end }}</p>
+  </div>
+  <div class="flex gap-2">
+    {% if snapshot.status == 'draft' %}
+    <a href="/billing/snapshots/{{ snapshot.pk }}/freeze/" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+      <i class="fa fa-lock mr-1"></i> Freeze and Issue
+    </a>
+    {% elif snapshot.status == 'frozen' %}
+    <a href="/billing/snapshots/{{ snapshot.pk }}/pdf/view/" target="_blank" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      <i class="fa fa-eye mr-1"></i> View PDF
+    </a>
+    <a href="/billing/snapshots/{{ snapshot.pk }}/pdf/download/" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+      <i class="fa fa-download mr-1"></i> Download PDF
+    </a>
+    {% endif %}
+  </div>
+</div>
+{% include "partials/messages.html" %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+  <div class="lg:col-span-2 space-y-4">
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+      <h3 class="font-semibold text-gray-700 mb-4">Statement Breakdown</h3>
+      <div class="space-y-2">
+        {% for item in items %}
+        <div class="flex justify-between items-center py-2 border-b border-gray-50 last:border-0
+          {% if item.item_type == 'previous_balance' %}text-orange-600
+          {% elif item.item_type == 'credit' %}text-green-600
+          {% else %}text-gray-700{% endif %}">
+          <div>
+            <p class="text-sm font-medium">{{ item.label }}</p>
+            {% if item.period_start %}<p class="text-xs text-gray-400">{{ item.period_start }} to {{ item.period_end }}</p>{% endif %}
+          </div>
+          <span class="font-semibold">PHP {{ item.amount }}</span>
+        </div>
+        {% endfor %}
+        {% if snapshot.credit_amount > 0 %}
+        <div class="flex justify-between py-2 text-green-600">
+          <span class="text-sm font-medium">Credits</span>
+          <span class="font-semibold">-PHP {{ snapshot.credit_amount }}</span>
+        </div>
+        {% endif %}
+        <div class="flex justify-between py-3 border-t-2 border-blue-200 mt-2">
+          <span class="font-bold text-gray-900">Total Due</span>
+          <span class="font-bold text-xl text-blue-700">PHP {{ snapshot.total_due_amount }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="space-y-4">
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+      <h3 class="font-semibold text-gray-700 mb-3">Details</h3>
+      <dl class="space-y-2 text-sm">
+        <div class="flex justify-between"><dt class="text-gray-400">Status</dt>
+          <dd><span class="px-2 py-0.5 rounded-full text-xs {% if snapshot.status == 'frozen' %}bg-blue-50 text-blue-700{% else %}bg-yellow-50 text-yellow-700{% endif %}">{{ snapshot.get_status_display }}</span></dd>
+        </div>
+        <div class="flex justify-between"><dt class="text-gray-400">Issue Date</dt><dd class="font-medium">{{ snapshot.issue_date }}</dd></div>
+        <div class="flex justify-between"><dt class="text-gray-400">Due Date</dt><dd class="font-medium">{{ snapshot.due_date }}</dd></div>
+        <div class="flex justify-between"><dt class="text-gray-400">Cutoff Date</dt><dd class="font-medium">{{ snapshot.cutoff_date }}</dd></div>
+        <div class="flex justify-between"><dt class="text-gray-400">Created By</dt><dd class="font-medium">{{ snapshot.created_by }}</dd></div>
+        {% if snapshot.frozen_at %}<div class="flex justify-between"><dt class="text-gray-400">Frozen At</dt><dd class="text-xs">{{ snapshot.frozen_at|date:"M d, Y H:i" }}</dd></div>{% endif %}
+      </dl>
+    </div>
+  </div>
+</div>
+{% endblock %}

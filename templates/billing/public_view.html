@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Billing Statement - {{ isp_name }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center py-10">
+  <div class="bg-white rounded-2xl shadow-lg w-full max-w-md overflow-hidden">
+
+    <div class="bg-blue-600 text-white px-6 py-6">
+      <h1 class="text-xl font-bold">{{ isp_name }}</h1>
+      <p class="text-blue-200 text-sm mt-1">Billing Statement</p>
+    </div>
+
+    <div class="px-6 py-6">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <p class="text-sm text-gray-500">Account</p>
+          <p class="font-bold text-gray-800 text-lg">{{ subscriber.display_name }}</p>
+          <p class="text-xs text-gray-400 font-mono">{{ subscriber.username }}</p>
+        </div>
+        <span class="px-3 py-1 rounded-full text-sm font-semibold
+          {% if invoice.status == 'paid' %}bg-green-100 text-green-700
+          {% elif invoice.status == 'overdue' %}bg-red-100 text-red-600
+          {% elif invoice.status == 'voided' %}bg-gray-100 text-gray-400
+          {% else %}bg-yellow-100 text-yellow-700{% endif %}">
+          {{ invoice.get_status_display }}
+        </span>
+      </div>
+
+      <div class="border border-gray-100 rounded-xl p-4 mb-6 space-y-3 text-sm">
+        <div class="flex justify-between">
+          <span class="text-gray-500">Invoice</span>
+          <span class="font-mono text-xs">{{ invoice.invoice_number }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span class="text-gray-500">Billing Period</span>
+          <span class="font-medium">{{ invoice.period_start }} to {{ invoice.period_end }}</span>
+        </div>
+        {% if invoice.plan_snapshot %}
+        <div class="flex justify-between">
+          <span class="text-gray-500">Plan</span>
+          <span class="font-medium">{{ invoice.plan_snapshot }}</span>
+        </div>
+        {% endif %}
+        <div class="flex justify-between">
+          <span class="text-gray-500">Due Date</span>
+          <span class="font-medium {% if invoice.is_overdue %}text-red-600{% endif %}">{{ invoice.due_date }}</span>
+        </div>
+        <div class="border-t border-gray-100 pt-3 flex justify-between">
+          <span class="font-semibold text-gray-700">Amount Due</span>
+          <span class="font-bold text-2xl text-blue-700">PHP {{ invoice.remaining_balance }}</span>
+        </div>
+        {% if invoice.amount_paid > 0 %}
+        <div class="flex justify-between text-green-600 text-xs">
+          <span>Already Paid</span>
+          <span>PHP {{ invoice.amount_paid }}</span>
+        </div>
+        {% endif %}
+      </div>
+
+      {% if invoice.status == 'paid' %}
+      <div class="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+        <i class="fa fa-circle-check text-green-500 text-2xl mb-2"></i>
+        <p class="font-semibold text-green-700">Fully Paid</p>
+        <p class="text-xs text-green-500 mt-1">Thank you for your payment.</p>
+      </div>
+      {% else %}
+      <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 text-center text-sm">
+        <p class="text-gray-600 font-medium mb-1">Payment Instructions</p>
+        <p class="text-gray-500">Please contact your ISP to settle this bill.</p>
+        {% if isp_phone %}<p class="text-blue-600 font-medium mt-2">{{ isp_phone }}</p>{% endif %}
+        {% if isp_email %}<p class="text-blue-500 text-xs mt-1">{{ isp_email }}</p>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="bg-gray-50 px-6 py-4 text-center">
+      <p class="text-xs text-gray-400">{{ isp_name }}</p>
+      <a href="/subscribers/portal/" class="text-xs text-blue-500 hover:underline mt-1 block">
+        View My Account
+      </a>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}SMS - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-bold text-gray-800">SMS</h2>
+  <div class="flex gap-2">
+    <a href="/sms/send/" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+      <i class="fa fa-paper-plane mr-1"></i> Send SMS
+    </a>
+    <a href="/sms/log/" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">View Log</a>
+  </div>
+</div>
+{% include "partials/messages.html" %}
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Sent Today</p>
+    <p class="text-3xl font-bold text-gray-800">{{ sent_today }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Semaphore Balance</p>
+    {% if balance_data %}
+    <p class="text-3xl font-bold text-green-600">{{ balance_data.credits|default:'--' }}</p>
+    <p class="text-xs text-gray-400 mt-1">credits remaining</p>
+    {% elif balance_err %}
+    <p class="text-sm text-red-400 mt-1">{{ balance_err }}</p>
+    {% else %}
+    <p class="text-3xl font-bold text-gray-300">--</p>
+    {% endif %}
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Quick Actions</p>
+    <div class="space-y-1 mt-1">
+      <a href="/sms/send/" class="block text-xs text-blue-600 hover:underline"><i class="fa fa-user w-4"></i> Single subscriber</a>
+      <a href="/sms/send/" class="block text-xs text-blue-600 hover:underline"><i class="fa fa-users w-4"></i> Bulk SMS</a>
+      <a href="/settings/sms/" class="block text-xs text-blue-600 hover:underline"><i class="fa fa-gear w-4"></i> SMS Settings</a>
+    </div>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+  <div class="px-5 py-4 border-b border-gray-100 flex justify-between">
+    <h3 class="font-semibold text-gray-700">Recent SMS</h3>
+    <a href="/sms/log/" class="text-xs text-blue-600 hover:underline">View all</a>
+  </div>
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Phone</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Subscriber</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Type</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 max-w-xs">Message</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Sent</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for log in recent %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-2 font-mono text-xs">{{ log.phone }}</td>
+        <td class="px-4 py-2 text-xs">{{ log.subscriber.display_name|default:'-' }}</td>
+        <td class="px-4 py-2">
+          <span class="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{{ log.get_sms_type_display }}</span>
+        </td>
+        <td class="px-4 py-2 text-xs text-gray-600 max-w-xs truncate">{{ log.message }}</td>
+        <td class="px-4 py-2">
+          <span class="px-2 py-0.5 rounded text-xs
+            {% if log.status == 'sent' %}bg-green-50 text-green-700
+            {% elif log.status == 'failed' %}bg-red-50 text-red-600
+            {% else %}bg-gray-50 text-gray-500{% endif %}">
+            {{ log.get_status_display }}
+          </span>
+        </td>
+        <td class="px-4 py-2 text-xs text-gray-400">{{ log.created_at|timesince }} ago</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="px-4 py-8 text-center text-gray-400 text-sm">No SMS sent yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

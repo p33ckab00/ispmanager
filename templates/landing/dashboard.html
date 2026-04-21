@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Landing Pages - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-6">
+  <h2 class="text-2xl font-bold text-gray-800">Landing Pages</h2>
+  <p class="text-gray-500 text-sm mt-1">Manage your ISP website and captive portal.</p>
+</div>
+{% include "partials/messages.html" %}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+  {% for page in homepage|add:'' %}{% endfor %}
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+    <div class="flex items-start justify-between mb-3">
+      <div>
+        <h3 class="font-semibold text-gray-800">ISP Homepage</h3>
+        <p class="text-sm text-gray-500 mt-1">Public website for your ISP.</p>
+      </div>
+      <span class="px-2 py-0.5 rounded-full text-xs {% if homepage.is_published %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">
+        {% if homepage.is_published %}Published{% else %}Draft{% endif %}
+      </span>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <a href="/landing/homepage/edit/" class="flex-1 text-center bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg">Edit</a>
+      <a href="/landing/homepage/publish/" class="flex-1 text-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold py-2 rounded-lg">
+        {% if homepage.is_published %}Unpublish{% else %}Publish{% endif %}
+      </a>
+      <a href="/landing/home/" target="_blank" class="flex-1 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-sm font-semibold py-2 rounded-lg">Preview</a>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+    <div class="flex items-start justify-between mb-3">
+      <div>
+        <h3 class="font-semibold text-gray-800">Captive Portal</h3>
+        <p class="text-sm text-gray-500 mt-1">MikroTik hotspot login page.</p>
+      </div>
+      <span class="px-2 py-0.5 rounded-full text-xs {% if captive.is_published %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">
+        {% if captive.is_published %}Published{% else %}Draft{% endif %}
+      </span>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <a href="/landing/captive/edit/" class="flex-1 text-center bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg">Edit</a>
+      <a href="/landing/captive/publish/" class="flex-1 text-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold py-2 rounded-lg">
+        {% if captive.is_published %}Unpublish{% else %}Publish{% endif %}
+      </a>
+      <a href="/landing/captive/" target="_blank" class="flex-1 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-sm font-semibold py-2 rounded-lg">Preview</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

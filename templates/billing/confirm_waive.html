@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Waive Bill - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 max-w-md">
+  <div class="text-center">
+    <i class="fa fa-circle-xmark text-4xl text-gray-400 mb-4"></i>
+    <h2 class="text-xl font-bold text-gray-800 mb-2">Waive this bill?</h2>
+    <p class="text-sm text-gray-500 mb-6">
+      Bill of <strong>PHP {{ bill.amount }}</strong> for <strong>{{ bill.subscriber.display_name }}</strong>
+      will be marked as waived. This cannot be undone.
+    </p>
+    <form method="post" class="flex gap-3 justify-center">
+      {% csrf_token %}
+      <button type="submit"
+        class="bg-gray-600 hover:bg-gray-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+        Yes, Waive
+      </button>
+      <a href="/billing/{{ bill.pk }}/"
+        class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2 rounded-lg text-sm transition">
+        Cancel
+      </a>
+    </form>
+  </div>
+</div>
+{% endblock %}

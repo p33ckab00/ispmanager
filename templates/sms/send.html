@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Send SMS - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-6"><h2 class="text-2xl font-bold text-gray-800">Send SMS</h2></div>
+{% include "partials/messages.html" %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+    <h3 class="font-semibold text-gray-700 mb-4">Send to Specific Subscriber</h3>
+    <form method="post" class="space-y-4">
+      {% csrf_token %}
+      <input type="hidden" name="mode" value="single">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Subscriber</label>
+        <select name="subscriber_id"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">-- Select Subscriber --</option>
+          {% for sub in subscribers %}
+          <option value="{{ sub.pk }}">{{ sub.display_name }} ({{ sub.phone }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Message</label>
+        <textarea name="message" rows="4" id="msg-single"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Type your message..."></textarea>
+        <p class="text-xs text-gray-400 mt-1"><span id="count-single">0</span> characters</p>
+      </div>
+      <button type="submit"
+        class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2 rounded-lg text-sm transition">
+        <i class="fa fa-paper-plane mr-1"></i> Send
+      </button>
+    </form>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+    <h3 class="font-semibold text-gray-700 mb-4">Bulk SMS to All Active Subscribers</h3>
+    <p class="text-sm text-gray-500 mb-4">Sends to all active subscribers with a phone number ({{ subscribers|length }} subscribers).</p>
+    <form method="post" class="space-y-4">
+      {% csrf_token %}
+      <input type="hidden" name="mode" value="bulk">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Message</label>
+        <textarea name="message" rows="4" id="msg-bulk"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Type your message..."></textarea>
+        <p class="text-xs text-gray-400 mt-1"><span id="count-bulk">0</span> characters</p>
+      </div>
+      <button type="submit"
+        class="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-5 py-2 rounded-lg text-sm transition"
+        onclick="return confirm('Send to all {{ subscribers|length }} active subscribers?')">
+        <i class="fa fa-users mr-1"></i> Send Bulk
+      </button>
+    </form>
+  </div>
+</div>
+<script>
+['single','bulk'].forEach(id => {
+  const ta = document.getElementById('msg-' + id)
+  const counter = document.getElementById('count-' + id)
+  ta.addEventListener('input', () => counter.textContent = ta.value.length)
+})
+</script>
+{% endblock %}

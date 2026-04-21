@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 max-w-sm">
+  <h2 class="font-bold text-gray-800 mb-4">Send Test Telegram Message</h2>
+  <form method="post">
+    {% csrf_token %}
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm">Send Test</button>
+    <a href="/notifications/" class="ml-3 text-sm text-gray-500">Cancel</a>
+  </form>
+</div>
+{% endblock %}

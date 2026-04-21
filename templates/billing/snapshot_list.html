@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Statements - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-bold text-gray-800">Billing Statements</h2>
+  <a href="/billing/" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">View Invoices</a>
+</div>
+{% include "partials/messages.html" %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <div class="flex gap-2 p-4 border-b border-gray-100">
+    {% for val, label in status_choices %}
+    <a href="?status={{ val }}"
+      class="px-3 py-1 rounded-lg text-xs font-medium border {% if status == val %}bg-blue-600 text-white border-blue-600{% else %}border-gray-200 text-gray-600 hover:bg-gray-50{% endif %}">
+      {{ label }}
+    </a>
+    {% endfor %}
+    <a href="?" class="px-3 py-1 rounded-lg text-xs font-medium border {% if not status %}bg-blue-600 text-white border-blue-600{% else %}border-gray-200 text-gray-600 hover:bg-gray-50{% endif %}">All</a>
+  </div>
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Snapshot</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Subscriber</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Period</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Current</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Prev. Balance</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Total Due</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-3 text-center text-xs font-medium text-gray-500">PDF</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for snap in page_obj %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3 font-mono text-xs text-blue-600">
+          <a href="/billing/snapshots/{{ snap.pk }}/">{{ snap.snapshot_number }}</a>
+        </td>
+        <td class="px-4 py-3">
+          <a href="/subscribers/{{ snap.subscriber.pk }}/" class="font-medium hover:text-blue-600 text-sm">{{ snap.subscriber.display_name }}</a>
+        </td>
+        <td class="px-4 py-3 text-xs text-gray-500">{{ snap.period_start|date:"M d" }} - {{ snap.period_end|date:"M d, Y" }}</td>
+        <td class="px-4 py-3 text-right text-xs">PHP {{ snap.current_cycle_amount }}</td>
+        <td class="px-4 py-3 text-right text-xs {% if snap.previous_balance_amount > 0 %}text-orange-500 font-medium{% else %}text-gray-300{% endif %}">PHP {{ snap.previous_balance_amount }}</td>
+        <td class="px-4 py-3 text-right font-bold">PHP {{ snap.total_due_amount }}</td>
+        <td class="px-4 py-3">
+          <span class="px-2 py-0.5 rounded-full text-xs
+            {% if snap.status == 'frozen' %}bg-blue-50 text-blue-700
+            {% elif snap.status == 'draft' %}bg-yellow-50 text-yellow-700
+            {% else %}bg-gray-50 text-gray-500{% endif %}">
+            {{ snap.get_status_display }}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-center">
+          {% if snap.status == 'frozen' %}
+          <a href="/billing/snapshots/{{ snap.pk }}/pdf/view/" target="_blank" class="text-xs text-blue-500 mr-2">View</a>
+          <a href="/billing/snapshots/{{ snap.pk }}/pdf/download/" class="text-xs text-blue-500">DL</a>
+          {% elif snap.status == 'draft' %}
+          <a href="/billing/snapshots/{{ snap.pk }}/freeze/" class="text-xs text-green-600 hover:underline">Freeze</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="8" class="px-4 py-12 text-center text-gray-400">No statements yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

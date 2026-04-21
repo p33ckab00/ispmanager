@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ subscriber.display_name }} - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <a href="/subscribers/{{ subscriber.pk }}/" class="text-sm text-blue-600 hover:underline">
+    <i class="fa fa-arrow-left mr-1"></i> Back to {{ subscriber.display_name }}
+  </a>
+</div>
+<div class="mb-6"><h2 class="text-2xl font-bold text-gray-800">Edit Subscriber</h2></div>
+{% include "partials/messages.html" %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-2xl">
+  <form method="post" action="/subscribers/{{ subscriber.pk }}/edit/">
+    {% csrf_token %}
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+        <input type="text" name="full_name" value="{{ subscriber.full_name|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
+        <input type="text" name="phone" value="{{ subscriber.phone|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="+63 9XX XXX XXXX">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+        <input type="email" name="email" value="{{ subscriber.email|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+        <input type="date" name="start_date" value="{{ subscriber.start_date|date:'Y-m-d'|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <p class="text-xs text-gray-400 mt-1">Used for billing cycle tracking.</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Cutoff Day (1-28)</label>
+        <input type="number" name="cutoff_day" min="1" max="28" value="{{ subscriber.cutoff_day|default:1 }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <p class="text-xs text-gray-400 mt-1">Day of month for billing cutoff.</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+        <select name="status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="active" {% if subscriber.status == 'active' %}selected{% endif %}>Active</option>
+          <option value="inactive" {% if subscriber.status == 'inactive' %}selected{% endif %}>Inactive</option>
+          <option value="suspended" {% if subscriber.status == 'suspended' %}selected{% endif %}>Suspended</option>
+        </select>
+        <p class="text-xs text-gray-400 mt-1">Use Disconnect/Deceased actions for other status changes.</p>
+      </div>
+      <div class="col-span-2">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Address</label>
+        <textarea name="address" rows="2"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ subscriber.address|default:'' }}</textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Latitude</label>
+        <input type="number" step="any" name="latitude" value="{{ subscriber.latitude|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="e.g. 14.5995">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Longitude</label>
+        <input type="number" step="any" name="longitude" value="{{ subscriber.longitude|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="e.g. 120.9842">
+      </div>
+      <div class="col-span-2">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+        <textarea name="notes" rows="2"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ subscriber.notes|default:'' }}</textarea>
+      </div>
+      <div class="col-span-2">
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input type="checkbox" name="sms_opt_out" {% if subscriber.sms_opt_out %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span class="text-sm text-gray-700">SMS Opt-out (do not send SMS to this subscriber)</span>
+        </label>
+      </div>
+    </div>
+    <div class="flex gap-3">
+      <button type="submit"
+        class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+        Save Changes
+      </button>
+      <a href="/subscribers/{{ subscriber.pk }}/" class="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

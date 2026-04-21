@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 max-w-md">
+  <div class="mb-4 flex items-center gap-3">
+    <i class="fa fa-plug-circle-xmark text-3xl text-orange-500"></i>
+    <div><h2 class="text-xl font-bold text-gray-800">Mark as Disconnected</h2>
+    <p class="text-sm text-gray-500">{{ subscriber.display_name }}</p></div>
+  </div>
+  <div class="bg-orange-50 border border-orange-100 rounded-lg p-3 mb-4 text-sm text-orange-700">
+    PPP will be disabled on MikroTik. Billing stops. Data preserved for audit.
+  </div>
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Reason for Disconnection</label>
+      <textarea name="reason" rows="3" required
+        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        placeholder="Client request, relocation, non-payment, etc."></textarea>
+    </div>
+    <div class="flex gap-3">
+      <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-2 rounded-lg text-sm">Confirm Disconnect</button>
+      <a href="/subscribers/{{ subscriber.pk }}/" class="text-sm text-gray-500 px-3 py-2">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

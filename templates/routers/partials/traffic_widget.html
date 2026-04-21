@@ -1,0 +1,27 @@
+{% if traffic.error %}
+  <div class="text-center py-4">
+    <p class="text-sm text-red-500"><i class="fa fa-triangle-exclamation mr-1"></i>{{ traffic.error }}</p>
+  </div>
+{% else %}
+  <div class="grid grid-cols-2 gap-4">
+    <div class="text-center">
+      <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Download (RX)</p>
+      <p class="text-3xl font-bold text-blue-600">{{ traffic.rx_mbps }}</p>
+      <p class="text-xs text-gray-400">Mbps</p>
+    </div>
+    <div class="text-center">
+      <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Upload (TX)</p>
+      <p class="text-3xl font-bold text-green-600">{{ traffic.tx_mbps }}</p>
+      <p class="text-xs text-gray-400">Mbps</p>
+    </div>
+    <div class="text-center">
+      <p class="text-xs text-gray-400 mb-1">RX Packets/s</p>
+      <p class="text-lg font-semibold text-gray-700">{{ traffic.rx_pps }}</p>
+    </div>
+    <div class="text-center">
+      <p class="text-xs text-gray-400 mb-1">TX Packets/s</p>
+      <p class="text-lg font-semibold text-gray-700">{{ traffic.tx_pps }}</p>
+    </div>
+  </div>
+  <p class="text-xs text-gray-300 text-center mt-3">Auto-refreshes every 10 seconds</p>
+{% endif %}

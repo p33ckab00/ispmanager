@@ -1,0 +1,54 @@
+{% extends "settings_app/base_settings.html" %}
+{% block settings_content %}
+<div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+  <h3 class="font-semibold text-gray-700 mb-6">Telegram Notification Settings</h3>
+  <form method="post" class="space-y-4 max-w-lg">
+    {% csrf_token %}
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Bot Token</label>
+      <input type="password" name="bot_token" value="{{ form.bot_token.value|default:'' }}"
+        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        placeholder="From @BotFather">
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Chat ID</label>
+      <input type="text" name="chat_id" value="{{ form.chat_id.value|default:'' }}"
+        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        placeholder="Your Telegram chat ID">
+    </div>
+
+    <div class="pt-2 space-y-2">
+      <p class="text-sm font-medium text-gray-700">Notify on:</p>
+      {% for field_name, label in notify_fields %}
+      <label class="flex items-center gap-3 cursor-pointer">
+        <input type="checkbox" name="{{ field_name }}"
+          {% if notify_values|default_if_none:'' %}
+            {% if field_name == 'notify_new_subscriber' and notify_values.notify_new_subscriber %}checked{% endif %}
+            {% if field_name == 'notify_subscriber_status_change' and notify_values.notify_subscriber_status_change %}checked{% endif %}
+            {% if field_name == 'notify_router_status' and notify_values.notify_router_status %}checked{% endif %}
+            {% if field_name == 'notify_billing_generated' and notify_values.notify_billing_generated %}checked{% endif %}
+            {% if field_name == 'notify_payment_received' and notify_values.notify_payment_received %}checked{% endif %}
+            {% if field_name == 'notify_sms_sent' and notify_values.notify_sms_sent %}checked{% endif %}
+            {% if field_name == 'notify_plan_change' and notify_values.notify_plan_change %}checked{% endif %}
+            {% if field_name == 'notify_settings_change' and notify_values.notify_settings_change %}checked{% endif %}
+            {% if field_name == 'notify_api_errors' and notify_values.notify_api_errors %}checked{% endif %}
+          {% endif %}
+          class="w-4 h-4 rounded border-gray-300 text-blue-600">
+        <span class="text-sm text-gray-600">{{ label }}</span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <label class="flex items-center gap-3 cursor-pointer pt-2">
+      <input type="checkbox" name="enable_notifications" {% if form.enable_notifications.value %}checked{% endif %}
+        class="w-4 h-4 rounded border-gray-300 text-blue-600">
+      <span class="text-sm font-medium text-gray-700">Enable Telegram Notifications</span>
+    </label>
+
+    <button type="submit"
+      class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+      Save Changes
+    </button>
+  </form>
+</div>
+{% endblock %}

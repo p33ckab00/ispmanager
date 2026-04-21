@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ iface.display_name }} - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <a href="/routers/{{ router.pk }}/" class="text-sm text-blue-600 hover:underline">
+    <i class="fa fa-arrow-left mr-1"></i> Back to {{ router.name }}
+  </a>
+</div>
+
+<div class="flex items-center gap-3 mb-6">
+  <span class="w-3 h-3 rounded-full {% if iface.is_running %}bg-green-400{% else %}bg-gray-300{% endif %}"></span>
+  <h2 class="text-2xl font-bold text-gray-800">{{ iface.display_name }}</h2>
+  <span class="text-sm text-gray-400 font-mono">{{ iface.name }}</span>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+  <!-- Live Traffic -->
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <h3 class="font-semibold text-gray-700 mb-4 flex items-center gap-2">
+      <i class="fa fa-chart-line text-blue-500"></i> Live Traffic
+    </h3>
+    <div id="traffic-widget"
+      hx-get="/routers/{{ router.pk }}/interfaces/{{ iface.pk }}/traffic/"
+      hx-trigger="load, every 10s"
+      hx-swap="innerHTML">
+      <div class="text-center text-sm text-gray-400 py-6">Loading traffic...</div>
+    </div>
+  </div>
+
+  <!-- Interface Info -->
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <h3 class="font-semibold text-gray-700 mb-4">Interface Info</h3>
+    <dl class="space-y-2 text-sm">
+      <div class="flex justify-between">
+        <dt class="text-gray-500">Type</dt>
+        <dd class="font-medium">{{ iface.get_iface_type_display }}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-gray-500">Role</dt>
+        <dd class="font-medium">{{ iface.get_role_display }}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-gray-500">MAC Address</dt>
+        <dd class="font-mono text-xs">{{ iface.mac_address|default:'-' }}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-gray-500">MTU</dt>
+        <dd>{{ iface.actual_mtu|default:'-' }}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-gray-500">Running</dt>
+        <dd>{% if iface.is_running %}<span class="text-green-600">Yes</span>{% else %}<span class="text-gray-400">No</span>{% endif %}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-gray-500">Slave</dt>
+        <dd>{% if iface.is_slave %}Yes{% else %}No{% endif %}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-gray-500">Dynamic</dt>
+        <dd>{% if iface.is_dynamic %}Yes{% else %}No{% endif %}</dd>
+      </div>
+      <div class="flex justify-between">
+        <dt class="text-gray-500">Last Synced</dt>
+        <dd>{{ iface.last_synced|timesince }} ago</dd>
+      </div>
+    </dl>
+  </div>
+
+  <!-- Label / Role Edit -->
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 lg:col-span-2">
+    <h3 class="font-semibold text-gray-700 mb-4">Port Label and Role</h3>
+    <form method="post" class="flex flex-wrap gap-4 items-end">
+      {% csrf_token %}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Label</label>
+        <input type="text" name="label" value="{{ form.label.value|default:'' }}"
+          class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
+          placeholder="e.g. ether6-toCDATA-OLT">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+        <select name="role"
+          class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for value, label in form.fields.role.choices %}
+          <option value="{{ value }}" {% if form.role.value == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Comment</label>
+        <input type="text" name="comment" value="{{ form.comment.value|default:'' }}"
+          class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-64">
+      </div>
+      <button type="submit"
+        class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2 rounded-lg text-sm transition">
+        Save
+      </button>
+    </form>
+  </div>
+
+</div>
+{% endblock %}

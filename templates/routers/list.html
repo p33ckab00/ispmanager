@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Routers - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Routers</h2>
+    <p class="text-gray-500 text-sm mt-1">Manage your MikroTik devices.</p>
+  </div>
+  <a href="/routers/add/"
+    class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+    <i class="fa fa-plus"></i> Add Router
+  </a>
+</div>
+
+{% include "partials/messages.html" %}
+
+{% if routers %}
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+    {% for router in routers %}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+      <div class="flex items-start justify-between mb-3">
+        <div>
+          <h3 class="font-semibold text-gray-800">{{ router.name }}</h3>
+          <p class="text-sm text-gray-500">{{ router.host }}:{{ router.api_port }}</p>
+        </div>
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+          {% if router.status == 'online' %}bg-green-100 text-green-700
+          {% elif router.status == 'offline' %}bg-red-100 text-red-700
+          {% else %}bg-gray-100 text-gray-500{% endif %}">
+          {{ router.get_status_display }}
+        </span>
+      </div>
+
+      {% if router.location %}
+        <p class="text-xs text-gray-400 mb-3"><i class="fa fa-location-dot mr-1"></i>{{ router.location }}</p>
+      {% endif %}
+
+      {% if router.last_seen %}
+        <p class="text-xs text-gray-400 mb-4">Last seen: {{ router.last_seen|timesince }} ago</p>
+      {% endif %}
+
+      <div class="flex gap-2">
+        <a href="/routers/{{ router.pk }}/"
+          class="flex-1 text-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium py-1.5 rounded-lg transition">
+          <i class="fa fa-eye mr-1"></i> View
+        </a>
+        <a href="/routers/{{ router.pk }}/sync/"
+          class="flex-1 text-center bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium py-1.5 rounded-lg transition">
+          <i class="fa fa-rotate mr-1"></i> Sync
+        </a>
+        <a href="/routers/{{ router.pk }}/edit/"
+          class="flex-1 text-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium py-1.5 rounded-lg transition">
+          <i class="fa fa-pen mr-1"></i> Edit
+        </a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center">
+    <i class="fa fa-router text-4xl text-gray-300 mb-4"></i>
+    <h3 class="font-semibold text-gray-600 mb-2">No routers yet</h3>
+    <p class="text-sm text-gray-400 mb-6">Add your first MikroTik router to get started.</p>
+    <a href="/routers/add/"
+      class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-6 py-2 rounded-lg transition">
+      Add Router
+    </a>
+  </div>
+{% endif %}
+{% endblock %}

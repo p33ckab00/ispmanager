@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Network Map - {{ isp_name }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  #nms-map { height: calc(100vh - 220px); min-height: 500px; border-radius: 12px; }
+  .marker-router { background: #2563eb; border: 3px solid #fff; border-radius: 50%; width: 18px; height: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+  .marker-router.offline { background: #ef4444; }
+  .marker-sub { border-radius: 50%; width: 12px; height: 12px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.25); }
+  .marker-sub.online { background: #22c55e; }
+  .marker-sub.offline { background: #9ca3af; }
+  .marker-sub.suspended { background: #f59e0b; }
+  .marker-sub.disconnected { background: #ef4444; }
+  .leaflet-popup-content { font-size: 13px; min-width: 180px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Network Map</h2>
+    <p class="text-gray-500 text-sm mt-0.5">Live view of routers and subscribers.</p>
+  </div>
+  <div class="flex gap-3 items-center text-sm">
+    <label class="flex items-center gap-2 cursor-pointer">
+      <input type="checkbox" id="toggle-routers" checked class="rounded"> Routers
+    </label>
+    <label class="flex items-center gap-2 cursor-pointer">
+      <input type="checkbox" id="toggle-subs" checked class="rounded"> Subscribers
+    </label>
+    <button onclick="refreshMap()"
+      class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition">
+      <i class="fa fa-rotate mr-1"></i> Refresh
+    </button>
+  </div>
+</div>
+
+<!-- Legend -->
+<div class="flex gap-4 mb-3 text-xs text-gray-500 flex-wrap">
+  <span class="flex items-center gap-1.5">
+    <span class="w-3 h-3 rounded-full bg-blue-600 inline-block"></span> Router Online
+  </span>
+  <span class="flex items-center gap-1.5">
+    <span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span> Router Offline
+  </span>
+  <span class="flex items-center gap-1.5">
+    <span class="w-3 h-3 rounded-full bg-green-500 inline-block"></span> Subscriber Online
+  </span>
+  <span class="flex items-center gap-1.5">
+    <span class="w-3 h-3 rounded-full bg-gray-400 inline-block"></span> Subscriber Offline
+  </span>
+  <span class="flex items-center gap-1.5">
+    <span class="w-3 h-3 rounded-full bg-yellow-400 inline-block"></span> Suspended
+  </span>
+</div>
+
+<!-- Stats bar -->
+<div class="flex gap-4 mb-3 text-xs">
+  <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5">
+    Routers: <strong id="count-routers">0</strong>
+  </span>
+  <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5">
+    Subscribers on map: <strong id="count-subs">0</strong>
+  </span>
+  <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5 text-green-600">
+    Online: <strong id="count-online">0</strong>
+  </span>
+</div>
+
+<div id="nms-map" class="shadow-sm border border-gray-100"></div>
+
+<p class="text-xs text-gray-400 mt-2">
+  To appear on this map, set coordinates on each router (<a href="/routers/" class="text-blue-500 hover:underline">Routers</a>)
+  and each subscriber (<a href="/subscribers/" class="text-blue-500 hover:underline">Subscribers &gt; Edit</a>).
+</p>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('nms-map').setView([12.8797, 121.7740], 6)
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  maxZoom: 19,
+}).addTo(map)
+
+let routerLayer = L.layerGroup().addTo(map)
+let subLayer = L.layerGroup().addTo(map)
+
+function makeRouterIcon(status) {
+  return L.divIcon({
+    className: '',
+    html: `<div class="marker-router ${status !== 'online' ? 'offline' : ''}"></div>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+    popupAnchor: [0, -12],
+  })
+}
+
+function makeSubIcon(status, mtStatus) {
+  let cls = 'offline'
+  if (mtStatus === 'online') cls = 'online'
+  else if (status === 'suspended') cls = 'suspended'
+  else if (status === 'disconnected') cls = 'disconnected'
+  return L.divIcon({
+    className: '',
+    html: `<div class="marker-sub ${cls}"></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+    popupAnchor: [0, -8],
+  })
+}
+
+function refreshMap() {
+  routerLayer.clearLayers()
+  subLayer.clearLayers()
+
+  fetch('/nms/data/')
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('count-routers').textContent = data.routers.length
+      document.getElementById('count-subs').textContent = data.subscribers.length
+      const online = data.subscribers.filter(s => s.mt_status === 'online').length
+      document.getElementById('count-online').textContent = online
+
+      data.routers.forEach(r => {
+        const marker = L.marker([r.lat, r.lng], { icon: makeRouterIcon(r.status) })
+        marker.bindPopup(`
+          <b><i class="fa fa-router"></i> ${r.name}</b><br>
+          <span class="text-gray-500">${r.host}</span><br>
+          Status: <span style="color:${r.status==='online'?'#16a34a':'#dc2626'}">${r.status}</span><br>
+          ${r.location ? '<i>'+r.location+'</i>' : ''}
+          <br><a href="/routers/${r.id}/" style="color:#2563eb">View Router</a>
+        `)
+        routerLayer.addLayer(marker)
+      })
+
+      data.subscribers.forEach(s => {
+        const marker = L.marker([s.lat, s.lng], { icon: makeSubIcon(s.status, s.mt_status) })
+        marker.bindPopup(`
+          <b>${s.name}</b><br>
+          <span class="text-gray-400 font-mono text-xs">${s.username}</span><br>
+          Plan: ${s.plan || '-'}<br>
+          IP: ${s.ip || '-'}<br>
+          MT: <span style="color:${s.mt_status==='online'?'#16a34a':'#6b7280'}">${s.mt_status}</span><br>
+          <a href="/subscribers/${s.id}/" style="color:#2563eb">View Subscriber</a>
+        `)
+        subLayer.addLayer(marker)
+      })
+
+      if (data.routers.length > 0 || data.subscribers.length > 0) {
+        const all = [...data.routers, ...data.subscribers].map(p => [p.lat, p.lng])
+        map.fitBounds(all, { padding: [30, 30] })
+      }
+    })
+}
+
+document.getElementById('toggle-routers').addEventListener('change', function() {
+  if (this.checked) map.addLayer(routerLayer)
+  else map.removeLayer(routerLayer)
+})
+
+document.getElementById('toggle-subs').addEventListener('change', function() {
+  if (this.checked) map.addLayer(subLayer)
+  else map.removeLayer(subLayer)
+})
+
+refreshMap()
+setInterval(refreshMap, 60000)
+</script>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Notifications - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <h2 class="text-2xl font-bold text-gray-800">Notifications</h2>
+  <a href="/notifications/telegram/test/"
+    onclick="return confirm('Send a test message to Telegram?')"
+    class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+    <i class="fa fa-paper-plane mr-1"></i> Test Telegram
+  </a>
+</div>
+{% include "partials/messages.html" %}
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Date</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Type</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Title</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Message</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Telegram</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for n in page_obj %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3 text-xs text-gray-400">{{ n.created_at|date:"M d H:i" }}</td>
+        <td class="px-4 py-3 text-xs">{{ n.get_event_type_display }}</td>
+        <td class="px-4 py-3 font-medium text-sm">{{ n.title }}</td>
+        <td class="px-4 py-3 text-xs text-gray-500 max-w-xs truncate">{{ n.message }}</td>
+        <td class="px-4 py-3">
+          {% if n.telegram_sent %}
+          <span class="text-green-600 text-xs"><i class="fa fa-check mr-1"></i>Sent</span>
+          {% else %}
+          <span class="text-red-400 text-xs"><i class="fa fa-xmark mr-1"></i>{{ n.error|truncatechars:30|default:'Not sent' }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="px-4 py-12 text-center text-gray-400">No notifications yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

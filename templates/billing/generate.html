@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Generate Invoices - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4"><a href="/billing/" class="text-sm text-blue-600 hover:underline"><i class="fa fa-arrow-left mr-1"></i> Back to Invoices</a></div>
+<div class="mb-6"><h2 class="text-2xl font-bold text-gray-800">Generate Invoices</h2></div>
+{% include "partials/messages.html" %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+    <h3 class="font-semibold text-gray-700 mb-2">Generate for All Active Subscribers</h3>
+    <p class="text-sm text-gray-500 mb-6">Creates invoices for all active subscribers using their individual cutoff day and current rate.</p>
+    <form method="post">
+      {% csrf_token %}
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+        <i class="fa fa-bolt mr-1"></i> Generate All Invoices
+      </button>
+    </form>
+  </div>
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+    <h3 class="font-semibold text-gray-700 mb-2">Generate for One Subscriber</h3>
+    <form method="post" class="space-y-3">
+      {% csrf_token %}
+      <select name="subscriber_id" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <option value="">-- Select Subscriber --</option>
+        {% for sub in subscribers %}
+        <option value="{{ sub.pk }}">{{ sub.username }} - {{ sub.display_name }} (PHP {{ sub.effective_rate|default:'No rate' }})</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="bg-gray-700 hover:bg-gray-800 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">Generate</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
