@@ -3,16 +3,24 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 import logging
+from datetime import date
+from django.db import models
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 _scheduler = None
+
+
+def using_sqlite():
+    return settings.DATABASES['default']['ENGINE'].endswith('sqlite3')
 
 
 def get_scheduler():
     global _scheduler
     if _scheduler is None:
         _scheduler = BackgroundScheduler(timezone='Asia/Manila')
-        _scheduler.add_jobstore(DjangoJobStore(), 'default')
+        if not using_sqlite():
+            _scheduler.add_jobstore(DjangoJobStore(), 'default')
     return _scheduler
 
 
@@ -144,6 +152,20 @@ def job_sync_router_status():
                              f"{router.name} ({router.host}) is not reachable.")
 
 
+def job_sample_router_traffic():
+    from apps.routers.models import Router
+    from apps.routers.services import sample_router_traffic
+    routers = Router.objects.filter(is_active=True, status='online')
+    sampled = 0
+    for router in routers:
+        try:
+            sampled += sample_router_traffic(router)
+        except Exception as e:
+            logger.error(f"job_sample_router_traffic error on {router.name}: {e}")
+    if sampled:
+        logger.debug("Router telemetry cached for %s interfaces", sampled)
+
+
 def job_auto_archive():
     from apps.subscribers.models import Subscriber
     from apps.subscribers.services import archive_subscriber
@@ -163,15 +185,54 @@ def job_auto_archive():
         logger.error(f"job_auto_archive error: {e}")
 
 
+def job_auto_suspend_overdue():
+    from apps.billing.models import Invoice
+    from apps.settings_app.models import BillingSettings
+    from apps.subscribers.models import Subscriber
+    from apps.subscribers.services import suspend_subscriber
+
+    settings = BillingSettings.get_settings()
+    if not settings.enable_auto_disconnect:
+        return
+
+    overdue_subscribers = Subscriber.objects.filter(
+        status='active',
+        invoices__status='overdue',
+    ).distinct()
+
+    suspended = 0
+    for subscriber in overdue_subscribers:
+        ok, err = suspend_subscriber(subscriber, suspended_by='scheduler')
+        suspended += 1
+        if err:
+            logger.warning("Auto-suspend updated %s with MikroTik warning: %s", subscriber.username, err)
+    if suspended:
+        logger.info("Auto-suspended %s overdue subscribers", suspended)
+
+
 def start_scheduler():
-    from apps.settings_app.models import UsageSettings
+    from apps.settings_app.models import UsageSettings, RouterSettings, SMSSettings
     scheduler = get_scheduler()
     if scheduler.running:
         return
+    usage_settings = UsageSettings.get_settings()
+    router_settings = RouterSettings.get_settings()
+    sms_settings = SMSSettings.get_settings()
+    sms_hour, sms_minute = 8, 0
+    try:
+        hour_text, minute_text = sms_settings.billing_sms_schedule.split(':', 1)
+        sms_hour = max(0, min(23, int(hour_text)))
+        sms_minute = max(0, min(59, int(minute_text)))
+    except Exception:
+        logger.warning("Invalid billing SMS schedule '%s'; defaulting to 08:00", sms_settings.billing_sms_schedule)
 
     scheduler.add_job(job_mark_overdue, CronTrigger(hour=0, minute=5),
                       id='mark_overdue', name='Mark Overdue Invoices',
                       replace_existing=True, misfire_grace_time=3600)
+
+    scheduler.add_job(job_auto_suspend_overdue, CronTrigger(minute='*/15'),
+                      id='auto_suspend_overdue', name='Auto Suspend Overdue Subscribers',
+                      replace_existing=True, misfire_grace_time=300)
 
     scheduler.add_job(job_generate_invoices, CronTrigger(hour=0, minute=10),
                       id='generate_invoices', name='Auto Generate Invoices',
@@ -185,15 +246,23 @@ def start_scheduler():
                       id='auto_freeze_drafts', name='Auto-Freeze Draft Snapshots',
                       replace_existing=True, misfire_grace_time=300)
 
-    scheduler.add_job(job_send_billing_sms, CronTrigger(hour=8, minute=0),
+    scheduler.add_job(job_send_billing_sms, CronTrigger(hour=sms_hour, minute=sms_minute),
                       id='billing_sms', name='Send Billing SMS',
                       replace_existing=True, misfire_grace_time=3600)
 
-    scheduler.add_job(job_sync_router_status, CronTrigger(minute='*/5'),
+    router_interval = max(1, router_settings.polling_interval_seconds)
+    if using_sqlite():
+        router_interval = max(router_interval, 15)
+    scheduler.add_job(job_sync_router_status, IntervalTrigger(seconds=router_interval),
                       id='router_status_check', name='Router Status Check',
                       replace_existing=True, misfire_grace_time=60)
 
-    scheduler.add_job(job_sample_usage, IntervalTrigger(minutes=5),
+    scheduler.add_job(job_sample_router_traffic, IntervalTrigger(seconds=router_interval),
+                      id='sample_router_traffic', name='Cache Router Interface Traffic',
+                      replace_existing=True, misfire_grace_time=max(60, router_interval))
+
+    usage_interval = max(1, usage_settings.sampler_interval_minutes)
+    scheduler.add_job(job_sample_usage, IntervalTrigger(minutes=usage_interval),
                       id='sample_usage', name='Sample Subscriber Usage',
                       replace_existing=True, misfire_grace_time=60)
 
@@ -202,4 +271,10 @@ def start_scheduler():
                       replace_existing=True, misfire_grace_time=3600)
 
     scheduler.start()
+    if router_settings.sync_on_startup and not using_sqlite():
+        try:
+            job_sync_router_status()
+            job_sample_router_traffic()
+        except Exception as e:
+            logger.warning("Startup sync failed: %s", e)
     logger.info("Scheduler started with all jobs.")

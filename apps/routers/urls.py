@@ -9,7 +9,9 @@ urlpatterns = [
     path('<int:pk>/delete/', views.router_delete, name='router-delete'),
     path('<int:pk>/sync/', views.router_sync, name='router-sync'),
     path('<int:pk>/coordinates/', views.router_coordinates, name='router-coordinates'),
+    path('<int:pk>/live-traffic-cache/', views.router_live_traffic_cache, name='router-live-traffic-cache'),
     path('<int:router_pk>/interfaces/<int:iface_pk>/', views.interface_detail, name='interface-detail'),
     path('<int:router_pk>/interfaces/<int:iface_pk>/traffic/', views.interface_traffic_poll, name='interface-traffic-poll'),
+    path('<int:router_pk>/interfaces/<int:iface_pk>/live-cache/', views.interface_live_traffic_cache, name='interface-live-traffic-cache'),
     path('test-connection/', views.test_connection_view, name='router-test-connection'),
 ]

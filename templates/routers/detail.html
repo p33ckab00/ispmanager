@@ -1,5 +1,32 @@
 {% extends "base.html" %}
 {% block title %}{{ router.name }} - {{ isp_name }}{% endblock %}
+{% block extra_css %}
+<style>
+  .telemetry-led {
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  }
+  .telemetry-led-active {
+    background-color: #22c55e;
+    box-shadow: 0 0 0.7rem rgba(34, 197, 94, 0.55);
+    animation: telemetryPulse 1s ease-in-out infinite;
+  }
+  .telemetry-led-idle {
+    background-color: #f59e0b;
+    box-shadow: 0 0 0.5rem rgba(245, 158, 11, 0.35);
+  }
+  .telemetry-led-down {
+    background-color: #ef4444;
+    box-shadow: 0 0 0.5rem rgba(239, 68, 68, 0.25);
+  }
+  .telemetry-led-unknown {
+    background-color: #9ca3af;
+  }
+  @keyframes telemetryPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.18); }
+  }
+</style>
+{% endblock %}
 {% block content %}
 <div class="flex items-start justify-between mb-6">
   <div>
@@ -83,9 +110,11 @@
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
       {% for iface in physical %}
       <a href="/routers/{{ router.pk }}/interfaces/{{ iface.pk }}/"
-        class="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md hover:border-blue-300 transition cursor-pointer block">
+        class="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md hover:border-blue-300 transition cursor-pointer block"
+        data-telemetry-card
+        data-iface-id="{{ iface.pk }}">
         <div class="flex items-center justify-between mb-2">
-          <span class="w-2.5 h-2.5 rounded-full {% if iface.is_running %}bg-green-400{% else %}bg-gray-300{% endif %}"></span>
+          <span class="w-2.5 h-2.5 rounded-full telemetry-led {% if iface.is_running %}telemetry-led-idle{% else %}telemetry-led-unknown{% endif %}" data-telemetry-led></span>
           <span class="text-xs text-gray-400">{{ iface.get_iface_type_display }}</span>
         </div>
         <p class="text-sm font-semibold text-gray-800 truncate">{{ iface.display_name }}</p>
@@ -100,6 +129,17 @@
         {% if iface.mac_address %}
           <p class="text-xs text-gray-300 mt-1 font-mono">{{ iface.mac_address }}</p>
         {% endif %}
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <div class="rounded-lg bg-gray-50 px-2 py-2">
+            <p class="text-[10px] uppercase tracking-wide text-gray-400">RX</p>
+            <p class="text-sm font-semibold text-blue-600" data-telemetry-rx>--</p>
+          </div>
+          <div class="rounded-lg bg-gray-50 px-2 py-2">
+            <p class="text-[10px] uppercase tracking-wide text-gray-400">TX</p>
+            <p class="text-sm font-semibold text-green-600" data-telemetry-tx>--</p>
+          </div>
+        </div>
+        <p class="mt-2 text-[10px] uppercase tracking-wide text-gray-400" data-telemetry-state>Waiting for telemetry</p>
       </a>
       {% endfor %}
     </div>
@@ -192,4 +232,43 @@
   </div>
   {% endif %}
 </div>
+{% endblock %}
+{% block extra_js %}
+<script>
+const routerTelemetryUrl = '/routers/{{ router.pk }}/live-traffic-cache/'
+
+function applyTelemetryState(led, state) {
+  if (!led) return
+  led.classList.remove('telemetry-led-active', 'telemetry-led-idle', 'telemetry-led-down', 'telemetry-led-unknown')
+  if (state === 'active') led.classList.add('telemetry-led-active')
+  else if (state === 'idle') led.classList.add('telemetry-led-idle')
+  else if (state === 'down' || state === 'error') led.classList.add('telemetry-led-down')
+  else led.classList.add('telemetry-led-unknown')
+}
+
+function refreshRouterTelemetry() {
+  fetch(routerTelemetryUrl)
+    .then(r => r.json())
+    .then(data => {
+      const cacheById = new Map((data.interfaces || []).map(item => [String(item.interface_id), item]))
+      document.querySelectorAll('[data-telemetry-card]').forEach(card => {
+        const ifaceId = card.dataset.ifaceId
+        const current = cacheById.get(ifaceId)
+        if (!current) return
+
+        applyTelemetryState(card.querySelector('[data-telemetry-led]'), current.activity_state)
+        const rx = card.querySelector('[data-telemetry-rx]')
+        const tx = card.querySelector('[data-telemetry-tx]')
+        const state = card.querySelector('[data-telemetry-state]')
+        if (rx) rx.textContent = `${current.rx_mbps.toFixed(2)} Mbps`
+        if (tx) tx.textContent = `${current.tx_mbps.toFixed(2)} Mbps`
+        if (state) state.textContent = current.error ? current.error : current.activity_state.toUpperCase()
+      })
+    })
+    .catch(() => {})
+}
+
+refreshRouterTelemetry()
+setInterval(refreshRouterTelemetry, {{ telemetry_poll_ms|default:1000 }})
+</script>
 {% endblock %}

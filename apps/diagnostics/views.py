@@ -1,10 +1,11 @@
 import platform
 import shutil
 import os
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.utils import timezone
+from zoneinfo import ZoneInfo
 from apps.routers.models import Router
 from apps.routers import mikrotik
 from apps.subscribers.models import Subscriber
@@ -99,7 +100,8 @@ def run_job_now(request, job_id):
     scheduler = get_scheduler()
     job = scheduler.get_job(job_id)
     if job:
-        job.modify(next_run_time=__import__('datetime').datetime.now(tz=__import__('pytz').timezone('Asia/Manila')))
+        from datetime import datetime
+        job.modify(next_run_time=datetime.now(tz=ZoneInfo('Asia/Manila')))
         from django.contrib import messages
         messages.success(request, f"Job '{job.name}' triggered.")
     return redirect('scheduler-status')

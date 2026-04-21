@@ -10,6 +10,11 @@ class CoreConfig(AppConfig):
         import os
         if os.environ.get('RUN_MAIN') != 'true':
             return
+        if os.environ.get('DISABLE_SCHEDULER') == '1':
+            return
+        argv = ' '.join(os.sys.argv)
+        if any(cmd in argv for cmd in ['migrate', 'makemigrations', 'collectstatic', 'shell', 'test']):
+            return
         try:
             from apps.core.scheduler import start_scheduler
             start_scheduler()

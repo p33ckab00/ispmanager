@@ -111,3 +111,36 @@ class InterfaceTrafficSnapshot(models.Model):
     @property
     def tx_mbps(self):
         return round(self.tx_bits_per_second / 1_000_000, 2)
+
+
+class InterfaceTrafficCache(models.Model):
+    ACTIVITY_CHOICES = [
+        ('active', 'Active'),
+        ('idle', 'Idle'),
+        ('down', 'Down'),
+        ('error', 'Error'),
+        ('unknown', 'Unknown'),
+    ]
+
+    interface = models.OneToOneField(RouterInterface, on_delete=models.CASCADE, related_name='traffic_cache')
+    rx_bits_per_second = models.BigIntegerField(default=0)
+    tx_bits_per_second = models.BigIntegerField(default=0)
+    rx_packets_per_second = models.IntegerField(default=0)
+    tx_packets_per_second = models.IntegerField(default=0)
+    activity_state = models.CharField(max_length=20, choices=ACTIVITY_CHOICES, default='unknown')
+    error = models.CharField(max_length=255, blank=True)
+    sampled_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-sampled_at']
+
+    def __str__(self):
+        return f"{self.interface.name} live cache"
+
+    @property
+    def rx_mbps(self):
+        return round(self.rx_bits_per_second / 1_000_000, 2)
+
+    @property
+    def tx_mbps(self):
+        return round(self.tx_bits_per_second / 1_000_000, 2)

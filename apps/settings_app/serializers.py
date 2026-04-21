@@ -16,10 +16,15 @@ class SMSSettingsSerializer(serializers.ModelSerializer):
 
 
 class TelegramSettingsSerializer(serializers.ModelSerializer):
+    bot_configured = serializers.SerializerMethodField()
+
     class Meta:
         model = TelegramSettings
         fields = '__all__'
         extra_kwargs = {'bot_token': {'write_only': True}}
+
+    def get_bot_configured(self, obj):
+        return bool(obj.bot_token and obj.chat_id)
 
 
 class RouterSettingsSerializer(serializers.ModelSerializer):

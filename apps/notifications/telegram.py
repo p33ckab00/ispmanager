@@ -1,4 +1,5 @@
 import requests
+from django.utils import timezone
 from apps.settings_app.models import TelegramSettings
 
 
@@ -34,17 +35,31 @@ def notify(event_type, title, message, check_setting=None):
     settings = TelegramSettings.get_settings()
 
     if check_setting and not getattr(settings, check_setting, True):
-        return None
+        return Notification.objects.create(
+            event_type=event_type,
+            channel='telegram',
+            title=title,
+            message=message,
+            status='pending',
+            error='Skipped because this event type is disabled in Telegram settings.',
+            delivery_state='skipped',
+            telegram_sent=False,
+            last_attempt_at=timezone.now(),
+        )
 
     full_message = f"<b>{title}</b>\n{message}"
     ok, err = send_telegram(full_message)
 
     notif = Notification.objects.create(
         event_type=event_type,
+        channel='telegram',
         title=title,
         message=message,
         status='sent' if ok else 'failed',
         error=err or '',
+        retry_count=1,
+        last_attempt_at=timezone.now(),
+        delivery_state='delivered' if ok else 'failed',
         telegram_sent=ok,
     )
 

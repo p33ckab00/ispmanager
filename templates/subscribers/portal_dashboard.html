@@ -119,6 +119,9 @@
       <div class="relative h-40">
         <canvas id="portalUsageChart"></canvas>
       </div>
+      <p id="portal-usage-empty" class="text-xs text-gray-400 mt-3 text-center hidden">
+        Usage data is not available yet. Please check again after the sampler runs.
+      </p>
     </div>
 
     <!-- Payment History -->
@@ -172,7 +175,8 @@
   const data = {{ usage_data|safe }}
 
   const ctx = document.getElementById('portalUsageChart')
-  if (ctx && data.labels.length) {
+  const emptyState = document.getElementById('portal-usage-empty')
+  if (ctx && data.labels.length && data.has_data) {
     new Chart(ctx, {
       type: 'bar',
       data: {
@@ -193,6 +197,9 @@
     const rxTotal = data.rx.reduce((a,b) => a+b, 0)
     const txTotal = data.tx.reduce((a,b) => a+b, 0)
     document.getElementById('portal-total').textContent = (rxTotal + txTotal).toFixed(2)
+  } else if (emptyState) {
+    emptyState.classList.remove('hidden')
+    document.getElementById('portal-total').textContent = '0.00'
   }
   </script>
 </body>

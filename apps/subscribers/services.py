@@ -338,9 +338,11 @@ def get_usage_chart_data(subscriber, view='this_cycle'):
         running += rx + tx
         cumulative.append(round(running, 3))
 
+    has_data = any(value > 0 for value in rx_data + tx_data)
     return {
         'labels': labels,
         'rx': rx_data,
         'tx': tx_data,
         'cumulative': cumulative,
+        'has_data': has_data,
     }

@@ -1,5 +1,6 @@
 from django.utils import timezone
-from apps.routers.models import Router, RouterInterface
+from django.conf import settings
+from apps.routers.models import Router, RouterInterface, InterfaceTrafficCache, InterfaceTrafficSnapshot
 from apps.routers import mikrotik
 
 
@@ -85,3 +86,77 @@ def get_live_traffic(router, interface_name):
         }
     except Exception as e:
         return {'error': str(e)}
+
+
+def sample_router_traffic(router):
+    """
+    Polls live traffic for non-session interfaces and stores a latest-state cache row.
+    The UI can then refresh quickly against cached values instead of calling MikroTik directly.
+    """
+    interfaces = router.interfaces.exclude(iface_type='pppoe-in').order_by('name')
+    sampled = 0
+    use_sqlite = settings.DATABASES['default']['ENGINE'].endswith('sqlite3')
+
+    for iface in interfaces:
+        try:
+            data = get_live_traffic(router, iface.name)
+            if data.get('error'):
+                InterfaceTrafficCache.objects.update_or_create(
+                    interface=iface,
+                    defaults={
+                        'rx_bits_per_second': 0,
+                        'tx_bits_per_second': 0,
+                        'rx_packets_per_second': 0,
+                        'tx_packets_per_second': 0,
+                        'activity_state': 'error',
+                        'error': data['error'][:255],
+                    },
+                )
+                continue
+
+            rx_bps = data['rx_bps']
+            tx_bps = data['tx_bps']
+            rx_pps = data['rx_pps']
+            tx_pps = data['tx_pps']
+
+            if not iface.is_running:
+                activity_state = 'down'
+            elif rx_bps > 0 or tx_bps > 0:
+                activity_state = 'active'
+            else:
+                activity_state = 'idle'
+
+            InterfaceTrafficCache.objects.update_or_create(
+                interface=iface,
+                defaults={
+                    'rx_bits_per_second': rx_bps,
+                    'tx_bits_per_second': tx_bps,
+                    'rx_packets_per_second': rx_pps,
+                    'tx_packets_per_second': tx_pps,
+                    'activity_state': activity_state,
+                    'error': '',
+                },
+            )
+            if not use_sqlite:
+                InterfaceTrafficSnapshot.objects.create(
+                    interface=iface,
+                    rx_bits_per_second=rx_bps,
+                    tx_bits_per_second=tx_bps,
+                    rx_packets_per_second=rx_pps,
+                    tx_packets_per_second=tx_pps,
+                )
+            sampled += 1
+        except Exception as e:
+            InterfaceTrafficCache.objects.update_or_create(
+                interface=iface,
+                defaults={
+                    'rx_bits_per_second': 0,
+                    'tx_bits_per_second': 0,
+                    'rx_packets_per_second': 0,
+                    'tx_packets_per_second': 0,
+                    'activity_state': 'error',
+                    'error': str(e)[:255],
+                },
+            )
+
+    return sampled

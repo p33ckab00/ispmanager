@@ -5,6 +5,7 @@ from django.core.paginator import Paginator
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.utils import timezone
+from django.db import OperationalError
 from apps.billing.models import Invoice, Payment, BillingSnapshot, BillingSnapshotItem
 from apps.billing.forms import PaymentForm, RateChangeForm
 from apps.billing.services import (
@@ -155,7 +156,17 @@ def snapshot_freeze(request, pk):
 def generate_snapshot(request, subscriber_pk):
     subscriber = get_object_or_404(Subscriber, pk=subscriber_pk)
     if request.method == 'POST':
-        snapshot, err = generate_snapshot_for_subscriber(subscriber, created_by=request.user.username)
+        try:
+            snapshot, err = generate_snapshot_for_subscriber(subscriber, created_by=request.user.username)
+        except OperationalError as exc:
+            if 'database is locked' in str(exc).lower():
+                messages.error(
+                    request,
+                    'Snapshot generation is temporarily busy because SQLite is handling background writes. '
+                    'Please wait a few seconds and try again, or restart the dev server after the new polling limits take effect.'
+                )
+                return redirect('subscriber-detail', pk=subscriber_pk)
+            raise
         if err:
             messages.error(request, err)
         else:

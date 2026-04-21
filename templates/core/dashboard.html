@@ -67,7 +67,7 @@
         class="flex items-center gap-2 text-sm bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium px-4 py-3 rounded-lg transition">
         <i class="fa fa-rotate w-4"></i> Sync Subscribers
       </a>
-      <a href="/billing/generate/"
+      <a href="/billing/invoices/generate/"
         class="flex items-center gap-2 text-sm bg-gray-50 hover:bg-gray-100 text-gray-700 font-medium px-4 py-3 rounded-lg transition">
         <i class="fa fa-file-invoice w-4"></i> Generate Bills
       </a>
@@ -153,7 +153,7 @@ function checkSystemStatus() {
     .then(r => r.json())
     .then(d => {
       const el = document.getElementById('tg-status')
-      if (d.bot_token && d.enable_notifications) {
+      if (d.bot_configured && d.enable_notifications) {
         el.textContent = 'Configured'; el.className = 'text-green-600 font-medium'
       } else {
         el.textContent = 'Not configured'; el.className = 'text-gray-400 font-medium'

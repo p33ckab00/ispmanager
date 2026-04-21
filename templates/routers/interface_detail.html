@@ -1,5 +1,103 @@
 {% extends "base.html" %}
 {% block title %}{{ iface.display_name }} - {{ isp_name }}{% endblock %}
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const liveCacheUrl = '/routers/{{ router.pk }}/interfaces/{{ iface.pk }}/live-cache/'
+const historyLabels = []
+const rxSeries = []
+const txSeries = []
+let liveChart = null
+
+function initLiveChart() {
+  const ctx = document.getElementById('liveTrafficChart')
+  if (!ctx) return
+  liveChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: historyLabels,
+      datasets: [
+        {
+          label: 'RX Mbps',
+          data: rxSeries,
+          borderColor: 'rgb(37, 99, 235)',
+          backgroundColor: 'rgba(37, 99, 235, 0.15)',
+          borderWidth: 2,
+          tension: 0.35,
+          pointRadius: 0,
+        },
+        {
+          label: 'TX Mbps',
+          data: txSeries,
+          borderColor: 'rgb(22, 163, 74)',
+          backgroundColor: 'rgba(22, 163, 74, 0.15)',
+          borderWidth: 2,
+          tension: 0.35,
+          pointRadius: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { position: 'top' },
+      },
+      scales: {
+        x: { ticks: { maxTicksLimit: 6 } },
+        y: { beginAtZero: true, title: { display: true, text: 'Mbps' } },
+      },
+    }
+  })
+}
+
+function pushPoint(label, rx, tx) {
+  historyLabels.push(label)
+  rxSeries.push(rx)
+  txSeries.push(tx)
+  if (historyLabels.length > 60) {
+    historyLabels.shift()
+    rxSeries.shift()
+    txSeries.shift()
+  }
+  if (liveChart) liveChart.update()
+}
+
+function setBadgeState(state) {
+  const badge = document.getElementById('live-activity-badge')
+  if (!badge) return
+  badge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium'
+  if (state === 'active') badge.classList.add('bg-green-100', 'text-green-700')
+  else if (state === 'idle') badge.classList.add('bg-amber-100', 'text-amber-700')
+  else if (state === 'down' || state === 'error') badge.classList.add('bg-red-100', 'text-red-700')
+  else badge.classList.add('bg-gray-100', 'text-gray-500')
+  badge.textContent = state ? state.toUpperCase() : 'UNKNOWN'
+}
+
+function refreshInterfaceTelemetry() {
+  fetch(liveCacheUrl)
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('live-rx-mbps').textContent = `${Number(data.rx_mbps || 0).toFixed(2)}`
+      document.getElementById('live-tx-mbps').textContent = `${Number(data.tx_mbps || 0).toFixed(2)}`
+      document.getElementById('live-rx-pps').textContent = data.rx_pps || 0
+      document.getElementById('live-tx-pps').textContent = data.tx_pps || 0
+      document.getElementById('live-sampled-at').textContent = data.sampled_at ? new Date(data.sampled_at).toLocaleTimeString() : 'Waiting for telemetry'
+      document.getElementById('live-error').textContent = data.error || ''
+      setBadgeState(data.activity_state)
+      pushPoint(new Date().toLocaleTimeString(), Number(data.rx_mbps || 0), Number(data.tx_mbps || 0))
+    })
+    .catch(() => {
+      document.getElementById('live-error').textContent = 'Failed to load cached telemetry.'
+    })
+}
+
+initLiveChart()
+refreshInterfaceTelemetry()
+setInterval(refreshInterfaceTelemetry, {{ telemetry_poll_ms|default:500 }})
+</script>
+{% endblock %}
 {% block content %}
 <div class="mb-4">
   <a href="/routers/{{ router.pk }}/" class="text-sm text-blue-600 hover:underline">
@@ -19,15 +117,39 @@
 
   <!-- Live Traffic -->
   <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-    <h3 class="font-semibold text-gray-700 mb-4 flex items-center gap-2">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-semibold text-gray-700 flex items-center gap-2">
       <i class="fa fa-chart-line text-blue-500"></i> Live Traffic
-    </h3>
-    <div id="traffic-widget"
-      hx-get="/routers/{{ router.pk }}/interfaces/{{ iface.pk }}/traffic/"
-      hx-trigger="load, every 10s"
-      hx-swap="innerHTML">
-      <div class="text-center text-sm text-gray-400 py-6">Loading traffic...</div>
+      </h3>
+      <span id="live-activity-badge" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+        UNKNOWN
+      </span>
     </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div class="text-center rounded-xl bg-blue-50 p-4">
+        <p class="text-xs text-blue-500 uppercase tracking-wide mb-1">Download (RX)</p>
+        <p class="text-3xl font-bold text-blue-600" id="live-rx-mbps">0.00</p>
+        <p class="text-xs text-blue-400">Mbps</p>
+      </div>
+      <div class="text-center rounded-xl bg-green-50 p-4">
+        <p class="text-xs text-green-500 uppercase tracking-wide mb-1">Upload (TX)</p>
+        <p class="text-3xl font-bold text-green-600" id="live-tx-mbps">0.00</p>
+        <p class="text-xs text-green-400">Mbps</p>
+      </div>
+      <div class="text-center rounded-xl bg-gray-50 p-4">
+        <p class="text-xs text-gray-400 mb-1">RX Packets/s</p>
+        <p class="text-lg font-semibold text-gray-700" id="live-rx-pps">0</p>
+      </div>
+      <div class="text-center rounded-xl bg-gray-50 p-4">
+        <p class="text-xs text-gray-400 mb-1">TX Packets/s</p>
+        <p class="text-lg font-semibold text-gray-700" id="live-tx-pps">0</p>
+      </div>
+    </div>
+    <div class="relative h-64">
+      <canvas id="liveTrafficChart"></canvas>
+    </div>
+    <p class="text-xs text-gray-300 text-center mt-3" id="live-sampled-at">Waiting for telemetry</p>
+    <p class="text-xs text-red-500 text-center mt-1" id="live-error"></p>
   </div>
 
   <!-- Interface Info -->

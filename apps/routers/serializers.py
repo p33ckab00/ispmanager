@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.routers.models import Router, RouterInterface, InterfaceTrafficSnapshot
+from apps.routers.models import Router, RouterInterface, InterfaceTrafficSnapshot, InterfaceTrafficCache
 
 
 class RouterSerializer(serializers.ModelSerializer):
@@ -32,3 +32,19 @@ class TrafficSnapshotSerializer(serializers.ModelSerializer):
         fields = ['id', 'interface', 'rx_bits_per_second', 'tx_bits_per_second',
                   'rx_packets_per_second', 'tx_packets_per_second',
                   'rx_mbps', 'tx_mbps', 'recorded_at']
+
+
+class TrafficCacheSerializer(serializers.ModelSerializer):
+    rx_mbps = serializers.ReadOnlyField()
+    tx_mbps = serializers.ReadOnlyField()
+    interface_name = serializers.CharField(source='interface.name', read_only=True)
+    interface_display_name = serializers.CharField(source='interface.display_name', read_only=True)
+
+    class Meta:
+        model = InterfaceTrafficCache
+        fields = [
+            'interface', 'interface_name', 'interface_display_name',
+            'rx_bits_per_second', 'tx_bits_per_second',
+            'rx_packets_per_second', 'tx_packets_per_second',
+            'rx_mbps', 'tx_mbps', 'activity_state', 'error', 'sampled_at',
+        ]

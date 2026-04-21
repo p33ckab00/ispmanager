@@ -2,6 +2,11 @@ from django.db import models
 
 
 class Notification(models.Model):
+    CHANNEL_CHOICES = [
+        ('telegram', 'Telegram'),
+        ('system', 'System'),
+    ]
+
     TYPE_CHOICES = [
         ('new_subscriber', 'New Subscriber'),
         ('subscriber_status', 'Subscriber Status Change'),
@@ -22,10 +27,14 @@ class Notification(models.Model):
     ]
 
     event_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
+    channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default='telegram')
     title = models.CharField(max_length=255)
     message = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     error = models.TextField(blank=True)
+    retry_count = models.IntegerField(default=0)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    delivery_state = models.CharField(max_length=20, default='pending')
     telegram_sent = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

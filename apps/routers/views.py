@@ -4,7 +4,8 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
-from apps.routers.models import Router, RouterInterface
+from django.conf import settings
+from apps.routers.models import Router, RouterInterface, InterfaceTrafficCache
 from apps.routers.forms import RouterForm, RouterCoordinatesForm, InterfaceLabelForm
 from apps.routers.services import sync_interfaces, get_live_traffic
 from apps.routers import mikrotik
@@ -61,6 +62,7 @@ def router_detail(request, pk):
         'vlans': vlans,
         'bridges': bridges,
         'tunnels': tunnels,
+        'telemetry_poll_ms': 3000 if settings.DATABASES['default']['ENGINE'].endswith('sqlite3') else 1000,
     })
 
 
@@ -119,6 +121,7 @@ def interface_detail(request, router_pk, iface_pk):
         'router': router,
         'iface': iface,
         'form': form,
+        'telemetry_poll_ms': 2000 if settings.DATABASES['default']['ENGINE'].endswith('sqlite3') else 500,
     })
 
 
@@ -130,6 +133,68 @@ def interface_traffic_poll(request, router_pk, iface_pk):
     return render(request, 'routers/partials/traffic_widget.html', {
         'iface': iface,
         'traffic': data,
+    })
+
+
+@login_required
+def router_live_traffic_cache(request, pk):
+    router = get_object_or_404(Router, pk=pk)
+    caches = InterfaceTrafficCache.objects.filter(interface__router=router).select_related('interface')
+    payload = {
+        'router_id': router.pk,
+        'router_status': router.status,
+        'interfaces': [
+            {
+                'interface_id': cache.interface_id,
+                'name': cache.interface.name,
+                'display_name': cache.interface.display_name,
+                'rx_mbps': cache.rx_mbps,
+                'tx_mbps': cache.tx_mbps,
+                'rx_bps': cache.rx_bits_per_second,
+                'tx_bps': cache.tx_bits_per_second,
+                'rx_pps': cache.rx_packets_per_second,
+                'tx_pps': cache.tx_packets_per_second,
+                'activity_state': cache.activity_state,
+                'sampled_at': cache.sampled_at.isoformat(),
+                'error': cache.error,
+            }
+            for cache in caches
+        ],
+    }
+    return JsonResponse(payload)
+
+
+@login_required
+def interface_live_traffic_cache(request, router_pk, iface_pk):
+    router = get_object_or_404(Router, pk=router_pk)
+    iface = get_object_or_404(RouterInterface, pk=iface_pk, router=router)
+    cache = InterfaceTrafficCache.objects.filter(interface=iface).first()
+    if not cache:
+        return JsonResponse({
+            'interface_id': iface.pk,
+            'display_name': iface.display_name,
+            'rx_mbps': 0,
+            'tx_mbps': 0,
+            'rx_bps': 0,
+            'tx_bps': 0,
+            'rx_pps': 0,
+            'tx_pps': 0,
+            'activity_state': 'unknown',
+            'sampled_at': None,
+            'error': '',
+        })
+    return JsonResponse({
+        'interface_id': iface.pk,
+        'display_name': iface.display_name,
+        'rx_mbps': cache.rx_mbps,
+        'tx_mbps': cache.tx_mbps,
+        'rx_bps': cache.rx_bits_per_second,
+        'tx_bps': cache.tx_bits_per_second,
+        'rx_pps': cache.rx_packets_per_second,
+        'tx_pps': cache.tx_packets_per_second,
+        'activity_state': cache.activity_state,
+        'sampled_at': cache.sampled_at.isoformat(),
+        'error': cache.error,
     })
 
 
