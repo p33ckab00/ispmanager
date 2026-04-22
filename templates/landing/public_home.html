@@ -3,8 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ page.hero_title|default:isp_name }}</title>
-  <meta name="description" content="{{ page.hero_subtitle|default:page.about_text|default:isp_name }}">
+  <title>{{ page.meta_title|default:page.hero_title|default:isp_name }}</title>
+  <meta name="description" content="{{ page.meta_description|default:page.hero_subtitle|default:page.about_text|default:isp_name }}">
+  {% if page.meta_keywords %}<meta name="keywords" content="{{ page.meta_keywords }}">{% endif %}
+  <meta property="og:title" content="{{ page.og_title|default:page.meta_title|default:page.hero_title|default:isp_name }}">
+  <meta property="og:description" content="{{ page.og_description|default:page.meta_description|default:page.hero_subtitle|default:page.about_text|default:isp_name }}">
+  <meta property="og:type" content="website">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -131,6 +135,7 @@
       color: var(--ink);
       font-size: 1.25rem;
     }
+    .nav-sheet { display: none; }
     .btn {
       display: inline-flex;
       align-items: center;
@@ -476,6 +481,115 @@
       color: white;
       border-color: rgba(255,255,255,0.22);
     }
+    .flash-stack {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+    .flash-message {
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid rgba(18, 32, 51, 0.08);
+      background: rgba(255,255,255,0.84);
+      color: var(--ink);
+      box-shadow: 0 10px 30px rgba(18, 32, 51, 0.06);
+    }
+    .flash-message.success {
+      border-color: rgba(15, 118, 110, 0.14);
+      background: rgba(236, 253, 245, 0.92);
+    }
+    .flash-message.error {
+      border-color: rgba(220, 38, 38, 0.14);
+      background: rgba(254, 242, 242, 0.92);
+    }
+    .faq-list {
+      display: grid;
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .faq-item {
+      border-radius: 24px;
+      padding: 20px 22px;
+      background: rgba(255,255,255,0.82);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }
+    .faq-item summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.08rem;
+      font-weight: 700;
+    }
+    .faq-item summary::-webkit-details-marker { display: none; }
+    .faq-item p {
+      margin: 14px 0 0;
+      color: var(--muted);
+      line-height: 1.8;
+      white-space: pre-line;
+    }
+    .inquiry-grid {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 18px;
+      margin-top: 18px;
+    }
+    .inquiry-panel {
+      padding: 28px;
+      border-radius: 28px;
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,0.55);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+    .inquiry-form {
+      display: grid;
+      gap: 14px;
+    }
+    .inquiry-form label {
+      display: block;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .inquiry-form input,
+    .inquiry-form select,
+    .inquiry-form textarea {
+      width: 100%;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      padding: 14px 16px;
+      background: rgba(255,255,255,0.86);
+      color: var(--ink);
+      font: inherit;
+    }
+    .inquiry-form .field-error {
+      margin-top: 6px;
+      font-size: 0.82rem;
+      color: #b91c1c;
+    }
+    .inquiry-helper-list {
+      list-style: none;
+      padding: 0;
+      margin: 18px 0 0;
+      display: grid;
+      gap: 12px;
+    }
+    .inquiry-helper-list li {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+    .inquiry-helper-list i {
+      color: var(--brand);
+      margin-top: 4px;
+    }
     footer {
       padding: 26px 0 40px;
       color: var(--muted);
@@ -494,6 +608,7 @@
       .hero-grid,
       .coverage-grid,
       .contact-grid,
+      .inquiry-grid,
       .plans-grid,
       .feature-grid {
         grid-template-columns: 1fr;
@@ -562,25 +677,25 @@
         </a>
 
         <nav class="nav-links" aria-label="Primary navigation">
-          <a href="#plans">Plans</a>
-          <a href="#why-us">Why Us</a>
-          <a href="#coverage">Coverage</a>
-          <a href="#contact">Contact</a>
+          <a href="#plans">{{ page.nav_plans_label|default:'Plans' }}</a>
+          <a href="#why-us">{{ page.nav_why_us_label|default:'Why Us' }}</a>
+          <a href="#coverage">{{ page.nav_coverage_label|default:'Coverage' }}</a>
+          <a href="#contact">{{ page.nav_contact_label|default:'Contact' }}</a>
           {% if request.user.is_authenticated %}
-          <a href="{{ dashboard_url }}">Dashboard</a>
+          <a href="{{ dashboard_url }}">{{ page.dashboard_label|default:'Dashboard' }}</a>
           {% else %}
-          <a href="{{ admin_login_url }}">Admin Login</a>
+          <a href="{{ admin_login_url }}">{{ page.admin_login_label|default:'Admin Login' }}</a>
           {% endif %}
         </nav>
 
         <div class="nav-actions">
           {% if request.user.is_authenticated %}
-          <a href="{{ dashboard_url }}" class="btn btn-secondary">Dashboard</a>
-          <a href="{{ admin_logout_url }}" class="btn btn-secondary">Logout</a>
+          <a href="{{ dashboard_url }}" class="btn btn-secondary">{{ page.dashboard_label|default:'Dashboard' }}</a>
+          <a href="{{ admin_logout_url }}" class="btn btn-secondary">{{ page.logout_label|default:'Logout' }}</a>
           {% else %}
-          <a href="{{ admin_login_url }}" class="btn btn-secondary">Admin Login</a>
+          <a href="{{ admin_login_url }}" class="btn btn-secondary">{{ page.admin_login_label|default:'Admin Login' }}</a>
           {% endif %}
-          <a href="{{ portal_url }}" class="btn btn-secondary">My Account</a>
+          <a href="{{ portal_url }}" class="btn btn-secondary">{{ page.portal_button_label|default:'My Account' }}</a>
           <a href="{{ primary_url }}" class="btn btn-primary">{{ primary_label }}</a>
         </div>
 
@@ -589,17 +704,17 @@
         </button>
       </div>
       <div class="nav-sheet" aria-label="Mobile navigation">
-        <a href="#plans">Plans</a>
-        <a href="#why-us">Why Us</a>
-        <a href="#coverage">Coverage</a>
-        <a href="#contact">Contact</a>
+        <a href="#plans">{{ page.nav_plans_label|default:'Plans' }}</a>
+        <a href="#why-us">{{ page.nav_why_us_label|default:'Why Us' }}</a>
+        <a href="#coverage">{{ page.nav_coverage_label|default:'Coverage' }}</a>
+        <a href="#contact">{{ page.nav_contact_label|default:'Contact' }}</a>
         {% if request.user.is_authenticated %}
-        <a href="{{ dashboard_url }}">Dashboard</a>
-        <a href="{{ admin_logout_url }}">Logout</a>
+        <a href="{{ dashboard_url }}">{{ page.dashboard_label|default:'Dashboard' }}</a>
+        <a href="{{ admin_logout_url }}">{{ page.logout_label|default:'Logout' }}</a>
         {% else %}
-        <a href="{{ admin_login_url }}">Admin Login</a>
+        <a href="{{ admin_login_url }}">{{ page.admin_login_label|default:'Admin Login' }}</a>
         {% endif %}
-        <a href="{{ portal_url }}">Subscriber Portal</a>
+        <a href="{{ portal_url }}">{{ page.portal_nav_label|default:'Subscriber Portal' }}</a>
       </div>
     </div>
   </header>
@@ -608,6 +723,13 @@
     <section class="hero">
       <div class="shell hero-grid">
         <div class="hero-panel">
+          {% if messages %}
+          <div class="flash-stack">
+            {% for message in messages %}
+            <div class="flash-message {{ message.tags }}">{{ message }}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
           <span class="eyebrow">
             <span class="eyebrow-dot"></span>
             {{ page.hero_badge|default:'Reliable neighborhood internet for homes and growing businesses' }}
@@ -623,47 +745,47 @@
           <div class="hero-stats">
             <div class="stat-box">
               <span class="stat-value">{{ plans|length }}</span>
-              <span class="stat-label">Published plan option{{ plans|length|pluralize }} ready for comparison</span>
+              <span class="stat-label">{{ page.hero_stat_plans_label|default:'Published plan option ready for comparison' }}</span>
             </div>
             <div class="stat-box">
               <span class="stat-value">{{ page.support_hours|default:'Mon-Sat' }}</span>
-              <span class="stat-label">Support window you can highlight for new and existing subscribers</span>
+              <span class="stat-label">{{ page.hero_stat_support_label|default:'Support window you can highlight for new and existing subscribers' }}</span>
             </div>
             <div class="stat-box">
-              <span class="stat-value">24/7</span>
-              <span class="stat-label">Subscriber portal access for viewing bills and account activity</span>
+              <span class="stat-value">{{ page.hero_stat_portal_value|default:'24/7' }}</span>
+              <span class="stat-label">{{ page.hero_stat_portal_label|default:'Subscriber portal access for viewing bills and account activity' }}</span>
             </div>
           </div>
         </div>
 
         <aside class="hero-aside">
           <div class="network-card">
-            <span class="network-label">Network Promise</span>
-            <h2>Fast answers matter as much as fast speeds.</h2>
-            <p>Use this homepage to set expectations clearly: transparent plans, reachable support, and an easier path to billing and account actions.</p>
+            <span class="network-label">{{ page.network_promise_eyebrow|default:'Network Promise' }}</span>
+            <h2>{{ page.network_promise_title|default:'Fast answers matter as much as fast speeds.' }}</h2>
+            <p>{{ page.network_promise_body|default:'Use this homepage to set expectations clearly: transparent plans, reachable support, and an easier path to billing and account actions.' }}</p>
           </div>
 
           <div class="quick-links">
-            <span class="section-eyebrow">Quick Actions</span>
+            <span class="section-eyebrow">{{ page.quick_actions_eyebrow|default:'Quick Actions' }}</span>
             <div class="quick-link-list">
               <a href="{{ portal_url }}" class="quick-link">
                 <span>
-                  Subscriber Portal
-                  <small>View balances, account details, and payment-related access</small>
+                  {{ page.quick_link_portal_title|default:'Subscriber Portal' }}
+                  <small>{{ page.quick_link_portal_text|default:'View balances, account details, and payment-related access' }}</small>
                 </span>
                 <i class="fa-solid fa-arrow-up-right-from-square"></i>
               </a>
               <a href="#plans" class="quick-link">
                 <span>
-                  Compare Plans
-                  <small>Show your featured offer and monthly pricing up front</small>
+                  {{ page.quick_link_plans_title|default:'Compare Plans' }}
+                  <small>{{ page.quick_link_plans_text|default:'Show your featured offer and monthly pricing up front' }}</small>
                 </span>
                 <i class="fa-solid fa-layer-group"></i>
               </a>
               {% if page.contact_phone %}
               <a href="tel:{{ page.contact_phone }}" class="quick-link">
                 <span>
-                  Call Support
+                  {{ page.quick_link_contact_title|default:'Call Support' }}
                   <small>{{ page.contact_phone }}</small>
                 </span>
                 <i class="fa-solid fa-phone"></i>
@@ -671,8 +793,8 @@
               {% else %}
               <a href="#contact" class="quick-link">
                 <span>
-                  Contact Us
-                  <small>Share your office line, mobile, or messenger handoff here</small>
+                  {{ page.quick_link_contact_title|default:'Contact Us' }}
+                  <small>{{ page.quick_link_contact_text|default:'Share your office line, mobile, or messenger handoff here' }}</small>
                 </span>
                 <i class="fa-solid fa-headset"></i>
               </a>
@@ -681,11 +803,15 @@
           </div>
 
           <div class="coverage-pillars">
-            <span class="section-eyebrow">Built for ISP Operations</span>
+            <span class="section-eyebrow">{{ page.operations_eyebrow|default:'Built for ISP Operations' }}</span>
             <ul>
+              {% for point in page.operations_point_list %}
+              <li><i class="fa-solid fa-circle-check"></i><span>{{ point }}</span></li>
+              {% empty %}
               <li><i class="fa-solid fa-circle-check"></i><span>Promote your best-fit plans without forcing visitors into a generic template.</span></li>
               <li><i class="fa-solid fa-circle-check"></i><span>Surface support, billing, and portal access right away so fewer people get lost.</span></li>
               <li><i class="fa-solid fa-circle-check"></i><span>Keep content editable from the admin side instead of hardcoding every homepage change.</span></li>
+              {% endfor %}
             </ul>
           </div>
         </aside>
@@ -697,15 +823,15 @@
       <div class="shell">
         <div class="section-heading">
           <div>
-            <div class="section-eyebrow">Service Plans</div>
-            <h2 class="section-title">Straightforward options people can compare in one look.</h2>
+            <div class="section-eyebrow">{{ page.plans_section_eyebrow|default:'Service Plans' }}</div>
+            <h2 class="section-title">{{ page.plans_section_title|default:'Straightforward options people can compare in one look.' }}</h2>
           </div>
-          <p class="section-intro">Your plans are pulled directly from the landing admin panel. Featured packages float to the top visually so promos and anchor offers stand out without burying the essentials.</p>
+          <p class="section-intro">{{ page.plans_section_intro|default:'Your plans are pulled directly from the landing admin panel. Featured packages float to the top visually so promos and anchor offers stand out without burying the essentials.' }}</p>
         </div>
         <div class="plans-grid">
           {% for plan in plans %}
           <article class="plan-card {% if plan.is_featured %}featured{% endif %}">
-            {% if plan.is_featured %}<span class="plan-badge">Featured Plan</span>{% endif %}
+            {% if plan.is_featured %}<span class="plan-badge">{{ page.featured_plan_badge|default:'Featured Plan' }}</span>{% endif %}
             <h3 class="plan-name">{{ plan.name }}</h3>
             <div class="plan-speed">{{ plan.speed|default:'Custom speed profile available' }}</div>
             <div class="price">{{ plan.price|default:'Contact us' }}</div>
@@ -717,12 +843,16 @@
             </ul>
             {% else %}
             <ul class="plan-features">
+              {% for item in page.plan_fallback_feature_list %}
+              <li><i class="fa-solid fa-bolt"></i><span>{{ item }}</span></li>
+              {% empty %}
               <li><i class="fa-solid fa-bolt"></i><span>Flexible setup for homes, shops, and small offices</span></li>
               <li><i class="fa-solid fa-bolt"></i><span>Talk to the team for installation schedule and area availability</span></li>
+              {% endfor %}
             </ul>
             {% endif %}
             <div style="margin-top:auto; padding-top:10px;">
-              <a href="#contact" class="btn btn-secondary" style="width:100%;">Ask About This Plan</a>
+              <a href="#contact" class="btn btn-secondary" style="width:100%;">{{ page.plan_cta_label|default:'Ask About This Plan' }}</a>
             </div>
           </article>
           {% endfor %}
@@ -735,26 +865,26 @@
       <div class="shell">
         <div class="section-heading">
           <div>
-            <div class="section-eyebrow">Why Choose {{ isp_name }}</div>
-            <h2 class="section-title">The landing page should answer the questions people actually ask before they sign up.</h2>
+            <div class="section-eyebrow">{{ page.why_section_eyebrow|default:'Why Choose' }} {{ isp_name }}</div>
+            <h2 class="section-title">{{ page.why_section_title|default:'The landing page should answer the questions people actually ask before they sign up.' }}</h2>
           </div>
-          <p class="section-intro">This section keeps the message practical: what support feels like, how billing stays understandable, and how customers can manage their accounts after installation.</p>
+          <p class="section-intro">{{ page.why_section_intro|default:'This section keeps the message practical: what support feels like, how billing stays understandable, and how customers can manage their accounts after installation.' }}</p>
         </div>
         <div class="feature-grid">
           <article class="section-card">
-            <div class="section-eyebrow">Fast Support</div>
-            <h3>Local communication, not just a phone number on a poster.</h3>
-            <p>Surface your office line, support email, and service window clearly so expectations are set before a new subscriber even applies.</p>
+            <div class="section-eyebrow">{{ page.why_card_1_eyebrow|default:'Fast Support' }}</div>
+            <h3>{{ page.why_card_1_title|default:'Local communication, not just a phone number on a poster.' }}</h3>
+            <p>{{ page.why_card_1_body|default:'Surface your office line, support email, and service window clearly so expectations are set before a new subscriber even applies.' }}</p>
           </article>
           <article class="section-card">
-            <div class="section-eyebrow">Clear Billing</div>
-            <h3>Plans, due expectations, and portal access should feel easy to follow.</h3>
-            <p>Use the public site to reduce confusion around monthly packages, statements, and where subscribers can check their account details.</p>
+            <div class="section-eyebrow">{{ page.why_card_2_eyebrow|default:'Clear Billing' }}</div>
+            <h3>{{ page.why_card_2_title|default:'Plans, due expectations, and portal access should feel easy to follow.' }}</h3>
+            <p>{{ page.why_card_2_body|default:'Use the public site to reduce confusion around monthly packages, statements, and where subscribers can check their account details.' }}</p>
           </article>
           <article class="section-card">
-            <div class="section-eyebrow">Operational Ready</div>
-            <h3>Built to work with the same ISP Manager backend your team uses daily.</h3>
-            <p>The public site can point directly into the subscriber portal while your staff keeps dashboards, billing, and support workflows inside the system.</p>
+            <div class="section-eyebrow">{{ page.why_card_3_eyebrow|default:'Operational Ready' }}</div>
+            <h3>{{ page.why_card_3_title|default:'Built to work with the same ISP Manager backend your team uses daily.' }}</h3>
+            <p>{{ page.why_card_3_body|default:'The public site can point directly into the subscriber portal while your staff keeps dashboards, billing, and support workflows inside the system.' }}</p>
           </article>
         </div>
       </div>
@@ -764,20 +894,20 @@
       <div class="shell">
         <div class="section-heading">
           <div>
-            <div class="section-eyebrow">Availability and Reach</div>
-            <h2 class="section-title">Let visitors know where service is available and how to ask for installation.</h2>
+            <div class="section-eyebrow">{{ page.coverage_section_eyebrow|default:'Availability and Reach' }}</div>
+            <h2 class="section-title">{{ page.coverage_section_title|default:'Let visitors know where service is available and how to ask for installation.' }}</h2>
           </div>
-          <p class="section-intro">Even a simple availability section helps reduce repetitive chats. It gives your sales or support team a clearer starting point for inquiries.</p>
+          <p class="section-intro">{{ page.coverage_section_intro|default:'Even a simple availability section helps reduce repetitive chats. It gives your sales or support team a clearer starting point for inquiries.' }}</p>
         </div>
         <div class="coverage-grid">
           <article class="section-card">
             <div class="section-eyebrow">{{ page.coverage_title|default:'Areas We Serve' }}</div>
-            <h3>Coverage can start simple and still feel professional.</h3>
+            <h3>{{ page.coverage_card_title|default:'Coverage can start simple and still feel professional.' }}</h3>
             <p>{{ page.coverage_text|default:'List the barangays, subdivisions, puroks, sitios, or business areas where your network is already active. You can also mention nearby expansion targets so visitors know whether to inquire.' }}</p>
           </article>
           <article class="section-card">
-            <div class="section-eyebrow">Payment Channels</div>
-            <h3>Tell subscribers where payments can be settled.</h3>
+            <div class="section-eyebrow">{{ page.payment_section_eyebrow|default:'Payment Channels' }}</div>
+            <h3>{{ page.payment_section_title|default:'Tell subscribers where payments can be settled.' }}</h3>
             {% if page.payment_channel_list %}
             <ul class="payment-list">
               {% for channel in page.payment_channel_list %}
@@ -786,10 +916,112 @@
             </ul>
             {% else %}
             <ul class="payment-list">
+              {% for note in page.payment_empty_note_list %}
+              <li><i class="fa-solid fa-wallet"></i><span>{{ note }}</span></li>
+              {% empty %}
               <li><i class="fa-solid fa-wallet"></i><span>Add GCash, Maya, bank transfer, or office walk-in options from the landing page editor.</span></li>
               <li><i class="fa-solid fa-wallet"></i><span>If you support portal-based billing views, keep the portal button visible from the hero area too.</span></li>
+              {% endfor %}
             </ul>
             {% endif %}
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <div class="shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-eyebrow">{{ page.faq_section_eyebrow|default:'Frequently Asked Questions' }}</div>
+            <h2 class="section-title">{{ page.faq_section_title|default:'Answer the practical questions before someone has to ask by chat or phone.' }}</h2>
+          </div>
+          <p class="section-intro">{{ page.faq_section_intro|default:'This section is fully editable from the landing admin area. Use it to cover installation, billing, payments, due dates, service area, and support expectations.' }}</p>
+        </div>
+        {% if faqs %}
+        <div class="faq-list">
+          {% for faq in faqs %}
+          <details class="faq-item" {% if forloop.first %}open{% endif %}>
+            <summary>
+              <span>{{ faq.question }}</span>
+              <i class="fa-solid fa-plus"></i>
+            </summary>
+            <p>{{ faq.answer }}</p>
+          </details>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="section-card">
+          <div class="section-eyebrow">{{ page.faq_empty_eyebrow|default:'FAQ Placeholder' }}</div>
+          <h3>{{ page.faq_empty_title|default:'Start adding your most common ISP questions.' }}</h3>
+          <p>{{ page.faq_empty_body|default:'Examples: what areas are covered, how long installation takes, how billing due dates work, what happens when payment is late, and which payment channels are accepted.' }}</p>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="section" id="inquiry">
+      <div class="shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-eyebrow">{{ page.inquiry_section_eyebrow|default:'Inquiry Form' }}</div>
+            <h2 class="section-title">{{ page.inquiry_section_title|default:'Turn homepage traffic into real leads your team can follow up.' }}</h2>
+          </div>
+          <p class="section-intro">{{ page.inquiry_section_intro|default:'Keep the first contact simple. Ask for the basics, capture where the customer is located, and let the staff team handle availability confirmation after submission.' }}</p>
+        </div>
+        <div class="inquiry-grid">
+          <article class="inquiry-panel">
+            <div class="section-eyebrow">{{ page.inquiry_info_eyebrow|default:'What happens next' }}</div>
+            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.55rem; margin:8px 0 10px;">{{ page.inquiry_info_title|default:'Your team gets a cleaner starting point for every inquiry.' }}</h3>
+            <p style="color:var(--muted); line-height:1.8; margin:0;">{{ page.inquiry_info_body|default:'Every inquiry is saved inside the system so staff can review, contact, and update the lead status from the landing management area.' }}</p>
+            <ul class="inquiry-helper-list">
+              {% for point in page.inquiry_highlight_list %}
+              <li><i class="fa-solid fa-circle-check"></i><span>{{ point }}</span></li>
+              {% empty %}
+              <li><i class="fa-solid fa-circle-check"></i><span>Ask for the address or area so serviceability is easier to confirm.</span></li>
+              <li><i class="fa-solid fa-circle-check"></i><span>Let people choose a preferred plan, or leave it open if they still need guidance.</span></li>
+              <li><i class="fa-solid fa-circle-check"></i><span>Keep the form short to reduce hesitation and incomplete submissions.</span></li>
+              {% endfor %}
+            </ul>
+          </article>
+
+          <article class="inquiry-panel">
+            <form method="post" class="inquiry-form">
+              {% csrf_token %}
+              <div>
+                <label for="id_full_name">{{ page.inquiry_full_name_label|default:'Full Name' }}</label>
+                <input id="id_full_name" type="text" name="full_name" value="{{ inquiry_form.full_name.value|default:'' }}" placeholder="{{ page.inquiry_full_name_placeholder|default:'Juan Dela Cruz' }}">
+                {% for error in inquiry_form.full_name.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+              </div>
+              <div>
+                <label for="id_mobile_number">{{ page.inquiry_mobile_label|default:'Mobile Number' }}</label>
+                <input id="id_mobile_number" type="text" name="mobile_number" value="{{ inquiry_form.mobile_number.value|default:'' }}" placeholder="{{ page.inquiry_mobile_placeholder|default:'09XXXXXXXXX' }}">
+                {% for error in inquiry_form.mobile_number.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+              </div>
+              <div>
+                <label for="id_service_address">{{ page.inquiry_service_address_label|default:'Address or Service Area' }}</label>
+                <textarea id="id_service_address" name="service_address" rows="3" placeholder="{{ page.inquiry_service_address_placeholder|default:'Barangay, subdivision, or full address' }}">{{ inquiry_form.service_address.value|default:'' }}</textarea>
+                {% for error in inquiry_form.service_address.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+              </div>
+              <div>
+                <label for="id_preferred_plan">{{ page.inquiry_plan_label|default:'Preferred Plan' }}</label>
+                <select id="id_preferred_plan" name="preferred_plan">
+                  {% for value, label in inquiry_form.fields.preferred_plan.choices %}
+                  <option value="{{ value }}" {% if inquiry_form.preferred_plan.value == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+                {% for error in inquiry_form.preferred_plan.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+              </div>
+              <div>
+                <label for="id_message">{{ page.inquiry_message_label|default:'Message' }}</label>
+                <textarea id="id_message" name="message" rows="3" placeholder="{{ page.inquiry_message_placeholder|default:'Share anything helpful: preferred installation date, landmark, or service concern.' }}">{{ inquiry_form.message.value|default:'' }}</textarea>
+                {% for error in inquiry_form.message.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+              </div>
+              {% if inquiry_form.non_field_errors %}
+              <div class="field-error">{{ inquiry_form.non_field_errors|join:', ' }}</div>
+              {% endif %}
+              <button type="submit" class="btn btn-primary" style="width:100%;">{{ page.inquiry_submit_label|default:'Send Inquiry' }} <i class="fa-solid fa-paper-plane"></i></button>
+            </form>
           </article>
         </div>
       </div>
@@ -799,15 +1031,15 @@
       <div class="shell">
         <div class="section-heading">
           <div>
-            <div class="section-eyebrow">Contact and Support</div>
-            <h2 class="section-title">Give people one obvious place to reach you.</h2>
+            <div class="section-eyebrow">{{ page.contact_section_eyebrow|default:'Contact and Support' }}</div>
+            <h2 class="section-title">{{ page.contact_section_title|default:'Give people one obvious place to reach you.' }}</h2>
           </div>
-          <p class="section-intro">The public homepage should make contact effortless. Phone, email, address, support hours, and portal access all belong here so both prospects and subscribers know where to go.</p>
+          <p class="section-intro">{{ page.contact_section_intro|default:'The public homepage should make contact effortless. Phone, email, address, support hours, and portal access all belong here so both prospects and subscribers know where to go.' }}</p>
         </div>
         <div class="contact-grid">
           <article class="contact-card">
-            <div class="section-eyebrow">Contact Details</div>
-            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; margin:8px 0 10px;">Talk to the team.</h3>
+            <div class="section-eyebrow">{{ page.contact_card_eyebrow|default:'Contact Details' }}</div>
+            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; margin:8px 0 10px;">{{ page.contact_card_title|default:'Talk to the team.' }}</h3>
             <ul class="contact-list">
               {% if page.contact_phone %}<li><i class="fa-solid fa-phone"></i><span>{{ page.contact_phone }}</span></li>{% endif %}
               {% if page.contact_email %}<li><i class="fa-solid fa-envelope"></i><span>{{ page.contact_email }}</span></li>{% endif %}
@@ -816,20 +1048,20 @@
             </ul>
           </article>
           <article class="contact-card">
-            <div class="section-eyebrow">About {{ isp_name }}</div>
-            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; margin:8px 0 10px;">Tell the story behind the network.</h3>
+            <div class="section-eyebrow">{{ page.about_card_eyebrow|default:'About' }} {{ isp_name }}</div>
+            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; margin:8px 0 10px;">{{ page.about_card_title|default:'Tell the story behind the network.' }}</h3>
             <p style="color:var(--muted); line-height:1.8; margin:0;">{{ page.about_text|default:'Use this space to explain who you serve, how your team supports installations and billing concerns, and what kind of subscriber experience people can expect once they are connected.' }}</p>
           </article>
         </div>
 
         <div class="cta-banner">
           <div>
-            <h3>Ready to turn this into your real public homepage?</h3>
-            <p>Keep `/` as the site front door, send existing subscribers to the portal, and let the internal team stay focused on dashboards, billing, routers, and support operations.</p>
+            <h3>{{ page.cta_banner_title|default:'Ready to turn this into your real public homepage?' }}</h3>
+            <p>{{ page.cta_banner_body|default:'Keep `/` as the site front door, send existing subscribers to the portal, and let the internal team stay focused on dashboards, billing, routers, and support operations.' }}</p>
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:12px;">
             <a href="{{ primary_url }}" class="btn btn-primary">{{ primary_label }}</a>
-            <a href="{{ portal_url }}" class="btn btn-secondary">Subscriber Portal</a>
+            <a href="{{ portal_url }}" class="btn btn-secondary">{{ secondary_label }}</a>
           </div>
         </div>
       </div>

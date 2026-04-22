@@ -7,7 +7,7 @@
 <div class="flex items-center justify-between mb-6">
   <div>
     <h2 class="text-2xl font-bold text-gray-800">Edit: {{ page.get_page_type_display }}</h2>
-    <p class="text-sm text-gray-500 mt-1">Tune the public-facing content, calls to action, and trust sections for your ISP site.</p>
+    <p class="text-sm text-gray-500 mt-1">Tune the public-facing content, calls to action, metadata, and operational copy for your ISP site.</p>
   </div>
   <a href="{% url 'landing-publish' page_type=page_type %}"
     class="{% if page.is_published %}bg-yellow-500 hover:bg-yellow-600{% else %}bg-green-600 hover:bg-green-700{% endif %} text-white text-sm font-semibold px-4 py-2 rounded-lg transition">
@@ -19,142 +19,510 @@
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
   <div class="xl:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-6">
     <h3 class="font-semibold text-gray-700 mb-4">Page Content</h3>
-    <form method="post" class="space-y-5">
+    <form method="post" class="space-y-8">
       {% csrf_token %}
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Hero Badge</label>
-          <input type="text" name="hero_badge" value="{{ page.hero_badge }}"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Neighborhood Fiber and Wireless Internet">
+      <section class="space-y-4">
+        <h4 class="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-2">Core Branding</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Hero Badge</label>
+            <input type="text" name="hero_badge" value="{{ page.hero_badge }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Neighborhood Fiber and Wireless Internet">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Primary Color</label>
+            <input type="color" name="primary_color" value="{{ page.primary_color }}" class="h-10 w-24 border border-gray-300 rounded-lg cursor-pointer">
+          </div>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Primary Color</label>
-          <input type="color" name="primary_color" value="{{ page.primary_color }}"
-            class="h-10 w-24 border border-gray-300 rounded-lg cursor-pointer">
-        </div>
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Hero Title</label>
-        <input type="text" name="hero_title" value="{{ page.hero_title }}"
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="Fast, reliable internet for homes, shops, and growing teams.">
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Hero Subtitle</label>
-        <textarea name="hero_subtitle" rows="3"
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="Highlight your service promise, response time, and why people should choose your ISP.">{{ page.hero_subtitle }}</textarea>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Primary CTA Label</label>
-          <input type="text" name="hero_primary_cta_label" value="{{ page.hero_primary_cta_label }}"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="See Plans">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Hero Title</label>
+          <input type="text" name="hero_title" value="{{ page.hero_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Fast, reliable internet for homes, shops, and growing teams.">
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Primary CTA URL</label>
-          <input type="text" name="hero_primary_cta_url" value="{{ page.hero_primary_cta_url }}"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="#plans or /subscribers/portal/">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Hero Subtitle</label>
+          <textarea name="hero_subtitle" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Highlight your service promise, response time, and why people should choose your ISP.">{{ page.hero_subtitle }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Primary CTA Label</label>
+            <input type="text" name="hero_primary_cta_label" value="{{ page.hero_primary_cta_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="See Plans">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Primary CTA URL</label>
+            <input type="text" name="hero_primary_cta_url" value="{{ page.hero_primary_cta_url }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="#plans or /subscribers/portal/">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Secondary CTA Label</label>
+            <input type="text" name="hero_secondary_cta_label" value="{{ page.hero_secondary_cta_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Subscriber Portal">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Secondary CTA URL</label>
+            <input type="text" name="hero_secondary_cta_url" value="{{ page.hero_secondary_cta_url }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="/subscribers/portal/">
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Hero Plans Stat Label</label>
+            <input type="text" name="hero_stat_plans_label" value="{{ page.hero_stat_plans_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Published plan options ready for comparison">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Hero Support Stat Label</label>
+            <input type="text" name="hero_stat_support_label" value="{{ page.hero_stat_support_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Support window you can highlight for subscribers">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Hero Portal Stat Value</label>
+            <input type="text" name="hero_stat_portal_value" value="{{ page.hero_stat_portal_value }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="24/7">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Hero Portal Stat Label</label>
+            <input type="text" name="hero_stat_portal_label" value="{{ page.hero_stat_portal_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Subscriber portal access for viewing bills and account activity">
+          </div>
+        </div>
+      </section>
+
+      <section class="space-y-4">
+        <h4 class="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-2">Navigation and Form Labels</h4>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Nav Plans Label</label>
+            <input type="text" name="nav_plans_label" value="{{ page.nav_plans_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Plans">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Nav Why Us Label</label>
+            <input type="text" name="nav_why_us_label" value="{{ page.nav_why_us_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Why Us">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Nav Coverage Label</label>
+            <input type="text" name="nav_coverage_label" value="{{ page.nav_coverage_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Coverage">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Nav Contact Label</label>
+            <input type="text" name="nav_contact_label" value="{{ page.nav_contact_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Contact">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Admin Login Label</label>
+            <input type="text" name="admin_login_label" value="{{ page.admin_login_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Admin Login">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Dashboard Label</label>
+            <input type="text" name="dashboard_label" value="{{ page.dashboard_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Dashboard">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Logout Label</label>
+            <input type="text" name="logout_label" value="{{ page.logout_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Logout">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Portal Button Label</label>
+            <input type="text" name="portal_button_label" value="{{ page.portal_button_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="My Account">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Portal Nav Label</label>
+            <input type="text" name="portal_nav_label" value="{{ page.portal_nav_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Subscriber Portal">
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Full Name Label</label>
+            <input type="text" name="inquiry_full_name_label" value="{{ page.inquiry_full_name_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Full Name">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Full Name Placeholder</label>
+            <input type="text" name="inquiry_full_name_placeholder" value="{{ page.inquiry_full_name_placeholder }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Juan Dela Cruz">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Mobile Label</label>
+            <input type="text" name="inquiry_mobile_label" value="{{ page.inquiry_mobile_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Mobile Number">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Mobile Placeholder</label>
+            <input type="text" name="inquiry_mobile_placeholder" value="{{ page.inquiry_mobile_placeholder }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="09XXXXXXXXX">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Address Label</label>
+            <input type="text" name="inquiry_service_address_label" value="{{ page.inquiry_service_address_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Address or Service Area">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Address Placeholder</label>
+            <input type="text" name="inquiry_service_address_placeholder" value="{{ page.inquiry_service_address_placeholder }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Barangay, subdivision, or full address">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Preferred Plan Label</label>
+            <input type="text" name="inquiry_plan_label" value="{{ page.inquiry_plan_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Preferred Plan">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Message Label</label>
+            <input type="text" name="inquiry_message_label" value="{{ page.inquiry_message_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Message">
+          </div>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Secondary CTA Label</label>
-          <input type="text" name="hero_secondary_cta_label" value="{{ page.hero_secondary_cta_label }}"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Subscriber Portal">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Message Placeholder</label>
+          <input type="text" name="inquiry_message_placeholder" value="{{ page.inquiry_message_placeholder }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Share anything helpful: preferred installation date, landmark, or service concern.">
+        </div>
+      </section>
+
+      <section class="space-y-4">
+        <h4 class="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-2">Search / Social Metadata</h4>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Meta Title</label>
+          <input type="text" name="meta_title" value="{{ page.meta_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Homepage title for browser tabs and search results">
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Secondary CTA URL</label>
-          <input type="text" name="hero_secondary_cta_url" value="{{ page.hero_secondary_cta_url }}"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="/subscribers/portal/">
-        </div>
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Announcement</label>
-        <textarea name="announcement" rows="2"
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="Maintenance notice, promo, or urgent advisory.">{{ page.announcement }}</textarea>
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">About / Description</label>
-        <textarea name="about_text" rows="5"
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="Tell visitors who you serve, what makes your network reliable, and what support experience they can expect.">{{ page.about_text }}</textarea>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Coverage Section Title</label>
-          <input type="text" name="coverage_title" value="{{ page.coverage_title }}"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Areas We Serve">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Meta Description</label>
+          <textarea name="meta_description" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Short summary for search engines and previews">{{ page.meta_description }}</textarea>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Support Hours</label>
-          <input type="text" name="support_hours" value="{{ page.support_hours }}"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Mon-Sat, 8:00 AM to 6:00 PM">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Meta Keywords</label>
+          <input type="text" name="meta_keywords" value="{{ page.meta_keywords }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="fiber internet, wireless internet, local isp, subscriber portal">
         </div>
-      </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">OG Title</label>
+            <input type="text" name="og_title" value="{{ page.og_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Title for social sharing cards">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">OG Description</label>
+            <textarea name="og_description" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Description for social sharing cards">{{ page.og_description }}</textarea>
+          </div>
+        </div>
+      </section>
 
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Coverage / Availability Text</label>
-        <textarea name="coverage_text" rows="3"
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="List barangays, subdivisions, or towns where service is available.">{{ page.coverage_text }}</textarea>
-      </div>
-
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Payment Channels</label>
-        <textarea name="payment_channels" rows="3"
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="GCash&#10;Maya&#10;Bank Transfer&#10;Office Walk-in">{{ page.payment_channels }}</textarea>
-        <p class="text-xs text-gray-400 mt-1">One payment channel per line.</p>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <section class="space-y-4">
+        <h4 class="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-2">Announcements and Contact</h4>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Contact Phone</label>
-          <input type="text" name="contact_phone" value="{{ page.contact_phone }}"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Announcement</label>
+          <textarea name="announcement" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Maintenance notice, promo, or urgent advisory.">{{ page.announcement }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Support Hours</label>
+            <input type="text" name="support_hours" value="{{ page.support_hours }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Mon-Sat, 8:00 AM to 6:00 PM">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Contact Phone</label>
+            <input type="text" name="contact_phone" value="{{ page.contact_phone }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
+            <input type="email" name="contact_email" value="{{ page.contact_email }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Footer Text</label>
+            <input type="text" name="footer_text" value="{{ page.footer_text }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Reliable internet for every household and business.">
+          </div>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
-          <input type="email" name="contact_email" value="{{ page.contact_email }}"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Contact Address</label>
+          <textarea name="contact_address" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ page.contact_address }}</textarea>
         </div>
-      </div>
+      </section>
 
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Contact Address</label>
-        <textarea name="contact_address" rows="2"
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ page.contact_address }}</textarea>
-      </div>
+      <section class="space-y-4">
+        <h4 class="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-2">Promise, Quick Actions, and Operations Copy</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Network Promise Eyebrow</label>
+            <input type="text" name="network_promise_eyebrow" value="{{ page.network_promise_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Network Promise">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Quick Actions Eyebrow</label>
+            <input type="text" name="quick_actions_eyebrow" value="{{ page.quick_actions_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Quick Actions">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Network Promise Title</label>
+          <input type="text" name="network_promise_title" value="{{ page.network_promise_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Fast answers matter as much as fast speeds.">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Network Promise Body</label>
+          <textarea name="network_promise_body" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Use this homepage to set expectations clearly...">{{ page.network_promise_body }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Quick Link Portal Title</label>
+            <input type="text" name="quick_link_portal_title" value="{{ page.quick_link_portal_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Subscriber Portal">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Quick Link Portal Text</label>
+            <input type="text" name="quick_link_portal_text" value="{{ page.quick_link_portal_text }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="View balances, account details, and payment-related access">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Quick Link Plans Title</label>
+            <input type="text" name="quick_link_plans_title" value="{{ page.quick_link_plans_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Compare Plans">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Quick Link Plans Text</label>
+            <input type="text" name="quick_link_plans_text" value="{{ page.quick_link_plans_text }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Show your featured offer and monthly pricing up front">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Quick Link Contact Title</label>
+            <input type="text" name="quick_link_contact_title" value="{{ page.quick_link_contact_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Contact Us">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Quick Link Contact Text</label>
+            <input type="text" name="quick_link_contact_text" value="{{ page.quick_link_contact_text }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Share your office line, mobile, or messenger handoff here">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Operations Eyebrow</label>
+          <input type="text" name="operations_eyebrow" value="{{ page.operations_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Built for ISP Operations">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Operations Highlight Points</label>
+          <textarea name="operations_points" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="One highlight per line">{{ page.operations_points }}</textarea>
+          <p class="text-xs text-gray-400 mt-1">One point per line.</p>
+        </div>
+      </section>
 
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Footer Text</label>
-        <input type="text" name="footer_text" value="{{ page.footer_text }}"
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="Reliable internet for every household and business.">
-      </div>
+      <section class="space-y-4">
+        <h4 class="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-2">Plans and Why Us</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Plans Eyebrow</label>
+            <input type="text" name="plans_section_eyebrow" value="{{ page.plans_section_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Service Plans">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Featured Plan Badge</label>
+            <input type="text" name="featured_plan_badge" value="{{ page.featured_plan_badge }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Featured Plan">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Plans Title</label>
+          <input type="text" name="plans_section_title" value="{{ page.plans_section_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Straightforward options people can compare in one look.">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Plans Intro</label>
+          <textarea name="plans_section_intro" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ page.plans_section_intro }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Plan CTA Label</label>
+            <input type="text" name="plan_cta_label" value="{{ page.plan_cta_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ask About This Plan">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Fallback Plan Features</label>
+            <textarea name="plan_fallback_features" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="One fallback feature per line">{{ page.plan_fallback_features }}</textarea>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Why Section Eyebrow</label>
+            <input type="text" name="why_section_eyebrow" value="{{ page.why_section_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Why Choose Your ISP">
+          </div>
+          <div class="md:col-span-2">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Why Section Title</label>
+            <input type="text" name="why_section_title" value="{{ page.why_section_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="The landing page should answer the questions people actually ask before they sign up.">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Why Section Intro</label>
+          <textarea name="why_section_intro" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ page.why_section_intro }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="space-y-2">
+            <input type="text" name="why_card_1_eyebrow" value="{{ page.why_card_1_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Fast Support">
+            <input type="text" name="why_card_1_title" value="{{ page.why_card_1_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Card 1 title">
+            <textarea name="why_card_1_body" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Card 1 body">{{ page.why_card_1_body }}</textarea>
+          </div>
+          <div class="space-y-2">
+            <input type="text" name="why_card_2_eyebrow" value="{{ page.why_card_2_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Clear Billing">
+            <input type="text" name="why_card_2_title" value="{{ page.why_card_2_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Card 2 title">
+            <textarea name="why_card_2_body" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Card 2 body">{{ page.why_card_2_body }}</textarea>
+          </div>
+          <div class="space-y-2">
+            <input type="text" name="why_card_3_eyebrow" value="{{ page.why_card_3_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Operational Ready">
+            <input type="text" name="why_card_3_title" value="{{ page.why_card_3_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Card 3 title">
+            <textarea name="why_card_3_body" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Card 3 body">{{ page.why_card_3_body }}</textarea>
+          </div>
+        </div>
+      </section>
 
-      <button type="submit"
-        class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+      <section class="space-y-4">
+        <h4 class="text-sm font-semibold text-gray-700 border-b border-gray-100 pb-2">Coverage, FAQ, Inquiry, and CTA Banner</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Coverage Section Eyebrow</label>
+            <input type="text" name="coverage_section_eyebrow" value="{{ page.coverage_section_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Availability and Reach">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Coverage Section Title</label>
+            <input type="text" name="coverage_section_title" value="{{ page.coverage_section_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Let visitors know where service is available and how to ask for installation.">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Coverage Section Intro</label>
+          <textarea name="coverage_section_intro" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ page.coverage_section_intro }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Coverage Card Eyebrow</label>
+            <input type="text" name="coverage_title" value="{{ page.coverage_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Areas We Serve">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Coverage Card Title</label>
+            <input type="text" name="coverage_card_title" value="{{ page.coverage_card_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Coverage can start simple and still feel professional.">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Coverage / Availability Text</label>
+          <textarea name="coverage_text" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ page.coverage_text }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Payment Section Eyebrow</label>
+            <input type="text" name="payment_section_eyebrow" value="{{ page.payment_section_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Payment Channels">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Payment Section Title</label>
+            <input type="text" name="payment_section_title" value="{{ page.payment_section_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Tell subscribers where payments can be settled.">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Payment Channels</label>
+          <textarea name="payment_channels" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="GCash&#10;Maya&#10;Bank Transfer&#10;Office Walk-in">{{ page.payment_channels }}</textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Payment Empty Notes</label>
+          <textarea name="payment_empty_notes" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="One fallback note per line">{{ page.payment_empty_notes }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">FAQ Section Eyebrow</label>
+            <input type="text" name="faq_section_eyebrow" value="{{ page.faq_section_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Frequently Asked Questions">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">FAQ Section Title</label>
+            <input type="text" name="faq_section_title" value="{{ page.faq_section_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">FAQ Section Intro</label>
+          <textarea name="faq_section_intro" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ page.faq_section_intro }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">FAQ Empty Eyebrow</label>
+            <input type="text" name="faq_empty_eyebrow" value="{{ page.faq_empty_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="FAQ Placeholder">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">FAQ Empty Title</label>
+            <input type="text" name="faq_empty_title" value="{{ page.faq_empty_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">FAQ Empty Body</label>
+            <textarea name="faq_empty_body" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ page.faq_empty_body }}</textarea>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Inquiry Section Eyebrow</label>
+            <input type="text" name="inquiry_section_eyebrow" value="{{ page.inquiry_section_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Inquiry Form">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Inquiry Section Title</label>
+            <input type="text" name="inquiry_section_title" value="{{ page.inquiry_section_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Inquiry Section Intro</label>
+          <textarea name="inquiry_section_intro" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ page.inquiry_section_intro }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Inquiry Info Eyebrow</label>
+            <input type="text" name="inquiry_info_eyebrow" value="{{ page.inquiry_info_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="What happens next">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Inquiry Info Title</label>
+            <input type="text" name="inquiry_info_title" value="{{ page.inquiry_info_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Inquiry Submit Button</label>
+            <input type="text" name="inquiry_submit_label" value="{{ page.inquiry_submit_label }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Send Inquiry">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Inquiry Info Body</label>
+          <textarea name="inquiry_info_body" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ page.inquiry_info_body }}</textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Inquiry Highlight Points</label>
+          <textarea name="inquiry_highlights" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="One highlight per line">{{ page.inquiry_highlights }}</textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Inquiry Success Message</label>
+          <input type="text" name="inquiry_success_message" value="{{ page.inquiry_success_message }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Inquiry received. Our team will reach out soon.">
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Contact Section Eyebrow</label>
+            <input type="text" name="contact_section_eyebrow" value="{{ page.contact_section_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Contact and Support">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Contact Section Title</label>
+            <input type="text" name="contact_section_title" value="{{ page.contact_section_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Contact Section Intro</label>
+          <textarea name="contact_section_intro" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ page.contact_section_intro }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Contact Card Eyebrow</label>
+            <input type="text" name="contact_card_eyebrow" value="{{ page.contact_card_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Contact Details">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Contact Card Title</label>
+            <input type="text" name="contact_card_title" value="{{ page.contact_card_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Talk to the team.">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">About Card Eyebrow</label>
+            <input type="text" name="about_card_eyebrow" value="{{ page.about_card_eyebrow }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="About ISP Name">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">About Card Title</label>
+            <input type="text" name="about_card_title" value="{{ page.about_card_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Tell the story behind the network.">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">About / Description</label>
+          <textarea name="about_text" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ page.about_text }}</textarea>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">CTA Banner Title</label>
+            <input type="text" name="cta_banner_title" value="{{ page.cta_banner_title }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">CTA Banner Body</label>
+            <textarea name="cta_banner_body" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">{{ page.cta_banner_body }}</textarea>
+          </div>
+        </div>
+      </section>
+
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
         Save Content
       </button>
     </form>
   </div>
 
   <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+    <div class="mb-6">
+      <h3 class="font-semibold text-gray-700 mb-3">Landing Tools</h3>
+      <div class="grid grid-cols-1 gap-3">
+        <a href="{% url 'landing-faq-list' page_type=page_type %}" class="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700 hover:border-blue-200 hover:bg-blue-50">
+          <span>Manage FAQs</span>
+          <i class="fa fa-arrow-right text-gray-400"></i>
+        </a>
+        {% if page_type == 'homepage' %}
+        <a href="{% url 'landing-inquiry-list' %}" class="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700 hover:border-blue-200 hover:bg-blue-50">
+          <span>Review Public Inquiries</span>
+          <i class="fa fa-arrow-right text-gray-400"></i>
+        </a>
+        {% endif %}
+      </div>
+    </div>
+
     <h3 class="font-semibold text-gray-700 mb-4">Plans ({{ plans|length }})</h3>
     {% for plan in plans %}
     <div class="border border-gray-100 rounded-lg p-3 mb-3 flex items-start justify-between gap-4">
@@ -163,9 +531,7 @@
         <p class="text-xs text-gray-500">{{ plan.speed }} | {{ plan.price }}</p>
         {% if plan.is_featured %}<span class="text-xs text-blue-600">Featured</span>{% endif %}
       </div>
-      <a href="{% url 'landing-plan-delete' pk=plan.pk %}"
-        onclick="return confirm('Remove this plan?')"
-        class="text-red-400 hover:text-red-600 text-xs">Remove</a>
+      <a href="{% url 'landing-plan-delete' pk=plan.pk %}" onclick="return confirm('Remove this plan?')" class="text-red-400 hover:text-red-600 text-xs">Remove</a>
     </div>
     {% empty %}
     <p class="text-sm text-gray-400 mb-4">No plans added yet.</p>
@@ -175,22 +541,16 @@
       {% csrf_token %}
       <p class="text-sm font-medium text-gray-700">Add Plan</p>
       <div class="grid grid-cols-2 gap-2">
-        <input type="text" name="name" placeholder="Plan Name" required
-          class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <input type="text" name="speed" placeholder="e.g. 50 Mbps"
-          class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <input type="text" name="price" placeholder="e.g. PHP 1499/mo"
-          class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <input type="number" name="sort_order" placeholder="Order" value="0"
-          class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="text" name="name" placeholder="Plan Name" required class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="text" name="speed" placeholder="e.g. 50 Mbps" class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="text" name="price" placeholder="e.g. PHP 1499/mo" class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="number" name="sort_order" placeholder="Order" value="0" class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
-      <textarea name="features" rows="4" placeholder="Feature per line..."
-        class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+      <textarea name="features" rows="4" placeholder="Feature per line..." class="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
       <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
         <input type="checkbox" name="is_featured" class="rounded"> Featured plan
       </label>
-      <button type="submit"
-        class="bg-gray-700 hover:bg-gray-800 text-white font-semibold px-4 py-1.5 rounded-lg text-sm transition">
+      <button type="submit" class="bg-gray-700 hover:bg-gray-800 text-white font-semibold px-4 py-1.5 rounded-lg text-sm transition">
         Add Plan
       </button>
     </form>

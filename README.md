@@ -82,6 +82,9 @@ Project documentation starts here:
 - [Overdue Palugit Implementation Plan](docs/25_overdue_grace_workflow_implementation_plan.md)
 - [Overdue Grace Implementation Notes](docs/26_overdue_grace_implementation_notes.md)
 - [Landing Public Homepage and Admin Auth Update](docs/27_landing_public_homepage_and_auth.md)
+- [Landing V2 Core Discussion](docs/28_landing_v2_core_discussion.md)
+- [Landing V2 Core Implementation Plan](docs/29_landing_v2_core_implementation_plan.md)
+- [Landing V2 Core Implementation Notes](docs/30_landing_v2_core_implementation_notes.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 
 ## Current Product Direction

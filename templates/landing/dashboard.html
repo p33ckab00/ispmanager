@@ -46,4 +46,38 @@
     </div>
   </div>
 </div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+    <div class="flex items-start justify-between mb-3">
+      <div>
+        <h3 class="font-semibold text-gray-800">Homepage FAQs</h3>
+        <p class="text-sm text-gray-500 mt-1">Manage the public FAQ section for the homepage.</p>
+      </div>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-blue-50 text-blue-700">
+        {{ homepage_faq_count }} item{{ homepage_faq_count|pluralize }}
+      </span>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <a href="{% url 'landing-faq-list' page_type='homepage' %}" class="flex-1 text-center bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg">Manage FAQs</a>
+      <a href="{% url 'public-homepage' %}#faq" target="_blank" class="flex-1 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-sm font-semibold py-2 rounded-lg">Preview FAQ</a>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+    <div class="flex items-start justify-between mb-3">
+      <div>
+        <h3 class="font-semibold text-gray-800">Public Inquiries</h3>
+        <p class="text-sm text-gray-500 mt-1">Track leads and update inquiry statuses from the website.</p>
+      </div>
+      <span class="px-2 py-0.5 rounded-full text-xs {% if homepage_new_inquiry_count %}bg-amber-100 text-amber-700{% else %}bg-gray-100 text-gray-500{% endif %}">
+        {{ homepage_new_inquiry_count }} new
+      </span>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <a href="{% url 'landing-inquiry-list' %}" class="flex-1 text-center bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg">View Inquiries</a>
+      <a href="{% url 'public-homepage' %}#inquiry" target="_blank" class="flex-1 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-sm font-semibold py-2 rounded-lg">Preview Form</a>
+    </div>
+  </div>
+</div>
 {% endblock %}

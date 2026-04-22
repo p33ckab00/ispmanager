@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Landing Inquiries - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4 flex items-center justify-between gap-4">
+  <div>
+    <a href="{% url 'landing-dashboard' %}" class="text-sm text-blue-600 hover:underline"><i class="fa fa-arrow-left mr-1"></i> Back</a>
+    <h2 class="text-2xl font-bold text-gray-800 mt-2">Public Inquiries</h2>
+    <p class="text-sm text-gray-500 mt-1">Review leads submitted from the public homepage and update their status.</p>
+  </div>
+  <a href="{% url 'public-homepage' %}#inquiry" target="_blank" class="bg-gray-50 hover:bg-gray-100 text-gray-600 text-sm font-semibold px-4 py-2 rounded-lg">Preview Form</a>
+</div>
+{% include "partials/messages.html" %}
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6 mb-6">
+  <form method="get" class="flex flex-wrap gap-3 items-end">
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+      <select name="status" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <option value="">All</option>
+        {% for value, label in status_choices %}
+        <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Filter</button>
+  </form>
+</div>
+
+<div class="space-y-4">
+  {% for inquiry in inquiries %}
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
+    <div class="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-6">
+      <div>
+        <div class="flex flex-wrap items-center gap-3 mb-3">
+          <h3 class="text-lg font-semibold text-gray-800">{{ inquiry.full_name }}</h3>
+          <span class="px-2 py-0.5 rounded-full text-xs {% if inquiry.status == 'new' %}bg-amber-100 text-amber-700{% elif inquiry.status == 'contacted' %}bg-blue-100 text-blue-700{% else %}bg-green-100 text-green-700{% endif %}">{{ inquiry.get_status_display }}</span>
+          <span class="text-xs text-gray-400">{{ inquiry.created_at|date:"M d, Y h:i A" }}</span>
+        </div>
+        <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-600">
+          <div>
+            <dt class="font-medium text-gray-700">Mobile Number</dt>
+            <dd>{{ inquiry.mobile_number }}</dd>
+          </div>
+          <div>
+            <dt class="font-medium text-gray-700">Preferred Plan</dt>
+            <dd>{{ inquiry.preferred_plan|default:'Not specified' }}</dd>
+          </div>
+          <div class="md:col-span-2">
+            <dt class="font-medium text-gray-700">Service Address</dt>
+            <dd class="whitespace-pre-line">{{ inquiry.service_address }}</dd>
+          </div>
+          <div class="md:col-span-2">
+            <dt class="font-medium text-gray-700">Message</dt>
+            <dd class="whitespace-pre-line">{{ inquiry.message|default:'No additional message.' }}</dd>
+          </div>
+        </dl>
+      </div>
+      <div>
+        <form method="post" action="{% url 'landing-inquiry-update' pk=inquiry.pk %}" class="space-y-3 min-w-[220px]">
+          {% csrf_token %}
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Update Status</label>
+            <select name="status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              {% for value, label in status_choices %}
+              <option value="{{ value }}" {% if inquiry.status == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Save Status</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <div class="bg-white rounded-xl border border-dashed border-gray-300 shadow-sm p-10 text-center text-sm text-gray-500">
+    No inquiries found for this filter yet.
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
