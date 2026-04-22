@@ -25,6 +25,8 @@
     </div>
   </div>
 
+  {% include "partials/messages.html" %}
+
   {% if alerts %}
   <section class="rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div class="border-b border-slate-100 px-5 py-4">
@@ -75,6 +77,184 @@
       <p class="mt-4 text-sm leading-6 text-slate-500">{{ card.meta }}</p>
     </div>
     {% endfor %}
+  </section>
+
+  <section class="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div class="border-b border-slate-100 px-5 py-4">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h3 class="text-lg font-semibold text-slate-900">Incident Workflow</h3>
+            <p class="mt-1 text-sm text-slate-500">Persistent diagnostics incidents stay visible until they are acknowledged or automatically resolved when the underlying condition clears.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            {% for filter in incidents.filters %}
+            <a href="/diagnostics/?incidents={{ filter.key }}" class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset {% if filter.active %}{{ filter.classes }}{% else %}bg-white text-slate-600 ring-slate-200 hover:bg-slate-50{% endif %}">
+              {{ filter.label }}
+              <span class="rounded-full bg-current/10 px-1.5 py-0.5 text-[10px] font-bold">{{ filter.count }}</span>
+            </a>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="grid gap-4 border-b border-slate-100 p-5 md:grid-cols-3">
+        <div class="rounded-2xl border border-slate-200 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Active</p>
+          <p class="mt-2 text-2xl font-bold text-rose-700">{{ incidents.active_count }}</p>
+          <p class="mt-1 text-sm text-slate-500">Need operator attention now</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Acknowledged</p>
+          <p class="mt-2 text-2xl font-bold text-amber-700">{{ incidents.acknowledged_count }}</p>
+          <p class="mt-1 text-sm text-slate-500">Seen and currently owned</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Resolved Today</p>
+          <p class="mt-2 text-2xl font-bold text-emerald-700">{{ incidents.resolved_today_count }}</p>
+          <p class="mt-1 text-sm text-slate-500">Conditions that cleared today</p>
+        </div>
+      </div>
+      <div class="divide-y divide-slate-100">
+        {% for row in incidents.rows %}
+        <div class="px-5 py-4">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset {{ row.severity_classes }}">{{ row.incident.severity|title }}</span>
+                <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset {{ row.status_classes }}">{{ row.incident.status|title }}</span>
+                <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{{ row.incident.source|title }}</span>
+              </div>
+              <h4 class="mt-3 text-base font-semibold text-slate-900">{{ row.incident.title }}</h4>
+              <p class="mt-2 text-sm leading-6 text-slate-600">{{ row.incident.detail }}</p>
+              <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                <span>First seen {{ row.incident.first_seen_at|date:"M d, Y H:i:s" }}</span>
+                <span>Last seen {{ row.incident.last_seen_at|timesince }} ago</span>
+                {% if row.incident.acknowledged_at %}
+                <span>Acknowledged {{ row.incident.acknowledged_at|timesince }} ago{% if row.incident.acknowledged_by %} by {{ row.incident.acknowledged_by.username }}{% endif %}</span>
+                {% endif %}
+                {% if row.incident.resolved_at %}
+                <span>Resolved {{ row.incident.resolved_at|timesince }} ago</span>
+                {% endif %}
+              </div>
+              {% if row.incident.resolution_note %}
+              <p class="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-6 text-slate-600">
+                <span class="font-semibold text-slate-700">Resolution note:</span>
+                {{ row.incident.resolution_note }}
+              </p>
+              {% endif %}
+            </div>
+            <div class="flex w-full shrink-0 flex-col gap-2 xl:w-56">
+              {% if row.can_acknowledge %}
+              <form method="post" action="/diagnostics/incidents/{{ row.incident.pk }}/acknowledge/">
+                {% csrf_token %}
+                <input type="hidden" name="incident_filter" value="{{ incidents.current_filter }}">
+                <button type="submit" class="w-full rounded-xl bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-100">
+                  Acknowledge
+                </button>
+              </form>
+              {% endif %}
+              {% if row.can_resolve %}
+              <form method="post" action="/diagnostics/incidents/{{ row.incident.pk }}/resolve/" class="space-y-2">
+                {% csrf_token %}
+                <input type="hidden" name="incident_filter" value="{{ incidents.current_filter }}">
+                <textarea name="resolution_note" rows="2" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 placeholder:text-slate-400 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-100" placeholder="Optional resolution note for this incident."></textarea>
+                <button type="submit" class="w-full rounded-xl bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100">
+                  Resolve
+                </button>
+              </form>
+              {% endif %}
+              {% if not row.can_acknowledge and not row.can_resolve %}
+              <div class="rounded-xl bg-slate-50 px-3 py-3 text-xs leading-6 text-slate-500">
+                This incident is already resolved and kept here for history.
+              </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        {% empty %}
+        <div class="px-5 py-8 text-sm text-slate-500">
+          No incidents in the <span class="font-semibold text-slate-700">{{ incidents.current_filter }}</span> filter right now.
+        </div>
+        {% endfor %}
+      </div>
+      <div class="border-t border-slate-100 px-5 py-4">
+        <h4 class="text-sm font-semibold text-slate-900">Recent Incident History</h4>
+        <div class="mt-3 space-y-3">
+          {% for row in incidents.recent_events %}
+          <div class="rounded-xl border border-slate-200 p-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset {{ row.type_classes }}">{{ row.event.get_event_type_display }}</span>
+              <span class="text-xs font-semibold text-slate-700">{{ row.event.incident.title }}</span>
+              <span class="text-xs text-slate-400">{{ row.event.created_at|timesince }} ago</span>
+            </div>
+            <p class="mt-2 text-xs leading-6 text-slate-600">{{ row.event.message }}</p>
+            {% if row.event.created_by %}
+            <p class="mt-1 text-[11px] text-slate-500">By {{ row.event.created_by.username }}</p>
+            {% endif %}
+          </div>
+          {% empty %}
+          <p class="text-sm text-slate-500">No incident events recorded yet.</p>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div class="border-b border-slate-100 px-5 py-4">
+        <h3 class="text-lg font-semibold text-slate-900">Linux Service Health</h3>
+        <p class="mt-1 text-sm text-slate-500">Ubuntu production truth for the services that keep the app reachable and automation running.</p>
+      </div>
+      <div class="grid gap-4 border-b border-slate-100 p-5 md:grid-cols-3 xl:grid-cols-1">
+        <div class="rounded-2xl border border-slate-200 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Critical Services</p>
+          <p class="mt-2 text-2xl font-bold {% if service_health.critical_count %}text-rose-700{% else %}text-slate-900{% endif %}">{{ service_health.critical_count }}</p>
+          <p class="mt-1 text-sm text-slate-500">service(s) currently critical</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Warnings</p>
+          <p class="mt-2 text-2xl font-bold {% if service_health.warning_count %}text-amber-700{% else %}text-slate-900{% endif %}">{{ service_health.warning_count }}</p>
+          <p class="mt-1 text-sm text-slate-500">service(s) needing follow-up</p>
+        </div>
+        <div class="rounded-2xl border border-slate-200 p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Last Probe</p>
+          <p class="mt-2 text-sm font-semibold text-slate-900">
+            {% if service_health.latest_check %}{{ service_health.latest_check|timesince }} ago{% else %}Never{% endif %}
+          </p>
+          <p class="mt-1 text-sm text-slate-500">snapshots cached for fast page loads</p>
+        </div>
+      </div>
+      <div class="divide-y divide-slate-100">
+        {% for row in service_health.rows %}
+        <div class="px-5 py-4">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-sm font-semibold text-slate-900">{{ row.snapshot.display_name }}</p>
+                <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset {{ row.status_classes }}">{{ row.snapshot.status|title }}</span>
+                {% if row.optional %}
+                <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Optional</span>
+                {% endif %}
+              </div>
+              <p class="mt-2 text-sm leading-6 text-slate-600">{{ row.snapshot.detail }}</p>
+              <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                <span>Present: {{ row.snapshot.is_present|yesno:"Yes,No" }}</span>
+                <span>Active: {{ row.snapshot.is_active|yesno:"Yes,No" }}</span>
+                <span>Enabled: {{ row.snapshot.is_enabled|yesno:"Yes,No" }}</span>
+                <span>Checked {{ row.snapshot.checked_at|timesince }} ago</span>
+              </div>
+            </div>
+            {% if row.snapshot.payload_json.sub_state or row.snapshot.payload_json.unit_file_state %}
+            <div class="rounded-xl bg-slate-50 px-3 py-2 text-xs leading-6 text-slate-600">
+              {% if row.snapshot.payload_json.active_state %}<div>State: {{ row.snapshot.payload_json.active_state }}{% if row.snapshot.payload_json.sub_state %} / {{ row.snapshot.payload_json.sub_state }}{% endif %}</div>{% endif %}
+              {% if row.snapshot.payload_json.unit_file_state %}<div>Boot: {{ row.snapshot.payload_json.unit_file_state }}</div>{% endif %}
+              {% if row.snapshot.payload_json.main_pid and row.snapshot.payload_json.main_pid != "0" %}<div>Main PID: {{ row.snapshot.payload_json.main_pid }}</div>{% endif %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
   </section>
 
   <section class="grid gap-6 xl:grid-cols-2">

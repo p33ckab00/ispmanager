@@ -6,7 +6,10 @@ from apps.diagnostics.services import build_diagnostics_snapshot
 
 class DiagnosticsHealthView(APIView):
     def get(self, request):
-        snapshot = build_diagnostics_snapshot()
+        snapshot = build_diagnostics_snapshot(
+            sync_incidents=False,
+            incident_status='active',
+        )
         runtime = snapshot['runtime']
         scheduler = snapshot['scheduler']
         messaging = snapshot['messaging']

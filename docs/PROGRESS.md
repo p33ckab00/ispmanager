@@ -25,7 +25,7 @@
 | accounting | DONE | Income/expense, monthly P&L, CSV export |
 | sms | DONE | Semaphore balance, bulk send, billing SMS from snapshot |
 | notifications | DONE | Telegram per-event log, test button |
-| diagnostics | DONE | Operations health center, alerts, scheduler truth, router/billing/messaging/usage health |
+| diagnostics | DONE | Operations health center, persistent incidents, scheduler truth, Linux service health, router/billing/messaging/usage checks |
 | landing | DONE | Homepage editor, captive portal, publish toggle |
 | nms | DONE | Leaflet map, router + NAP + subscriber markers |
 | data_exchange | DONE | CSV exports, subscriber/payment imports, dry-run, job history |
@@ -76,6 +76,7 @@ Diagnostics is now an operations health center instead of a small system-info pa
 - usage sampling freshness
 - data exchange recent failures and audit activity
 - dashboard widget now uses `/api/v1/diagnostics/health/` for truthful compact health status
+- Diagnostics V2 adds persistent incidents, acknowledge/resolve workflow, and cached Linux service health snapshots
 
 ---
 

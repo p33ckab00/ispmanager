@@ -1,13 +1,14 @@
 import os
 import platform
 import shutil
+import subprocess
 from datetime import timedelta
 from time import perf_counter
 
 from django.conf import settings
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.db.models import Count, DecimalField, F, Max, Q, Sum, Value
+from django.db.models import DecimalField, F, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django_apscheduler.models import DjangoJob, DjangoJobExecution
@@ -16,6 +17,11 @@ from apps.accounting.models import ExpenseRecord, IncomeRecord
 from apps.billing.models import BillingSnapshot, Invoice, Payment
 from apps.core.models import AuditLog
 from apps.data_exchange.models import DataExchangeJob
+from apps.diagnostics.models import (
+    DiagnosticsIncident,
+    DiagnosticsIncidentEvent,
+    DiagnosticsServiceSnapshot,
+)
 from apps.notifications.models import Notification
 from apps.routers.models import InterfaceTrafficCache, Router
 from apps.settings_app.models import (
@@ -27,7 +33,15 @@ from apps.settings_app.models import (
     UsageSettings,
 )
 from apps.sms.models import SMSLog
-from apps.subscribers.models import Subscriber, SubscriberUsageCutoffSnapshot, SubscriberUsageDaily, SubscriberUsageSample
+from apps.subscribers.models import (
+    Subscriber,
+    SubscriberUsageCutoffSnapshot,
+    SubscriberUsageDaily,
+    SubscriberUsageSample,
+)
+
+SERVICE_PROBE_MAX_AGE = timedelta(minutes=5)
+INCIDENT_FILTERS = ['active', 'acknowledged', 'resolved']
 
 
 def _format_bytes(value):
@@ -49,12 +63,15 @@ def _safe_ratio(numerator, denominator):
     return round((numerator / denominator) * 100, 1)
 
 
-def _make_alert(severity, title, detail, href=None):
+def _make_alert(key, severity, title, detail, href=None, source='system', payload=None):
     return {
+        'key': key,
+        'source': source,
         'severity': severity,
         'title': title,
         'detail': detail,
         'href': href,
+        'payload': payload or {},
     }
 
 
@@ -68,22 +85,216 @@ def _badge_classes(severity):
         'pending': 'bg-slate-50 text-slate-600 ring-slate-200',
         'stale': 'bg-amber-50 text-amber-700 ring-amber-200',
         'missing': 'bg-rose-50 text-rose-700 ring-rose-200',
+        'unsupported': 'bg-slate-100 text-slate-600 ring-slate-200',
+        'unknown': 'bg-slate-50 text-slate-600 ring-slate-200',
+        'active': 'bg-rose-50 text-rose-700 ring-rose-200',
+        'acknowledged': 'bg-amber-50 text-amber-700 ring-amber-200',
+        'resolved': 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+        'neutral': 'bg-slate-50 text-slate-600 ring-slate-200',
     }
     return mapping.get(severity, mapping['info'])
 
 
 def _severity_rank(severity):
     order = {
-        'critical': 3,
-        'warning': 2,
-        'healthy': 1,
-        'info': 1,
-        'disabled': 0,
-        'pending': 0,
-        'stale': 2,
-        'missing': 3,
+        'critical': 4,
+        'warning': 3,
+        'healthy': 2,
+        'info': 2,
+        'active': 4,
+        'acknowledged': 3,
+        'resolved': 1,
+        'disabled': 1,
+        'pending': 1,
+        'stale': 3,
+        'missing': 4,
+        'unsupported': 0,
+        'unknown': 0,
+        'neutral': 0,
     }
     return order.get(severity, 0)
+
+
+def _record_incident_event(incident, event_type, message, payload=None, user=None):
+    DiagnosticsIncidentEvent.objects.create(
+        incident=incident,
+        event_type=event_type,
+        message=message,
+        payload_json=payload or {},
+        created_by=user,
+    )
+
+
+def _service_definitions():
+    return [
+        {'service_name': 'postgresql', 'display_name': 'PostgreSQL', 'optional': False},
+        {'service_name': 'nginx', 'display_name': 'Nginx', 'optional': False},
+        {'service_name': 'ispmanager-web', 'display_name': 'ISP Manager Web', 'optional': False},
+        {'service_name': 'ispmanager-scheduler', 'display_name': 'ISP Manager Scheduler', 'optional': False},
+        {'service_name': 'cloudflared', 'display_name': 'Cloudflared Tunnel', 'optional': True},
+    ]
+
+
+def _run_command(args, timeout=8):
+    try:
+        return subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception as exc:
+        class Result:
+            returncode = 1
+            stdout = ''
+            stderr = str(exc)
+        return Result()
+
+
+def _probe_single_service(definition):
+    name = definition['service_name']
+    optional = definition.get('optional', False)
+    linux_supported = platform.system() == 'Linux' and bool(shutil.which('systemctl'))
+
+    if not linux_supported:
+        status = 'unsupported'
+        detail = 'Linux systemd checks are only available on Ubuntu or other systemd-based Linux hosts.'
+        payload = {'optional': optional, 'linux_supported': False}
+        return {
+            'service_name': name,
+            'display_name': definition['display_name'],
+            'status': status,
+            'is_present': False,
+            'is_active': False,
+            'is_enabled': False,
+            'detail': detail,
+            'payload_json': payload,
+        }
+
+    result = _run_command([
+        'systemctl', 'show', name, '--no-page',
+        '--property=LoadState,ActiveState,SubState,UnitFileState,Description,MainPID'
+    ])
+
+    parsed = {}
+    for line in result.stdout.splitlines():
+        if '=' in line:
+            key, value = line.split('=', 1)
+            parsed[key] = value
+
+    load_state = parsed.get('LoadState', '')
+    active_state = parsed.get('ActiveState', '')
+    sub_state = parsed.get('SubState', '')
+    unit_file_state = parsed.get('UnitFileState', '')
+    description = parsed.get('Description', definition['display_name'])
+    main_pid = parsed.get('MainPID', '')
+
+    is_present = load_state not in ('', 'not-found')
+    is_active = active_state == 'active'
+    is_enabled = unit_file_state in {'enabled', 'static', 'indirect', 'generated', 'alias', 'linked'}
+
+    if not is_present:
+        status = 'unknown' if optional else 'critical'
+        detail = 'Service unit not found on this host.' if not result.stderr else result.stderr.strip()
+    elif is_active and is_enabled:
+        status = 'healthy'
+        detail = f'Active ({sub_state or active_state}).'
+    elif is_active:
+        status = 'warning'
+        detail = f'Active but not enabled at boot (unit file state: {unit_file_state or "unknown"}).'
+    elif active_state in {'activating', 'reloading'}:
+        status = 'warning'
+        detail = f'Service is transitioning: {active_state} ({sub_state}).'
+    elif active_state == 'failed':
+        status = 'critical'
+        detail = 'Service is in failed state.'
+    elif active_state == 'inactive':
+        status = 'warning' if optional else 'critical'
+        detail = 'Service is installed but inactive.'
+    else:
+        status = 'unknown'
+        detail = f'State is {active_state or "unknown"}.'
+
+    payload = {
+        'optional': optional,
+        'linux_supported': True,
+        'load_state': load_state,
+        'active_state': active_state,
+        'sub_state': sub_state,
+        'unit_file_state': unit_file_state,
+        'description': description,
+        'main_pid': main_pid,
+        'stderr': result.stderr.strip(),
+    }
+    return {
+        'service_name': name,
+        'display_name': definition['display_name'],
+        'status': status,
+        'is_present': is_present,
+        'is_active': is_active,
+        'is_enabled': is_enabled,
+        'detail': detail,
+        'payload_json': payload,
+    }
+
+
+def probe_service_snapshots(force=False):
+    now = timezone.now()
+    existing = {
+        snapshot.service_name: snapshot
+        for snapshot in DiagnosticsServiceSnapshot.objects.all()
+    }
+    service_defs = _service_definitions()
+    if not force:
+        expected_names = {item['service_name'] for item in service_defs}
+        if set(existing.keys()) == expected_names and not any(
+            snapshot.checked_at < now - SERVICE_PROBE_MAX_AGE for snapshot in existing.values()
+        ):
+            return list(existing.values())
+
+    snapshots = []
+    for definition in service_defs:
+        data = _probe_single_service(definition)
+        snapshot, _ = DiagnosticsServiceSnapshot.objects.update_or_create(
+            service_name=data['service_name'],
+            defaults={
+                'display_name': data['display_name'],
+                'status': data['status'],
+                'is_present': data['is_present'],
+                'is_active': data['is_active'],
+                'is_enabled': data['is_enabled'],
+                'detail': data['detail'],
+                'payload_json': data['payload_json'],
+                'checked_at': now,
+            },
+        )
+        snapshots.append(snapshot)
+    return snapshots
+
+
+def _get_service_health(now, force=False):
+    snapshots = probe_service_snapshots(force=force)
+    critical_count = sum(1 for snapshot in snapshots if snapshot.status == 'critical')
+    warning_count = sum(1 for snapshot in snapshots if snapshot.status == 'warning')
+    supported = any(snapshot.status != 'unsupported' for snapshot in snapshots)
+    latest_check = max((snapshot.checked_at for snapshot in snapshots), default=None)
+    rows = []
+    for snapshot in snapshots:
+        rows.append({
+            'snapshot': snapshot,
+            'status_classes': _badge_classes(snapshot.status),
+            'optional': snapshot.payload_json.get('optional', False),
+        })
+
+    return {
+        'snapshots': snapshots,
+        'rows': rows,
+        'critical_count': critical_count,
+        'warning_count': warning_count,
+        'supported': supported,
+        'latest_check': latest_check,
+    }
 
 
 def _build_job_metadata():
@@ -98,6 +309,14 @@ def _build_job_metadata():
     usage_interval = max(1, usage_settings.sampler_interval_minutes)
 
     return {
+        'refresh_diagnostics': {
+            'label': 'Refresh Diagnostics State',
+            'group': 'Diagnostics',
+            'schedule': 'Every 5 minutes',
+            'enabled': True,
+            'healthy_within': timedelta(minutes=15),
+            'note': 'Refreshes persisted diagnostics incidents and Linux service snapshots.',
+        },
         'mark_overdue': {
             'label': 'Mark Overdue Invoices',
             'group': 'Billing',
@@ -298,7 +517,7 @@ def _get_scheduler_health(now):
         if scheduler.running:
             embedded_job_ids = {job.id for job in scheduler.get_jobs()}
     except Exception:
-        scheduler = None
+        pass
 
     persisted_jobs = {job.id: job for job in DjangoJob.objects.all()}
     job_rows = []
@@ -335,7 +554,7 @@ def _get_scheduler_health(now):
             health = 'pending'
             detail = 'No successful execution recorded yet.'
 
-        if meta['enabled'] and job_id in {'router_status_check', 'sample_router_traffic', 'sample_usage'} and health == 'healthy':
+        if meta['enabled'] and job_id in {'router_status_check', 'sample_router_traffic', 'sample_usage', 'refresh_diagnostics'} and health == 'healthy':
             healthy_interval_seen = True
 
         job_rows.append({
@@ -634,35 +853,138 @@ def _build_alerts(snapshot):
     messaging = snapshot['messaging']
     usage = snapshot['usage']
     data_exchange = snapshot['data_exchange']
+    services = snapshot['service_health']
 
     if not runtime['database']['ok']:
-        alerts.append(_make_alert('critical', 'Database check failed', runtime['database']['error'] or 'The application could not complete a database round-trip.'))
+        alerts.append(_make_alert(
+            'runtime.database.failed',
+            'critical',
+            'Database check failed',
+            runtime['database']['error'] or 'The application could not complete a database round-trip.',
+            source='runtime',
+        ))
     if runtime['migrations']['pending_count']:
-        alerts.append(_make_alert('warning', 'Pending migrations detected', f"{runtime['migrations']['pending_count']} migration(s) are unapplied."))
+        alerts.append(_make_alert(
+            'runtime.migrations.pending',
+            'warning',
+            'Pending migrations detected',
+            f"{runtime['migrations']['pending_count']} migration(s) are unapplied.",
+            source='runtime',
+            payload={'pending_count': runtime['migrations']['pending_count']},
+        ))
     if not runtime['paths']['static_root']['exists']:
-        alerts.append(_make_alert('warning', 'Static root is missing', f"Expected static root at {runtime['paths']['static_root']['path']}."))
+        alerts.append(_make_alert(
+            'runtime.static_root.missing',
+            'warning',
+            'Static root is missing',
+            f"Expected static root at {runtime['paths']['static_root']['path']}.",
+            source='runtime',
+        ))
     if scheduler['service_health'] == 'critical':
-        alerts.append(_make_alert('critical', 'Scheduler automation looks down', scheduler['service_message'], href='/diagnostics/scheduler/'))
+        alerts.append(_make_alert(
+            'scheduler.service.critical',
+            'critical',
+            'Scheduler automation looks down',
+            scheduler['service_message'],
+            href='/diagnostics/scheduler/',
+            source='scheduler',
+        ))
     elif scheduler['service_health'] == 'warning':
-        alerts.append(_make_alert('warning', 'Scheduler state needs attention', scheduler['service_message'], href='/diagnostics/scheduler/'))
+        alerts.append(_make_alert(
+            'scheduler.service.warning',
+            'warning',
+            'Scheduler state needs attention',
+            scheduler['service_message'],
+            href='/diagnostics/scheduler/',
+            source='scheduler',
+        ))
     if routers['offline'] > 0:
-        alerts.append(_make_alert('warning', 'One or more routers are offline', f"{routers['offline']} active router(s) currently report offline state."))
+        alerts.append(_make_alert(
+            'routers.offline',
+            'warning',
+            'One or more routers are offline',
+            f"{routers['offline']} active router(s) currently report offline state.",
+            source='routers',
+            payload={'offline': routers['offline']},
+        ))
     if routers['stale_telemetry_count'] > 0:
-        alerts.append(_make_alert('warning', 'Router telemetry is stale', f"{routers['stale_telemetry_count']} interface cache row(s) are older than the expected refresh window."))
+        alerts.append(_make_alert(
+            'routers.telemetry.stale',
+            'warning',
+            'Router telemetry is stale',
+            f"{routers['stale_telemetry_count']} interface cache row(s) are older than the expected refresh window.",
+            source='routers',
+            payload={'stale_telemetry_count': routers['stale_telemetry_count']},
+        ))
     if billing['payments_without_income_count'] > 0:
-        alerts.append(_make_alert('critical', 'Payments without accounting income found', f"{billing['payments_without_income_count']} payment(s) are missing linked income records."))
+        alerts.append(_make_alert(
+            'billing.payments_without_income',
+            'critical',
+            'Payments without accounting income found',
+            f"{billing['payments_without_income_count']} payment(s) are missing linked income records.",
+            source='billing',
+            payload={'payments_without_income_count': billing['payments_without_income_count']},
+        ))
     if billing['billable_without_rate_count'] > 0:
-        alerts.append(_make_alert('warning', 'Billable subscribers are missing rates', f"{billing['billable_without_rate_count']} subscriber(s) can generate billing but have no effective rate."))
+        alerts.append(_make_alert(
+            'billing.billable_without_rate',
+            'warning',
+            'Billable subscribers are missing rates',
+            f"{billing['billable_without_rate_count']} subscriber(s) can generate billing but have no effective rate.",
+            source='billing',
+        ))
     if billing['draft_stale_count'] > 0:
-        alerts.append(_make_alert('warning', 'Draft snapshots are waiting too long', f"{billing['draft_stale_count']} draft snapshot(s) are older than the auto-freeze threshold."))
+        alerts.append(_make_alert(
+            'billing.draft_snapshots.stale',
+            'warning',
+            'Draft snapshots are waiting too long',
+            f"{billing['draft_stale_count']} draft snapshot(s) are older than the auto-freeze threshold.",
+            source='billing',
+        ))
     if messaging['sms']['today_failed'] > 0:
-        alerts.append(_make_alert('warning', 'SMS failures detected today', f"{messaging['sms']['today_failed']} SMS message(s) failed today."))
+        alerts.append(_make_alert(
+            'messaging.sms.failed_today',
+            'warning',
+            'SMS failures detected today',
+            f"{messaging['sms']['today_failed']} SMS message(s) failed today.",
+            source='messaging',
+        ))
     if messaging['telegram']['failed_last_24h'] > 0:
-        alerts.append(_make_alert('warning', 'Telegram delivery failures detected', f"{messaging['telegram']['failed_last_24h']} Telegram notification(s) failed in the last 24 hours."))
+        alerts.append(_make_alert(
+            'messaging.telegram.failed_last_24h',
+            'warning',
+            'Telegram delivery failures detected',
+            f"{messaging['telegram']['failed_last_24h']} Telegram notification(s) failed in the last 24 hours.",
+            source='messaging',
+        ))
     if usage['enabled'] and usage['stale_or_missing_count'] > 0:
-        alerts.append(_make_alert('warning', 'Subscriber usage data is stale or missing', f"{usage['stale_or_missing_count']} active or suspended subscriber(s) do not have fresh usage samples."))
+        alerts.append(_make_alert(
+            'usage.samples.stale_or_missing',
+            'warning',
+            'Subscriber usage data is stale or missing',
+            f"{usage['stale_or_missing_count']} active or suspended subscriber(s) do not have fresh usage samples.",
+            source='usage',
+        ))
     if data_exchange['failed_last_7d'] > 0:
-        alerts.append(_make_alert('warning', 'Recent import/export failures found', f"{data_exchange['failed_last_7d']} data exchange job(s) failed in the last 7 days."))
+        alerts.append(_make_alert(
+            'data_exchange.failed_recently',
+            'warning',
+            'Recent import/export failures found',
+            f"{data_exchange['failed_last_7d']} data exchange job(s) failed in the last 7 days.",
+            source='data_exchange',
+        ))
+
+    for snapshot_item in services['snapshots']:
+        optional = snapshot_item.payload_json.get('optional', False)
+        if snapshot_item.status in {'critical', 'warning'} and (not optional or snapshot_item.is_present):
+            alerts.append(_make_alert(
+                f"service.{snapshot_item.service_name}.{snapshot_item.status}",
+                snapshot_item.status,
+                f"Linux service needs attention: {snapshot_item.display_name}",
+                snapshot_item.detail,
+                source='services',
+                payload={'service_name': snapshot_item.service_name},
+            ))
 
     alerts.sort(key=lambda item: _severity_rank(item['severity']), reverse=True)
     for alert in alerts:
@@ -681,12 +1003,157 @@ def _build_alerts(snapshot):
     return alerts, overall, summary
 
 
-def build_diagnostics_snapshot():
+def _sync_incidents(alerts, user=None):
+    now = timezone.now()
+    active_keys = set()
+
+    for alert in alerts:
+        active_keys.add(alert['key'])
+        defaults = {
+            'source': alert['source'],
+            'severity': alert['severity'],
+            'title': alert['title'],
+            'detail': alert['detail'],
+            'status': 'active',
+            'first_seen_at': now,
+            'last_seen_at': now,
+            'current_payload_json': alert.get('payload', {}),
+        }
+        incident, created = DiagnosticsIncident.objects.get_or_create(
+            key=alert['key'],
+            defaults=defaults,
+        )
+        if created:
+            _record_incident_event(incident, 'detected', alert['detail'], payload=alert.get('payload', {}), user=user)
+            continue
+
+        previous_status = incident.status
+        previous_signature = (incident.severity, incident.title, incident.detail, incident.current_payload_json)
+
+        incident.source = alert['source']
+        incident.severity = alert['severity']
+        incident.title = alert['title']
+        incident.detail = alert['detail']
+        incident.current_payload_json = alert.get('payload', {})
+        incident.last_seen_at = now
+
+        event_type = None
+        event_message = None
+        if previous_status == 'resolved':
+            incident.status = 'active'
+            incident.acknowledged_at = None
+            incident.acknowledged_by = None
+            incident.resolved_at = None
+            incident.resolution_note = ''
+            event_type = 'reopened'
+            event_message = 'Condition reappeared after being resolved.'
+        elif previous_signature != (incident.severity, incident.title, incident.detail, incident.current_payload_json):
+            event_type = 'updated'
+            event_message = incident.detail
+
+        incident.save(update_fields=[
+            'source', 'severity', 'title', 'detail', 'current_payload_json',
+            'last_seen_at', 'status', 'acknowledged_at', 'acknowledged_by',
+            'resolved_at', 'resolution_note', 'updated_at',
+        ])
+        if event_type:
+            _record_incident_event(incident, event_type, event_message, payload=incident.current_payload_json, user=user)
+
+    resolved_qs = DiagnosticsIncident.objects.exclude(status='resolved').exclude(key__in=active_keys)
+    for incident in resolved_qs:
+        incident.status = 'resolved'
+        incident.resolved_at = now
+        if not incident.resolution_note:
+            incident.resolution_note = 'Condition cleared automatically.'
+        incident.save(update_fields=['status', 'resolved_at', 'resolution_note', 'updated_at'])
+        _record_incident_event(incident, 'resolved', incident.resolution_note, payload=incident.current_payload_json, user=user)
+
+
+def acknowledge_incident(incident, user=None):
+    if incident.status == 'resolved':
+        return incident
+    incident.status = 'acknowledged'
+    incident.acknowledged_at = timezone.now()
+    incident.acknowledged_by = user
+    incident.save(update_fields=['status', 'acknowledged_at', 'acknowledged_by', 'updated_at'])
+    _record_incident_event(incident, 'acknowledged', 'Incident acknowledged by operator.', payload=incident.current_payload_json, user=user)
+    return incident
+
+
+def resolve_incident(incident, user=None, resolution_note='Resolved by operator.'):
+    incident.status = 'resolved'
+    incident.resolved_at = timezone.now()
+    incident.resolution_note = resolution_note
+    incident.save(update_fields=['status', 'resolved_at', 'resolution_note', 'updated_at'])
+    _record_incident_event(incident, 'manually_resolved', resolution_note, payload=incident.current_payload_json, user=user)
+    return incident
+
+
+def _get_incident_health(filter_status='active'):
+    if filter_status not in INCIDENT_FILTERS:
+        filter_status = 'active'
+
+    incident_counts = {
+        status: DiagnosticsIncident.objects.filter(status=status).count()
+        for status in INCIDENT_FILTERS
+    }
+    incident_rows = DiagnosticsIncident.objects.select_related('acknowledged_by').filter(status=filter_status).order_by(
+        '-last_seen_at' if filter_status != 'resolved' else '-resolved_at', '-first_seen_at'
+    )[:20]
+    rows = []
+    for incident in incident_rows:
+        rows.append({
+            'incident': incident,
+            'severity_classes': _badge_classes(incident.severity),
+            'status_classes': _badge_classes(incident.status if incident.status != 'active' else 'critical'),
+            'can_acknowledge': incident.status == 'active',
+            'can_resolve': incident.status in {'active', 'acknowledged'},
+        })
+
+    event_rows = []
+    recent_events = DiagnosticsIncidentEvent.objects.select_related('incident', 'created_by').order_by('-created_at')[:10]
+    for event in recent_events:
+        event_rows.append({
+            'event': event,
+            'type_classes': _badge_classes(
+                'critical' if event.event_type in {'detected', 'reopened'} else
+                'warning' if event.event_type == 'acknowledged' else
+                'healthy'
+            ),
+        })
+
+    filter_rows = []
+    for status in INCIDENT_FILTERS:
+        filter_rows.append({
+            'key': status,
+            'label': status.replace('_', ' ').title(),
+            'count': incident_counts[status],
+            'active': status == filter_status,
+            'classes': _badge_classes(status if status != 'active' else 'critical'),
+        })
+
+    return {
+        'current_filter': filter_status,
+        'rows': rows,
+        'recent_events': event_rows,
+        'active_count': incident_counts['active'],
+        'acknowledged_count': incident_counts['acknowledged'],
+        'resolved_count': incident_counts['resolved'],
+        'resolved_today_count': DiagnosticsIncident.objects.filter(
+            status='resolved',
+            resolved_at__date=timezone.localdate(),
+        ).count(),
+        'filters': filter_rows,
+    }
+
+
+def build_diagnostics_snapshot(sync_incidents=True, user=None, incident_status='active', force_service_probe=False):
     now = timezone.now()
     snapshot = {
         'generated_at': now,
         'runtime': _get_runtime_health(now),
         'scheduler': _get_scheduler_health(now),
+        'service_health': _get_service_health(now, force=force_service_probe),
         'routers': _get_router_health(now),
         'billing': _get_billing_health(now),
         'messaging': _get_messaging_health(now),
@@ -696,10 +1163,13 @@ def build_diagnostics_snapshot():
         'recent_activity': _get_recent_activity(),
     }
     alerts, overall, summary = _build_alerts(snapshot)
+    if sync_incidents:
+        _sync_incidents(alerts, user=user)
     snapshot['alerts'] = alerts
     snapshot['overall_health'] = overall
     snapshot['overall_health_classes'] = _badge_classes(overall)
     snapshot['overall_summary'] = summary
+    snapshot['incidents'] = _get_incident_health(filter_status=incident_status)
     snapshot['overview_cards'] = [
         {
             'label': 'Overall Health',
@@ -712,6 +1182,12 @@ def build_diagnostics_snapshot():
             'value': snapshot['scheduler']['service_health'].title(),
             'meta': f"{len(snapshot['scheduler']['failed_jobs'])} failed job(s), {len(snapshot['scheduler']['stale_jobs'])} stale/pending job(s)",
             'accent': snapshot['scheduler']['service_health_classes'],
+        },
+        {
+            'label': 'Incidents',
+            'value': str(snapshot['incidents']['active_count']),
+            'meta': f"{snapshot['incidents']['acknowledged_count']} acknowledged, {snapshot['incidents']['resolved_today_count']} resolved today",
+            'accent': _badge_classes('critical' if snapshot['incidents']['active_count'] else 'healthy'),
         },
         {
             'label': 'Routers',
@@ -728,7 +1204,7 @@ def build_diagnostics_snapshot():
         {
             'label': 'Messaging',
             'value': str(snapshot['messaging']['sms']['today_sent']),
-            'meta': f"SMS sent today, {snapshot['messaging']['sms']['today_failed']} failed", 
+            'meta': f"SMS sent today, {snapshot['messaging']['sms']['today_failed']} failed",
             'accent': _badge_classes('warning' if snapshot['messaging']['sms']['today_failed'] else 'healthy'),
         },
         {
@@ -736,6 +1212,12 @@ def build_diagnostics_snapshot():
             'value': f"{snapshot['usage']['fresh_subscriber_count']}/{snapshot['usage']['active_subscriber_count']}",
             'meta': 'subscribers with fresh samples',
             'accent': _badge_classes('warning' if snapshot['usage']['stale_or_missing_count'] else 'healthy'),
+        },
+        {
+            'label': 'Linux Services',
+            'value': str(snapshot['service_health']['critical_count']),
+            'meta': f"{snapshot['service_health']['warning_count']} warning service(s)",
+            'accent': _badge_classes('critical' if snapshot['service_health']['critical_count'] else ('warning' if snapshot['service_health']['warning_count'] else 'healthy')),
         },
     ]
     return snapshot

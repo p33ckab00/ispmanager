@@ -6,15 +6,25 @@ from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
-from apps.diagnostics.services import build_diagnostics_snapshot
+from apps.diagnostics.models import DiagnosticsIncident
+from apps.diagnostics.services import (
+    acknowledge_incident,
+    build_diagnostics_snapshot,
+    resolve_incident,
+)
 from apps.routers import mikrotik
 from apps.routers.models import Router
 
 
 @login_required
 def diagnostics_dashboard(request):
-    snapshot = build_diagnostics_snapshot()
+    incident_status = request.GET.get('incidents', 'active')
+    snapshot = build_diagnostics_snapshot(
+        user=request.user,
+        incident_status=incident_status,
+    )
     return render(request, 'diagnostics/dashboard.html', snapshot)
 
 
@@ -44,7 +54,10 @@ def router_ping(request, pk):
 
 @login_required
 def scheduler_status(request):
-    snapshot = build_diagnostics_snapshot()
+    snapshot = build_diagnostics_snapshot(
+        sync_incidents=False,
+        incident_status='active',
+    )
     scheduler = snapshot['scheduler']
     context = {
         'generated_at': snapshot['generated_at'],
@@ -87,6 +100,35 @@ def scheduler_status(request):
         ],
     }
     return render(request, 'diagnostics/scheduler.html', context)
+
+
+@login_required
+@require_POST
+def acknowledge_incident_view(request, pk):
+    incident = get_object_or_404(DiagnosticsIncident, pk=pk)
+    if incident.status == 'resolved':
+        messages.info(request, 'This incident is already resolved.')
+    elif incident.status == 'acknowledged':
+        messages.info(request, 'This incident was already acknowledged.')
+    else:
+        acknowledge_incident(incident, user=request.user)
+        messages.success(request, f"Incident acknowledged: {incident.title}")
+    filter_key = request.POST.get('incident_filter', 'active')
+    return redirect(f"/diagnostics/?incidents={filter_key}")
+
+
+@login_required
+@require_POST
+def resolve_incident_view(request, pk):
+    incident = get_object_or_404(DiagnosticsIncident, pk=pk)
+    resolution_note = (request.POST.get('resolution_note') or '').strip() or 'Resolved by operator.'
+    if incident.status == 'resolved':
+        messages.info(request, 'This incident is already resolved.')
+    else:
+        resolve_incident(incident, user=request.user, resolution_note=resolution_note)
+        messages.success(request, f"Incident resolved: {incident.title}")
+    filter_key = request.POST.get('incident_filter', 'active')
+    return redirect(f"/diagnostics/?incidents={filter_key}")
 
 
 @login_required

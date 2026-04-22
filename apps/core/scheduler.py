@@ -225,6 +225,23 @@ def job_auto_suspend_overdue():
         logger.info("Auto-suspended %s overdue subscribers", suspended)
 
 
+def job_refresh_diagnostics():
+    from apps.diagnostics.services import build_diagnostics_snapshot
+
+    try:
+        snapshot = build_diagnostics_snapshot(
+            sync_incidents=True,
+            force_service_probe=True,
+        )
+        logger.debug(
+            "Diagnostics refreshed: %s active incident(s), %s alert(s)",
+            snapshot['incidents']['active_count'],
+            len(snapshot['alerts']),
+        )
+    except Exception as e:
+        logger.error(f"job_refresh_diagnostics error: {e}")
+
+
 def start_scheduler():
     from apps.settings_app.models import UsageSettings, RouterSettings, SMSSettings
     scheduler = get_scheduler()
@@ -244,6 +261,10 @@ def start_scheduler():
     scheduler.add_job(job_mark_overdue, CronTrigger(hour=0, minute=5),
                       id='mark_overdue', name='Mark Overdue Invoices',
                       replace_existing=True, misfire_grace_time=3600)
+
+    scheduler.add_job(job_refresh_diagnostics, IntervalTrigger(minutes=5),
+                      id='refresh_diagnostics', name='Refresh Diagnostics State',
+                      replace_existing=True, misfire_grace_time=300)
 
     scheduler.add_job(job_auto_suspend_overdue, CronTrigger(minute='*/15'),
                       id='auto_suspend_overdue', name='Auto Suspend Overdue Subscribers',
