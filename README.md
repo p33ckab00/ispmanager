@@ -38,7 +38,7 @@ The recommended architecture is a `modular monolith` with background job support
 - Frontend: Django templates and admin/operator views
 - API: REST endpoints under `/api/v1/`
 - Backend: Django application modules by domain
-- Database: currently SQLite in local development, with PostgreSQL recommended for production
+- Database: SQLite for lightweight local development, PostgreSQL recommended for staging and production
 - Background jobs: APScheduler-based task execution
 - Integrations: MikroTik RouterOS API, Semaphore SMS, Telegram Bot API
 
@@ -67,6 +67,14 @@ Project documentation starts here:
 - [Routers](docs/03_routers.md)
 - [Subscribers](docs/04_subscribers.md)
 - [Billing](docs/05_billing.md)
+- [PostgreSQL Installation Workflow](docs/07_postgresql_installation_workflow.md)
+- [Production Deployment Workflow](docs/08_production_deployment_workflow.md)
+- [PostgreSQL Migration Plan](docs/09_postgresql_migration_plan.md)
+- [Scheduler Production Strategy](docs/10_scheduler_production_strategy.md)
+- [Environment Variables Reference](docs/11_environment_variables_reference.md)
+- [Backup and Restore Runbook](docs/12_backup_restore_runbook.md)
+- [Staging Checklist](docs/13_staging_checklist.md)
+- [Go-Live Checklist](docs/14_go_live_checklist.md)
 
 ## Current Product Direction
 
@@ -93,13 +101,19 @@ Based on the current project design:
 - Redesign live telemetry polling for near-real-time charts and port activity UI
 - Harden settings so all configurable values are actually wired into runtime behavior
 
-## GitHub Publishing
+## PostgreSQL Readiness
 
-This folder is currently **not initialized as a Git repository**. That means we can still prepare the project for GitHub, but publishing will require:
+The project now includes:
 
-1. Initializing Git in this project folder
-2. Creating the first commit
-3. Connecting a GitHub repository under your account
-4. Pushing the branch
+1. PostgreSQL-aware Django settings controlled by environment variables
+2. a safe `.env.example` template for switching between SQLite and PostgreSQL
+3. a PostgreSQL driver requirement in `requirements.txt`
 
-If you want, I can do that next and help publish it to your GitHub account at `https://github.com/p33ckab00` once you confirm the target repository name.
+Recommended next steps for PostgreSQL cutover:
+
+1. Install dependencies with `pip install -r requirements.txt`
+2. Copy `.env.example` values into your real `.env`
+3. Set `USE_POSTGRES=True`
+4. Fill in `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, and `POSTGRES_PORT`
+5. Run `python manage.py migrate`
+6. Verify scheduler, billing, router sync, and usage tracking against PostgreSQL
