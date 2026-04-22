@@ -1,7 +1,7 @@
 # PostgreSQL Project Requirements
 
 ## Purpose
-This document captures the project-side requirements that must be in place before switching `ISP Manager` from SQLite to PostgreSQL.
+This document captures the project-side requirements now that `ISP Manager` is standardized on PostgreSQL.
 
 ## Requirements Added
 
@@ -21,8 +21,6 @@ A safe environment template is now available in:
 
 This includes:
 
-- `USE_POSTGRES`
-- `SQLITE_TIMEOUT_SECONDS`
 - `POSTGRES_DB`
 - `POSTGRES_USER`
 - `POSTGRES_PASSWORD`
@@ -32,11 +30,7 @@ This includes:
 - `DISABLE_SCHEDULER`
 
 ### 3. Django Settings Support
-The Django settings already support PostgreSQL mode when:
-
-- `USE_POSTGRES=True`
-
-and the PostgreSQL environment variables are provided.
+The Django settings now expect PostgreSQL directly when the PostgreSQL environment variables are provided.
 
 ## Pre-Cutover Checklist
 
@@ -60,7 +54,6 @@ pip install -r requirements.txt
 2. Update `.env`:
 
 ```env
-USE_POSTGRES=True
 POSTGRES_DB=ispmanager
 POSTGRES_USER=ispmanager
 POSTGRES_PASSWORD=your_password
@@ -93,5 +86,4 @@ python manage.py check
 ## Notes
 
 - The real `.env` file was not modified by this preparation step.
-- SQLite remains available for fallback local development.
 - PostgreSQL remains the recommended database for staging and production because of scheduler activity, telemetry writes, and billing concurrency.

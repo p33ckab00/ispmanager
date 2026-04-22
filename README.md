@@ -38,7 +38,7 @@ The recommended architecture is a `modular monolith` with background job support
 - Frontend: Django templates and admin/operator views
 - API: REST endpoints under `/api/v1/`
 - Backend: Django application modules by domain
-- Database: SQLite for lightweight local development, PostgreSQL recommended for staging and production
+- Database: PostgreSQL
 - Background jobs: APScheduler-based task execution
 - Integrations: MikroTik RouterOS API, Semaphore SMS, Telegram Bot API
 
@@ -75,6 +75,9 @@ Project documentation starts here:
 - [Backup and Restore Runbook](docs/12_backup_restore_runbook.md)
 - [Staging Checklist](docs/13_staging_checklist.md)
 - [Go-Live Checklist](docs/14_go_live_checklist.md)
+- [Ubuntu Production Manual Install Guide](docs/21_ubuntu_production_manual_install_guide.md)
+- [Ubuntu Scheduler Workaround Guide](docs/22_ubuntu_scheduler_workaround_guide.md)
+- [Production Hardening Checklist](docs/23_production_hardening_checklist.md)
 
 ## Current Product Direction
 
@@ -101,19 +104,23 @@ Based on the current project design:
 - Redesign live telemetry polling for near-real-time charts and port activity UI
 - Harden settings so all configurable values are actually wired into runtime behavior
 
-## PostgreSQL Readiness
+## PostgreSQL Configuration
 
-The project now includes:
+The project now runs on PostgreSQL only.
 
-1. PostgreSQL-aware Django settings controlled by environment variables
-2. a safe `.env.example` template for switching between SQLite and PostgreSQL
-3. a PostgreSQL driver requirement in `requirements.txt`
+Required database environment variables:
 
-Recommended next steps for PostgreSQL cutover:
+1. `POSTGRES_DB`
+2. `POSTGRES_USER`
+3. `POSTGRES_PASSWORD`
+4. `POSTGRES_HOST`
+5. `POSTGRES_PORT`
+6. `POSTGRES_CONN_MAX_AGE`
+
+Recommended setup flow:
 
 1. Install dependencies with `pip install -r requirements.txt`
 2. Copy `.env.example` values into your real `.env`
-3. Set `USE_POSTGRES=True`
-4. Fill in `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, and `POSTGRES_PORT`
-5. Run `python manage.py migrate`
-6. Verify scheduler, billing, router sync, and usage tracking against PostgreSQL
+3. Fill in `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, and `POSTGRES_PORT`
+4. Run `python manage.py migrate`
+5. Verify scheduler, billing, router sync, accounting, and usage tracking against PostgreSQL

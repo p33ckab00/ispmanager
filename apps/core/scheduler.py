@@ -5,22 +5,16 @@ from apscheduler.triggers.interval import IntervalTrigger
 import logging
 from datetime import date
 from django.db import models
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 _scheduler = None
-
-
-def using_sqlite():
-    return settings.DATABASES['default']['ENGINE'].endswith('sqlite3')
 
 
 def get_scheduler():
     global _scheduler
     if _scheduler is None:
         _scheduler = BackgroundScheduler(timezone='Asia/Manila')
-        if not using_sqlite():
-            _scheduler.add_jobstore(DjangoJobStore(), 'default')
+        _scheduler.add_jobstore(DjangoJobStore(), 'default')
     return _scheduler
 
 
@@ -256,8 +250,6 @@ def start_scheduler():
                       replace_existing=True, misfire_grace_time=3600)
 
     router_interval = max(1, router_settings.polling_interval_seconds)
-    if using_sqlite():
-        router_interval = max(router_interval, 15)
     scheduler.add_job(job_sync_router_status, IntervalTrigger(seconds=router_interval),
                       id='router_status_check', name='Router Status Check',
                       replace_existing=True, misfire_grace_time=60)
@@ -276,7 +268,7 @@ def start_scheduler():
                       replace_existing=True, misfire_grace_time=3600)
 
     scheduler.start()
-    if router_settings.sync_on_startup and not using_sqlite():
+    if router_settings.sync_on_startup:
         try:
             job_sync_router_status()
             job_sample_router_traffic()

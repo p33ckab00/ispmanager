@@ -162,8 +162,8 @@ def generate_snapshot(request, subscriber_pk):
             if 'database is locked' in str(exc).lower():
                 messages.error(
                     request,
-                    'Snapshot generation is temporarily busy because SQLite is handling background writes. '
-                    'Please wait a few seconds and try again, or restart the dev server after the new polling limits take effect.'
+                    'Snapshot generation is temporarily busy because another database operation is still running. '
+                    'Please wait a few seconds and try again.'
                 )
                 return redirect('subscriber-detail', pk=subscriber_pk)
             raise

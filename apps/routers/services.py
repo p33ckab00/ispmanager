@@ -1,5 +1,4 @@
 from django.utils import timezone
-from django.conf import settings
 from apps.routers.models import Router, RouterInterface, InterfaceTrafficCache, InterfaceTrafficSnapshot
 from apps.routers import mikrotik
 
@@ -95,7 +94,6 @@ def sample_router_traffic(router):
     """
     interfaces = router.interfaces.exclude(iface_type='pppoe-in').order_by('name')
     sampled = 0
-    use_sqlite = settings.DATABASES['default']['ENGINE'].endswith('sqlite3')
 
     for iface in interfaces:
         try:
@@ -137,14 +135,13 @@ def sample_router_traffic(router):
                     'error': '',
                 },
             )
-            if not use_sqlite:
-                InterfaceTrafficSnapshot.objects.create(
-                    interface=iface,
-                    rx_bits_per_second=rx_bps,
-                    tx_bits_per_second=tx_bps,
-                    rx_packets_per_second=rx_pps,
-                    tx_packets_per_second=tx_pps,
-                )
+            InterfaceTrafficSnapshot.objects.create(
+                interface=iface,
+                rx_bits_per_second=rx_bps,
+                tx_bits_per_second=tx_bps,
+                rx_packets_per_second=rx_pps,
+                tx_packets_per_second=tx_pps,
+            )
             sampled += 1
         except Exception as e:
             InterfaceTrafficCache.objects.update_or_create(

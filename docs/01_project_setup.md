@@ -12,7 +12,6 @@ ispmanager/
 ├── manage.py
 ├── .env
 ├── requirements.txt
-├── db.sqlite3
 ├── config/
 │   ├── __init__.py
 │   ├── settings.py       # Main Django settings

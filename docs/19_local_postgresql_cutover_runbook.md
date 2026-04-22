@@ -16,7 +16,6 @@ This runbook documents the completed local database cutover from SQLite to Postg
 ## Safety Steps Performed
 
 - Backed up the original SQLite database before cutover
-- Preserved the existing `db.sqlite3` file as rollback source
 - Exported SQLite application data using `dumpdata`
 - Migrated schema to PostgreSQL using Django migrations
 - Imported the exported data into PostgreSQL
@@ -40,19 +39,9 @@ Logical application database name:
 ispmanager
 ```
 
-### Rollback / legacy SQLite source
+### Legacy migration artifacts
 
-Project SQLite file retained for rollback:
-
-```text
-/mnt/c/users/fredjie estilloso/documents/ispmanager/db.sqlite3
-```
-
-Temporary safety copy created during cutover:
-
-```text
-/tmp/ispmanager-pre-postgres/db.sqlite3.backup
-```
+The original SQLite source and temporary backup were used during cutover and have since been removed from the active local workspace.
 
 ## Django Configuration
 
@@ -61,7 +50,6 @@ The live connection is controlled through the local `.env` file.
 Expected PostgreSQL keys:
 
 ```env
-USE_POSTGRES=True
 POSTGRES_DB=ispmanager
 POSTGRES_USER=ispmanager
 POSTGRES_PASSWORD=<local secret>
@@ -82,11 +70,4 @@ POSTGRES_CONN_MAX_AGE=60
 
 ## Rollback
 
-If local PostgreSQL must be rolled back:
-
-1. Restore `.env` to disable PostgreSQL
-2. Set `USE_POSTGRES=False`
-3. Restart Django
-4. Confirm Django is again using `db.sqlite3`
-
-The retained SQLite file is the rollback source of truth unless a newer PostgreSQL backup supersedes it.
+The project is now PostgreSQL-only. Any future rollback should restore from PostgreSQL backups rather than returning to SQLite.

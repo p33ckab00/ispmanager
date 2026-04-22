@@ -106,24 +106,9 @@ Production guidance:
 
 ## 2. Database Variables
 
-These are required once moving to PostgreSQL.
+These are the active database variables for the current PostgreSQL-only setup.
 
-### `DB_ENGINE`
-
-Purpose:
-
-- defines the DB backend
-
-Suggested values:
-
-- `sqlite`
-- `postgresql`
-
-Recommended production value:
-
-- `postgresql`
-
-### `DB_NAME`
+### `POSTGRES_DB`
 
 Purpose:
 
@@ -134,7 +119,7 @@ Examples:
 - `ispmanager`
 - `ispmanager_staging`
 
-### `DB_USER`
+### `POSTGRES_USER`
 
 Purpose:
 
@@ -142,9 +127,9 @@ Purpose:
 
 Example:
 
-- `ispmanager_user`
+- `ispmanager`
 
-### `DB_PASSWORD`
+### `POSTGRES_PASSWORD`
 
 Purpose:
 
@@ -155,7 +140,7 @@ Production guidance:
 - strong random value
 - never hardcode
 
-### `DB_HOST`
+### `POSTGRES_HOST`
 
 Purpose:
 
@@ -167,16 +152,15 @@ Examples:
 - `localhost`
 - private DB host IP
 
-### `DB_PORT`
+### `POSTGRES_PORT`
 
 Purpose:
 
 - database port
 
-Typical values:
+Typical value:
 
-- `5432` for PostgreSQL
-- `3306` for MySQL if ever used
+- `5432`
 
 ### `DB_CONN_MAX_AGE`
 
@@ -494,7 +478,7 @@ Purpose:
 Recommended characteristics:
 
 - `DEBUG=True`
-- SQLite allowed
+- PostgreSQL
 - internal scheduler optional
 - broad localhost origins acceptable
 - lower security strictness
@@ -529,7 +513,11 @@ Required characteristics:
 - `SECRET_KEY`
 - `DEBUG`
 - `ALLOWED_HOSTS`
-- `DB_ENGINE`
+- `POSTGRES_DB`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+- `POSTGRES_HOST`
+- `POSTGRES_PORT`
 
 ### Minimum Staging Set
 
@@ -607,4 +595,3 @@ This will make `ISP Manager` easier to:
 - move to PostgreSQL
 - separate scheduler from web workers
 - harden for production
-

@@ -3,7 +3,7 @@
 ## Stack
 - Backend: Django 5.0.6 + Django REST Framework 3.15.2
 - Frontend: Django Templates + TailwindCSS (CDN) + HTMX + Alpine.js + Chart.js
-- Database: SQLite (fresh schema)
+- Database: PostgreSQL
 - Deploy Target: Raspberry Pi / mini PC
 - PDF: WeasyPrint
 - MikroTik API: routeros-api
@@ -54,8 +54,7 @@ Any -> Archived (hidden from all active views, data preserved)
 ## How to Run
 
 ```bash
-# Fresh start
-del db.sqlite3  (Windows) or rm db.sqlite3 (Linux)
+# PostgreSQL-backed local/dev start
 python manage.py migrate
 python manage.py runserver 0.0.0.0:8000
 ```

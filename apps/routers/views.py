@@ -4,7 +4,6 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
-from django.conf import settings
 from apps.routers.models import Router, RouterInterface, InterfaceTrafficCache
 from apps.routers.forms import RouterForm, RouterCoordinatesForm, InterfaceLabelForm
 from apps.routers.services import sync_interfaces, get_live_traffic
@@ -62,7 +61,7 @@ def router_detail(request, pk):
         'vlans': vlans,
         'bridges': bridges,
         'tunnels': tunnels,
-        'telemetry_poll_ms': 3000 if settings.DATABASES['default']['ENGINE'].endswith('sqlite3') else 1000,
+        'telemetry_poll_ms': 1000,
     })
 
 
@@ -121,7 +120,7 @@ def interface_detail(request, router_pk, iface_pk):
         'router': router,
         'iface': iface,
         'form': form,
-        'telemetry_poll_ms': 2000 if settings.DATABASES['default']['ENGINE'].endswith('sqlite3') else 500,
+        'telemetry_poll_ms': 500,
     })
 
 

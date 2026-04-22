@@ -8,7 +8,7 @@ Result:
 
 - No PostgreSQL blocker was found
 - Core application pages and billing/accounting flows passed validation
-- Existing SQLite-specific safeguards now correctly resolve to PostgreSQL behavior
+- The current runtime now behaves as a PostgreSQL-only deployment
 
 ## Audit Checks Performed
 
