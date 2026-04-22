@@ -78,6 +78,9 @@ Project documentation starts here:
 - [Ubuntu Production Manual Install Guide](docs/21_ubuntu_production_manual_install_guide.md)
 - [Ubuntu Scheduler Service Guide](docs/22_ubuntu_scheduler_workaround_guide.md)
 - [Production Hardening Checklist](docs/23_production_hardening_checklist.md)
+- [Overdue and Palugit Current Workflow](docs/24_overdue_grace_current_workflow.md)
+- [Overdue Palugit Implementation Plan](docs/25_overdue_grace_workflow_implementation_plan.md)
+- [Overdue Grace Implementation Notes](docs/26_overdue_grace_implementation_notes.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 
 ## Current Product Direction

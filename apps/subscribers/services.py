@@ -126,7 +126,18 @@ def reconnect_on_mikrotik(subscriber):
 def suspend_subscriber(subscriber, suspended_by='admin'):
     ok, err = suspend_on_mikrotik(subscriber)
     subscriber.status = 'suspended'
-    subscriber.save(update_fields=['status', 'updated_at'])
+    subscriber.suspension_hold_until = None
+    subscriber.suspension_hold_reason = ''
+    subscriber.suspension_hold_by = ''
+    subscriber.suspension_hold_created_at = None
+    subscriber.save(update_fields=[
+        'status',
+        'suspension_hold_until',
+        'suspension_hold_reason',
+        'suspension_hold_by',
+        'suspension_hold_created_at',
+        'updated_at',
+    ])
 
     from apps.core.models import AuditLog
     AuditLog.log('update', 'subscribers', f"{subscriber.username} suspended by {suspended_by}", )
@@ -158,7 +169,20 @@ def disconnect_subscriber(subscriber, reason='', disconnected_by='admin'):
     subscriber.status = 'disconnected'
     subscriber.disconnected_date = date.today()
     subscriber.disconnected_reason = reason
-    subscriber.save(update_fields=['status', 'disconnected_date', 'disconnected_reason', 'updated_at'])
+    subscriber.suspension_hold_until = None
+    subscriber.suspension_hold_reason = ''
+    subscriber.suspension_hold_by = ''
+    subscriber.suspension_hold_created_at = None
+    subscriber.save(update_fields=[
+        'status',
+        'disconnected_date',
+        'disconnected_reason',
+        'suspension_hold_until',
+        'suspension_hold_reason',
+        'suspension_hold_by',
+        'suspension_hold_created_at',
+        'updated_at',
+    ])
 
     from apps.core.models import AuditLog
     AuditLog.log('update', 'subscribers', f"{subscriber.username} disconnected: {reason}")
@@ -174,7 +198,20 @@ def mark_deceased(subscriber, deceased_date=None, note='', marked_by='admin'):
     subscriber.status = 'deceased'
     subscriber.deceased_date = deceased_date or date.today()
     subscriber.deceased_note = note
-    subscriber.save(update_fields=['status', 'deceased_date', 'deceased_note', 'updated_at'])
+    subscriber.suspension_hold_until = None
+    subscriber.suspension_hold_reason = ''
+    subscriber.suspension_hold_by = ''
+    subscriber.suspension_hold_created_at = None
+    subscriber.save(update_fields=[
+        'status',
+        'deceased_date',
+        'deceased_note',
+        'suspension_hold_until',
+        'suspension_hold_reason',
+        'suspension_hold_by',
+        'suspension_hold_created_at',
+        'updated_at',
+    ])
     voided = void_invoices_for_deceased(subscriber, voided_by=marked_by)
 
     from apps.core.models import AuditLog

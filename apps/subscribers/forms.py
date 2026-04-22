@@ -104,6 +104,31 @@ class DisconnectForm(forms.Form):
     )
 
 
+class SuspensionHoldForm(forms.Form):
+    suspension_hold_until = forms.DateTimeField(
+        widget=forms.DateTimeInput(
+            attrs={'type': 'datetime-local'},
+            format='%Y-%m-%dT%H:%M',
+        ),
+        input_formats=['%Y-%m-%dT%H:%M'],
+        help_text='Service may stay active until this date/time even if billing is overdue.',
+    )
+    suspension_hold_reason = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 3}),
+        help_text='Optional note such as promise-to-pay or approved extension reason.',
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        hold_until = cleaned.get('suspension_hold_until')
+        if hold_until is not None:
+            from django.utils import timezone
+            if hold_until <= timezone.now():
+                raise forms.ValidationError('Palugit end must be in the future.')
+        return cleaned
+
+
 class DeceasedForm(forms.Form):
     deceased_date = forms.DateField(
         widget=forms.DateInput(attrs={'type': 'date'}),

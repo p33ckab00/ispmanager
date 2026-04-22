@@ -4,11 +4,12 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.http import JsonResponse
+from django.utils import timezone
 from apps.subscribers.models import Subscriber, Plan, RateHistory, NetworkNode, SubscriberNode
 from apps.subscribers.forms import (
     SubscriberAdminForm, PlanForm, ManualSubscriberForm,
     OTPRequestForm, OTPVerifyForm, StatusChangeForm,
-    DeceasedForm, DisconnectForm, RateChangeForm,
+    DeceasedForm, DisconnectForm, RateChangeForm, SuspensionHoldForm,
 )
 from apps.subscribers.services import (
     sync_ppp_secrets, sync_active_sessions,
@@ -73,6 +74,7 @@ def subscriber_detail(request, pk):
     payments = Payment.objects.filter(subscriber=subscriber).prefetch_related('allocations').order_by('-paid_at')
     rate_history = RateHistory.objects.filter(subscriber=subscriber).order_by('-effective_date')
     latest_snapshot = snapshots.first()
+    overdue_invoice_count = invoices.filter(status='overdue').count()
 
     open_balance = sum(
         inv.remaining_balance for inv in
@@ -94,6 +96,9 @@ def subscriber_detail(request, pk):
         'rate_history': rate_history[:10],
         'latest_snapshot': latest_snapshot,
         'open_balance': open_balance,
+        'overdue_invoice_count': overdue_invoice_count,
+        'has_active_palugit': subscriber.has_active_suspension_hold,
+        'palugit_until': timezone.localtime(subscriber.suspension_hold_until) if subscriber.has_active_suspension_hold else None,
         'node_assignment': node_assignment,
         'nodes': NetworkNode.objects.filter(is_active=True).order_by('name'),
         'usage_views': usage_views,
@@ -233,6 +238,76 @@ def subscriber_reconnect(request, pk):
             messages.warning(request, f"Status updated but MikroTik error: {err}")
         else:
             messages.success(request, f"{subscriber.display_name} reconnected.")
+    return redirect('subscriber-detail', pk=pk)
+
+
+@login_required
+def subscriber_palugit(request, pk):
+    subscriber = get_object_or_404(Subscriber, pk=pk)
+    if subscriber.status in ['disconnected', 'deceased', 'archived']:
+        messages.error(request, 'Palugit is only available for serviceable subscriber accounts.')
+        return redirect('subscriber-detail', pk=pk)
+
+    initial = {}
+    if subscriber.has_active_suspension_hold:
+        initial = {
+            'suspension_hold_until': timezone.localtime(subscriber.suspension_hold_until).strftime('%Y-%m-%dT%H:%M'),
+            'suspension_hold_reason': subscriber.suspension_hold_reason,
+        }
+
+    if request.method == 'POST':
+        form = SuspensionHoldForm(request.POST)
+        if form.is_valid():
+            subscriber.suspension_hold_until = form.cleaned_data['suspension_hold_until']
+            subscriber.suspension_hold_reason = form.cleaned_data['suspension_hold_reason']
+            subscriber.suspension_hold_by = request.user.username
+            subscriber.suspension_hold_created_at = timezone.now()
+            subscriber.save(update_fields=[
+                'suspension_hold_until',
+                'suspension_hold_reason',
+                'suspension_hold_by',
+                'suspension_hold_created_at',
+                'updated_at',
+            ])
+            AuditLog.log(
+                'update',
+                'subscribers',
+                f"Palugit set for {subscriber.username} until {subscriber.suspension_hold_until}",
+                user=request.user,
+            )
+            messages.success(
+                request,
+                f"Palugit saved for {subscriber.display_name} until {timezone.localtime(subscriber.suspension_hold_until).strftime('%b %d, %Y %I:%M %p')}.",
+            )
+            return redirect('subscriber-detail', pk=pk)
+    else:
+        form = SuspensionHoldForm(initial=initial)
+
+    return render(request, 'subscribers/palugit_form.html', {
+        'subscriber': subscriber,
+        'form': form,
+        'has_active_palugit': subscriber.has_active_suspension_hold,
+        'palugit_until': timezone.localtime(subscriber.suspension_hold_until) if subscriber.has_active_suspension_hold else None,
+    })
+
+
+@login_required
+def subscriber_palugit_remove(request, pk):
+    subscriber = get_object_or_404(Subscriber, pk=pk)
+    if request.method == 'POST':
+        subscriber.suspension_hold_until = None
+        subscriber.suspension_hold_reason = ''
+        subscriber.suspension_hold_by = ''
+        subscriber.suspension_hold_created_at = None
+        subscriber.save(update_fields=[
+            'suspension_hold_until',
+            'suspension_hold_reason',
+            'suspension_hold_by',
+            'suspension_hold_created_at',
+            'updated_at',
+        ])
+        AuditLog.log('update', 'subscribers', f"Palugit removed for {subscriber.username}", user=request.user)
+        messages.success(request, f"Palugit removed for {subscriber.display_name}.")
     return redirect('subscriber-detail', pk=pk)
 
 

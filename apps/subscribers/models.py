@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 from apps.routers.models import Router
 
 
@@ -78,6 +79,14 @@ class Subscriber(models.Model):
         default=True,
         help_text='If disabled, invoices and snapshots will not be generated for this subscriber.'
     )
+    suspension_hold_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='Admin-approved extension of service access for overdue accounts.'
+    )
+    suspension_hold_reason = models.TextField(blank=True)
+    suspension_hold_by = models.CharField(max_length=100, blank=True)
+    suspension_hold_created_at = models.DateTimeField(null=True, blank=True)
     start_date = models.DateField(null=True, blank=True, help_text='Service start date')
 
     # Status
@@ -129,6 +138,10 @@ class Subscriber(models.Model):
     @property
     def can_generate_billing(self):
         return self.is_billable and self.status in ('active', 'suspended')
+
+    @property
+    def has_active_suspension_hold(self):
+        return bool(self.suspension_hold_until and self.suspension_hold_until > timezone.now())
 
 
 class RateHistory(models.Model):

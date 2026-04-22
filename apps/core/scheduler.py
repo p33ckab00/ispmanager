@@ -5,6 +5,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 import logging
 from datetime import date
 from django.db import models
+from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 _scheduler = None
@@ -185,7 +186,6 @@ def job_auto_archive():
 
 
 def job_auto_suspend_overdue():
-    from apps.billing.models import Invoice
     from apps.settings_app.models import BillingSettings
     from apps.subscribers.models import Subscriber
     from apps.subscribers.services import suspend_subscriber
@@ -198,6 +198,22 @@ def job_auto_suspend_overdue():
         status='active',
         invoices__status='overdue',
     ).distinct()
+
+    held_subscribers = overdue_subscribers.filter(
+        suspension_hold_until__isnull=False,
+        suspension_hold_until__gt=timezone.now(),
+    )
+    for subscriber in held_subscribers:
+        logger.debug(
+            "Skipping auto-suspend for %s; palugit active until %s",
+            subscriber.username,
+            subscriber.suspension_hold_until,
+        )
+
+    overdue_subscribers = overdue_subscribers.exclude(
+        suspension_hold_until__isnull=False,
+        suspension_hold_until__gt=timezone.now(),
+    )
 
     suspended = 0
     for subscriber in overdue_subscribers:

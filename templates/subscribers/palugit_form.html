@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Manage Palugit - {{ subscriber.display_name }}{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <a href="/subscribers/{{ subscriber.pk }}/" class="text-sm text-blue-600 hover:underline">
+    <i class="fa fa-arrow-left mr-1"></i> Back to {{ subscriber.display_name }}
+  </a>
+</div>
+
+<div class="max-w-2xl space-y-4">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Manage Palugit</h2>
+    <p class="text-sm text-gray-500 mt-1">
+      Palugit extends service access for an overdue account without changing invoice period or due date.
+    </p>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+    <h3 class="font-semibold text-gray-700 mb-4">Current State</h3>
+    <dl class="grid grid-cols-2 gap-3 text-sm">
+      <div>
+        <dt class="text-xs text-gray-400">Subscriber</dt>
+        <dd class="font-medium mt-0.5">{{ subscriber.display_name }}</dd>
+      </div>
+      <div>
+        <dt class="text-xs text-gray-400">Status</dt>
+        <dd class="font-medium mt-0.5">{{ subscriber.get_status_display }}</dd>
+      </div>
+      <div class="col-span-2">
+        <dt class="text-xs text-gray-400">Active Palugit</dt>
+        {% if has_active_palugit %}
+        <dd class="font-medium mt-0.5 text-amber-700">Until {{ palugit_until|date:"M d, Y g:i A" }}</dd>
+        {% if subscriber.suspension_hold_reason %}
+        <dd class="text-gray-500 mt-1">{{ subscriber.suspension_hold_reason }}</dd>
+        {% endif %}
+        {% if subscriber.suspension_hold_by %}
+        <dd class="text-gray-400 mt-1 text-xs">Set by {{ subscriber.suspension_hold_by }}</dd>
+        {% endif %}
+        {% else %}
+        <dd class="text-gray-500 mt-0.5">No active palugit</dd>
+        {% endif %}
+      </div>
+    </dl>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+    <h3 class="font-semibold text-gray-700 mb-4">
+      {% if has_active_palugit %}Extend or Update Palugit{% else %}Grant Palugit{% endif %}
+    </h3>
+    <form method="post" class="space-y-4">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="px-4 py-3 rounded-lg text-sm font-medium bg-red-100 text-red-700 border border-red-200">
+        {% for error in form.non_field_errors %}{{ error }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+      </div>
+      {% endif %}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Palugit Until</label>
+        <input type="datetime-local" name="suspension_hold_until"
+          value="{{ form.suspension_hold_until.value|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500">
+        {% if form.suspension_hold_until.errors %}
+        <p class="text-xs text-red-600 mt-1">{{ form.suspension_hold_until.errors.0 }}</p>
+        {% endif %}
+        <p class="text-xs text-gray-400 mt-1">During this period, auto-suspend will skip this subscriber.</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Reason / Note</label>
+        <textarea name="suspension_hold_reason" rows="3"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+          placeholder="Promise to pay on Friday, approved by collections, etc.">{{ form.suspension_hold_reason.value|default:'' }}</textarea>
+        {% if form.suspension_hold_reason.errors %}
+        <p class="text-xs text-red-600 mt-1">{{ form.suspension_hold_reason.errors.0 }}</p>
+        {% endif %}
+      </div>
+      <div class="flex gap-3">
+        <button type="submit" class="bg-amber-500 hover:bg-amber-600 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+          Save Palugit
+        </button>
+        <a href="/subscribers/{{ subscriber.pk }}/" class="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  {% if has_active_palugit %}
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+    <h3 class="font-semibold text-gray-700 mb-3">Remove Active Palugit</h3>
+    <p class="text-sm text-gray-500 mb-4">
+      Removing palugit makes the subscriber eligible again for automatic overdue suspension based on billing rules.
+    </p>
+    <form method="post" action="/subscribers/{{ subscriber.pk }}/palugit/remove/"
+          onsubmit="return confirm('Remove palugit for {{ subscriber.display_name }}?')">
+      {% csrf_token %}
+      <button type="submit" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-5 py-2 rounded-lg text-sm transition">
+        Remove Palugit
+      </button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
