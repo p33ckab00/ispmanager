@@ -19,6 +19,7 @@ urlpatterns = [
     path('diagnostics/', include('apps.diagnostics.urls')),
     path('landing/', include('apps.landing.urls')),
     path('nms/', include('apps.nms.urls')),
+    path('data-exchange/', include('apps.data_exchange.urls')),
     path('settings/', include('apps.settings_app.urls')),
     path('api/v1/', include('config.api_urls')),
     path('b/<str:short_code>/', include('apps.billing.short_urls')),

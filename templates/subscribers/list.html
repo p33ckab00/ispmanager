@@ -7,6 +7,14 @@
     <p class="text-gray-500 text-sm mt-1">{{ total }} total subscribers</p>
   </div>
   <div class="flex gap-2">
+    <a href="{% url 'data-exchange-export' dataset='subscribers' %}?q={{ q }}&status={{ status }}&service={{ service }}"
+      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+      <i class="fa fa-download"></i> Export CSV
+    </a>
+    <a href="{% url 'data-exchange-dashboard' %}"
+      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
+      <i class="fa fa-file-arrow-up"></i> Data Exchange
+    </a>
     <a href="/subscribers/sync/"
       class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center gap-2">
       <i class="fa fa-rotate"></i> Sync from MikroTik
@@ -26,7 +34,7 @@
 
 <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
   <form method="get" class="flex gap-3 p-4">
-    <input type="text" name="q" value="{{ search }}" placeholder="Search username, name, phone..."
+    <input type="text" name="q" value="{{ q }}" placeholder="Search username, name, phone..."
       class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
     <select name="status"
       class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -120,11 +128,11 @@
     </p>
     <div class="flex gap-1">
       {% if page_obj.has_previous %}
-      <a href="?page={{ page_obj.previous_page_number }}&q={{ search }}&status={{ status }}&service={{ service }}"
+      <a href="?page={{ page_obj.previous_page_number }}&q={{ q }}&status={{ status }}&service={{ service }}"
         class="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50">Prev</a>
       {% endif %}
       {% if page_obj.has_next %}
-      <a href="?page={{ page_obj.next_page_number }}&q={{ search }}&status={{ status }}&service={{ service }}"
+      <a href="?page={{ page_obj.next_page_number }}&q={{ q }}&status={{ status }}&service={{ service }}"
         class="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50">Next</a>
       {% endif %}
     </div>

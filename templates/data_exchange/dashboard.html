@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Data Exchange - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Data Exchange</h2>
+    <p class="text-gray-500 text-sm mt-1">Import and export subscriber, billing, and finance data with a dry-run first workflow.</p>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6 mb-6">
+  <div class="xl:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-gray-800">Subscriber Import</h3>
+        <a href="{% url 'data-exchange-template' dataset='subscribers' %}" class="text-xs text-blue-600 hover:underline">Download Template</a>
+      </div>
+      <p class="text-sm text-gray-500 mb-4">Use CSV to create new subscribers or update existing usernames safely.</p>
+      <form method="post" action="{% url 'data-exchange-import-subscribers' %}" enctype="multipart/form-data" class="space-y-4">
+        {% csrf_token %}
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">CSV File</label>
+          {{ subscriber_form.file }}
+        </div>
+        <label class="flex items-center gap-2 text-sm text-gray-600">
+          {{ subscriber_form.update_existing }}
+          <span>Update existing usernames when they already exist</span>
+        </label>
+        <div class="flex gap-2">
+          <button type="submit" name="run_mode" value="dry_run" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Dry Run</button>
+          <button type="submit" name="run_mode" value="apply" class="bg-gray-900 hover:bg-black text-white text-sm font-semibold px-4 py-2 rounded-lg">Apply Import</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-gray-800">Payment Import</h3>
+        <a href="{% url 'data-exchange-template' dataset='payments' %}" class="text-xs text-blue-600 hover:underline">Download Template</a>
+      </div>
+      <p class="text-sm text-gray-500 mb-4">Import legacy payments through the normal allocation flow so invoices and accounting stay aligned.</p>
+      <form method="post" action="{% url 'data-exchange-import-payments' %}" enctype="multipart/form-data" class="space-y-4">
+        {% csrf_token %}
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">CSV File</label>
+          {{ payment_form.file }}
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" name="run_mode" value="dry_run" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Dry Run</button>
+          <button type="submit" name="run_mode" value="apply" class="bg-gray-900 hover:bg-black text-white text-sm font-semibold px-4 py-2 rounded-lg">Apply Import</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <h3 class="font-semibold text-gray-800 mb-3">Quick Exports</h3>
+    <div class="grid grid-cols-1 gap-3">
+      <a href="{% url 'data-exchange-export' dataset='subscribers' %}" class="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 text-sm hover:bg-gray-50">
+        <span>Subscribers CSV</span>
+        <i class="fa fa-download text-gray-400"></i>
+      </a>
+      <a href="{% url 'data-exchange-export' dataset='invoices' %}" class="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 text-sm hover:bg-gray-50">
+        <span>Invoices CSV</span>
+        <i class="fa fa-download text-gray-400"></i>
+      </a>
+      <a href="{% url 'data-exchange-export' dataset='payments' %}" class="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 text-sm hover:bg-gray-50">
+        <span>Payments CSV</span>
+        <i class="fa fa-download text-gray-400"></i>
+      </a>
+      <a href="{% url 'data-exchange-export' dataset='expenses' %}" class="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 text-sm hover:bg-gray-50">
+        <span>Expenses CSV</span>
+        <i class="fa fa-download text-gray-400"></i>
+      </a>
+    </div>
+    <div class="mt-4 rounded-lg bg-blue-50 border border-blue-100 p-4 text-xs text-blue-900 leading-6">
+      Run a dry run first. Applied imports stop when validation errors are present so we do not partially mutate billing or subscriber data.
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+  <div class="xl:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div class="px-5 py-4 border-b border-gray-100">
+      <h3 class="font-semibold text-gray-800">Recent Jobs</h3>
+    </div>
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 border-b border-gray-100">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">When</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Type</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Dataset</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Mode</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Counts</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-50">
+        {% for job in jobs %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-3 text-xs text-gray-500">{{ job.created_at|date:"M d, Y H:i" }}</td>
+          <td class="px-4 py-3 text-xs">{{ job.get_job_type_display }}</td>
+          <td class="px-4 py-3 text-xs">{{ job.get_dataset_display }}</td>
+          <td class="px-4 py-3 text-xs">
+            {% if job.job_type == 'import' %}
+              {% if job.is_dry_run %}Dry Run{% else %}Applied{% endif %}
+            {% else %}
+              Export
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-xs text-gray-600">
+            {{ job.total_rows }} rows
+            {% if job.job_type == 'import' %}
+            | +{{ job.created_count }} / ~{{ job.updated_count }} / -{{ job.skipped_count }} / !{{ job.error_count }}
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-right">
+            <a href="{% url 'data-exchange-dashboard' %}?job={{ job.pk }}" class="text-blue-600 hover:underline text-xs">View</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="6" class="px-4 py-10 text-center text-gray-400 text-sm">No imports or exports have been run yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <h3 class="font-semibold text-gray-800 mb-3">Job Preview</h3>
+    {% if selected_job %}
+    <div class="space-y-3 text-sm">
+      <div class="rounded-lg bg-gray-50 border border-gray-100 p-3">
+        <p><span class="font-medium">Dataset:</span> {{ selected_job.get_dataset_display }}</p>
+        <p><span class="font-medium">Type:</span> {{ selected_job.get_job_type_display }}</p>
+        <p><span class="font-medium">Mode:</span>
+          {% if selected_job.job_type == 'import' %}
+            {% if selected_job.is_dry_run %}Dry Run{% else %}Applied{% endif %}
+          {% else %}
+            Export
+          {% endif %}
+        </p>
+        <p><span class="font-medium">File:</span> {{ selected_job.file_name|default:'-' }}</p>
+      </div>
+
+      {% if selected_job_preview.preview_rows %}
+      <div>
+        <p class="text-xs font-semibold text-gray-500 uppercase mb-2">Preview Rows</p>
+        <div class="space-y-2 max-h-72 overflow-y-auto">
+          {% for row in selected_job_preview.preview_rows %}
+          <div class="rounded-lg border border-gray-100 px-3 py-2 text-xs bg-white">
+            Line {{ row.line }} - {{ row.key }} - {{ row.action }}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {% if selected_job_preview.errors %}
+      <div>
+        <p class="text-xs font-semibold text-red-500 uppercase mb-2">Validation Errors</p>
+        <div class="space-y-2 max-h-72 overflow-y-auto">
+          {% for error in selected_job_preview.errors %}
+          <div class="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{{ error }}</div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-400">Run an import dry run or choose a history item to see details here.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

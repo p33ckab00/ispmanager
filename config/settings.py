@@ -40,6 +40,7 @@ LOCAL_APPS = [
     'apps.diagnostics',
     'apps.landing',
     'apps.nms',
+    'apps.data_exchange',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
