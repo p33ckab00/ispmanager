@@ -85,6 +85,29 @@ def get_ppp_active(router, include_stats=False):
         raise RuntimeError(f"Failed to get PPP active sessions: {str(e)}")
 
 
+def get_pppoe_interface_stats(router):
+    api, conn = get_connection(router)
+    try:
+        resource = api.get_resource('/interface')
+        rows = resource.call('print', {'stats': ''})
+        conn.disconnect()
+        stats = {}
+        for row in rows:
+            if row.get('type') != 'pppoe-in':
+                continue
+            iface_name = row.get('name', '')
+            if not (iface_name.startswith('<pppoe-') and iface_name.endswith('>')):
+                continue
+            username = iface_name[len('<pppoe-'):-1].strip()
+            if not username:
+                continue
+            stats[username] = row
+        return stats
+    except Exception as e:
+        conn.disconnect()
+        raise RuntimeError(f"Failed to get PPPoE interface stats: {str(e)}")
+
+
 def get_ppp_secrets(router):
     api, conn = get_connection(router)
     try:

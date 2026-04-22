@@ -209,6 +209,11 @@ def sample_subscriber_usage(router):
     except Exception:
         return 0
 
+    try:
+        pppoe_interface_stats = mikrotik.get_pppoe_interface_stats(router)
+    except Exception:
+        pppoe_interface_stats = {}
+
     sampled = 0
     for session in sessions:
         username = session.get('name', '').strip()
@@ -220,8 +225,21 @@ def sample_subscriber_usage(router):
         except Subscriber.DoesNotExist:
             continue
 
-        rx_bytes = _parse_counter(session, 'bytes-in', 'rx-byte', 'rx-bytes')
-        tx_bytes = _parse_counter(session, 'bytes-out', 'tx-byte', 'tx-bytes')
+        iface_stats = pppoe_interface_stats.get(username, {})
+        rx_bytes = _parse_counter(
+            session,
+            'bytes-in',
+            'rx-byte',
+            'rx-bytes',
+            default=_parse_counter(iface_stats, 'rx-byte', 'rx-bytes'),
+        )
+        tx_bytes = _parse_counter(
+            session,
+            'bytes-out',
+            'tx-byte',
+            'tx-bytes',
+            default=_parse_counter(iface_stats, 'tx-byte', 'tx-bytes'),
+        )
         session_id = session.get('session-id', '') or session.get('.id', '')
 
         last_sample_qs = SubscriberUsageSample.objects.filter(subscriber=subscriber)
