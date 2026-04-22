@@ -28,6 +28,7 @@
 | diagnostics | DONE | Disk, DB, router ping, scheduler status |
 | landing | DONE | Homepage editor, captive portal, publish toggle |
 | nms | DONE | Leaflet map, router + NAP + subscriber markers |
+| data_exchange | DONE | CSV exports, subscriber/payment imports, dry-run, job history |
 
 ---
 
@@ -48,6 +49,17 @@ Active -> Suspended (PPP disabled on MikroTik)
 Active -> Disconnected (voluntary, billing stops, data preserved)
 Active/Suspended -> Deceased (open invoices voided, hidden from NMS)
 Any -> Archived (hidden from all active views, data preserved)
+
+---
+
+## Data Exchange
+
+Data Exchange v1 is now part of the operator workflow.
+
+- Quick CSV export for subscribers, invoices, payments, and expenses
+- Central Data Exchange dashboard for templates, imports, exports, and job history
+- Dry-run validation before subscriber and payment imports
+- Payment imports reuse the billing allocation flow so linked accounting income stays consistent
 
 ---
 

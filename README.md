@@ -30,6 +30,7 @@ It centralizes:
 - `apps/diagnostics` - health and scheduler diagnostics
 - `apps/nms` - network map views
 - `apps/landing` - public landing and captive-style content
+- `apps/data_exchange` - CSV import/export tools, dry-run validation, and job history
 
 ## Architecture
 
@@ -56,6 +57,7 @@ The recommended architecture is a `modular monolith` with background job support
 - Daily usage rollups and usage charts
 - Telegram and SMS notifications
 - Accounting dashboards for income and expenses
+- CSV import/export workflows for operational data exchange
 
 ## Documentation
 
@@ -86,6 +88,7 @@ Project documentation starts here:
 - [Landing V2 Core Implementation Plan](docs/29_landing_v2_core_implementation_plan.md)
 - [Landing V2 Core Implementation Notes](docs/30_landing_v2_core_implementation_notes.md)
 - [Landing Nav UX Refinement](docs/31_landing_nav_ux_refinement.md)
+- [Data Exchange V1 Implementation Notes](docs/32_data_exchange_v1_implementation_notes.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 
 ## Current Product Direction
