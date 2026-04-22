@@ -145,8 +145,11 @@ def generate_invoices_for_all(billing_settings=None):
 def record_payment_with_allocation(subscriber, amount, method='cash', reference='',
                                     notes='', recorded_by='admin', paid_at=None):
     """
-    Records a payment and allocates oldest-first against open invoices.
+    Records a payment, mirrors it into accounting income, and allocates
+    oldest-first against open invoices.
     """
+    from apps.accounting.services import ensure_income_record_for_payment
+
     if paid_at is None:
         paid_at = timezone.now()
 
@@ -159,6 +162,7 @@ def record_payment_with_allocation(subscriber, amount, method='cash', reference=
         recorded_by=recorded_by,
         paid_at=paid_at,
     )
+    ensure_income_record_for_payment(payment)
 
     remaining = Decimal(str(amount))
     open_invoices = Invoice.objects.filter(
