@@ -77,3 +77,19 @@ python manage.py runserver 0.0.0.0:8193
 pip install gunicorn
 gunicorn config.wsgi:application --bind 0.0.0.0:8193 --workers 2
 ```
+
+## Ubuntu Production Deployment
+
+- Manual production deployment guide updated for fresh Ubuntu rollout
+- New one-click installer script added at `deploy/install_ubuntu_fresh.sh`
+- Deployment path now assumes:
+  - preserve `/opt/libreqos`
+  - back up legacy `/opt/isp-manager`
+  - deploy fresh app into `/opt/ispmanager`
+- Cloudflared tunnel-safe mode added:
+  - detect and preserve existing `cloudflared.service`
+  - fresh-install `cloudflared` only when absent
+  - use localhost-only Nginx origin for tunnel deployments
+- Cloudflare route and redeploy support added:
+  - dashboard route checklist for tunnel hostname setup
+  - `deploy/redeploy_ubuntu_update.sh` for future production updates

@@ -1,27 +1,32 @@
 # Ubuntu Production Manual Install Guide
 
-Manual installation and troubleshooting guide for deploying `ISP Manager` on an Ubuntu server.
+Manual installation and fresh-install deployment guide for running `ISP Manager` on an Ubuntu production server.
 
 ## Purpose
 
-This document is a practical step-by-step guide for taking the current project from local development to a manually installed Ubuntu production deployment.
+This guide is written for the real deployment scenario where:
+
+- `LibreQoS` already exists at `/opt/libreqos`
+- an older `ISP Manager` deployment may exist at `/opt/isp-manager`
+- you want a fresh production install of the current codebase
+- you want a safe backup path before replacing anything
+- you want a repeatable way to redeploy future updates after go-live
 
 It covers:
 
-- server requirements
-- required software packages
-- PostgreSQL setup
-- Django app setup
-- Gunicorn and Nginx setup
-- HTTPS setup
-- environment file layout
-- dedicated scheduler service setup
-- manual smoke tests
-- troubleshooting common deployment issues
+- preflight and backup workflow
+- coexistence with LibreQoS
+- manual Ubuntu production installation
+- the new one-click installer script
+- Cloudflared tunnel-safe deployment mode
+- future redeploy/update workflow
+- PostgreSQL, Gunicorn, Nginx, and scheduler setup
+- smoke testing and rollback basics
+- troubleshooting common deployment failures
 
 ## Current Production Model
 
-The current recommended Ubuntu production layout is:
+The recommended Ubuntu production layout is:
 
 - `Nginx` as the public reverse proxy
 - `Gunicorn` serving Django on `127.0.0.1:8193`
@@ -32,11 +37,32 @@ The current recommended Ubuntu production layout is:
 Important rule:
 
 - keep scheduler startup disabled inside the web service with `DISABLE_SCHEDULER=1`
-- run scheduled jobs through the dedicated `manage.py run_scheduler` process only
+- run scheduled jobs only through `python manage.py run_scheduler`
+
+If you deploy behind `cloudflared`:
+
+- public HTTPS terminates at Cloudflare
+- `cloudflared` forwards traffic to a localhost-only Nginx listener
+- the installer and manual guide should preserve any existing `cloudflared` service instead of overwriting it blindly
+
+## Safe Server Layout
+
+For your current server situation, the recommended layout is:
+
+- keep LibreQoS untouched at `/opt/libreqos`
+- treat `/opt/isp-manager` as legacy and back it up before deploying
+- use `/opt/ispmanager` as the fresh canonical app path for the current production install
+- keep deployment-specific secrets in `/etc/ispmanager/ispmanager.env`
+
+This means:
+
+- `LibreQoS` stays separate
+- the old hyphenated app path becomes backup material
+- the new production path stays aligned with the rest of the project documentation
 
 ## Minimum Requirements
 
-### Minimum for small live rollout
+### Minimum for a small live rollout
 
 - `2 vCPU`
 - `4 GB RAM`
@@ -50,7 +76,7 @@ Important rule:
 - `8 GB RAM`
 - `80 GB SSD`
 - daily backups
-- separate backup storage or snapshot support
+- off-server backups or VM snapshots
 
 ## OS and Runtime
 
@@ -67,7 +93,26 @@ Recommended:
 - one domain or subdomain, for example `isp.example.com`
 - firewall enabled
 - only ports `22`, `80`, and `443` exposed publicly
-- PostgreSQL `5432` should not be public unless you intentionally isolate DB on a private network
+- PostgreSQL `5432` should not be public unless intentionally isolated on a private network
+
+## Preflight Checklist
+
+Before deployment:
+
+1. confirm LibreQoS is healthy and should remain untouched
+2. confirm the old app path that should be backed up:
+   - usually `/opt/isp-manager`
+   - sometimes `/opt/ispmanager`
+3. confirm your production domain or public server IP
+4. decide whether you will enable Let's Encrypt during install
+5. prepare:
+   - PostgreSQL app password
+   - Django `SECRET_KEY`
+   - optional first superuser credentials
+6. if you plan to use Cloudflare Tunnel:
+   - check if `cloudflared` is already installed
+   - check if `cloudflared.service` already exists and may already be serving other apps
+   - prepare a `CLOUDFLARE_TUNNEL_TOKEN` only if you expect a fresh cloudflared service install
 
 ## Required Ubuntu Packages
 
@@ -75,36 +120,239 @@ Install these packages first:
 
 ```bash
 sudo apt update
-sudo apt upgrade -y
 sudo apt install -y \
   python3 python3-venv python3-dev \
   build-essential libpq-dev \
-  git nginx \
+  git rsync curl nginx \
   postgresql postgresql-contrib \
   certbot python3-certbot-nginx
 ```
 
-## Recommended Linux User and Paths
+## Recommended Runtime Paths
 
-Use a dedicated runtime user:
-
-- Linux user: `ispmanager`
+- app user: `ispmanager`
 - app root: `/opt/ispmanager`
 - virtualenv: `/opt/ispmanager/.venv`
 - environment file: `/etc/ispmanager/ispmanager.env`
-- Gunicorn working dir: `/opt/ispmanager`
+- backup root: `/opt/backups/ispmanager`
+- Gunicorn bind: `127.0.0.1:8193`
 
-Create the user and directories:
+## One-Click Fresh Installation Script
+
+The repo now includes:
+
+- `deploy/install_ubuntu_fresh.sh`
+
+This script is designed for:
+
+- fresh Ubuntu deployment
+- safe coexistence with `/opt/libreqos`
+- automatic backup of:
+  - `/opt/isp-manager`
+  - `/opt/ispmanager`
+  - old app env/config/service files when present
+
+### What the script does
+
+The script will:
+
+1. install Ubuntu packages
+2. preserve `/opt/libreqos`
+3. backup any existing `ISP Manager` app/config paths
+4. copy the current repo into `/opt/ispmanager`
+5. create the Python virtual environment
+6. install requirements and Gunicorn
+7. create or update the PostgreSQL app role and database
+8. create `/etc/ispmanager/ispmanager.env`
+9. run:
+   - `migrate`
+   - `collectstatic`
+   - `check`
+10. create:
+   - `ispmanager-web.service`
+   - `ispmanager-scheduler.service`
+   - Nginx site config
+11. optionally request a Let's Encrypt certificate
+12. optionally create the first Django superuser if credentials are provided
+
+The script intentionally does not copy:
+
+- your local repo `.env`
+- SQLite files such as `db.sqlite3`
+- local `media/`
+- local `staticfiles/`
+
+That keeps the Ubuntu install fresh and production-oriented instead of inheriting local development state.
+
+### Recommended usage from a fresh repo clone
+
+Clone the repo somewhere temporary on the Ubuntu server first:
 
 ```bash
-sudo adduser --system --group --home /opt/ispmanager ispmanager
+cd /tmp
+git clone <your-repo-url> ispmanager-deploy
+cd ispmanager-deploy
+```
+
+Important:
+
+- review the checked-out branch before running the installer
+- the script deploys the code currently present in that repo clone
+- it does not pull a second copy from Git on its own
+
+Then run the installer:
+
+```bash
+sudo APP_DOMAIN=isp.example.com \
+  APP_WWW_DOMAIN=www.isp.example.com \
+  LETSENCRYPT_EMAIL=ops@example.com \
+  POSTGRES_PASSWORD='replace-with-strong-password' \
+  DJANGO_SUPERUSER_USERNAME=admin \
+  DJANGO_SUPERUSER_EMAIL=admin@example.com \
+  DJANGO_SUPERUSER_PASSWORD='replace-with-strong-password' \
+  ENABLE_CERTBOT=1 \
+  bash deploy/install_ubuntu_fresh.sh
+```
+
+### HTTP-first test install by IP
+
+If you want to test first without DNS/SSL:
+
+```bash
+sudo PRIMARY_IP=203.0.113.10 \
+  POSTGRES_PASSWORD='replace-with-strong-password' \
+  ENABLE_CERTBOT=0 \
+  bash deploy/install_ubuntu_fresh.sh
+```
+
+### Supported installer environment variables
+
+Most useful variables:
+
+- `APP_DOMAIN`
+- `APP_WWW_DOMAIN`
+- `PRIMARY_IP`
+- `POSTGRES_DB`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+- `SECRET_KEY`
+- `LETSENCRYPT_EMAIL`
+- `ENABLE_CERTBOT`
+- `DJANGO_SUPERUSER_USERNAME`
+- `DJANGO_SUPERUSER_EMAIL`
+- `DJANGO_SUPERUSER_PASSWORD`
+
+Defaults:
+
+- app path: `/opt/ispmanager`
+- env file: `/etc/ispmanager/ispmanager.env`
+- PostgreSQL DB: `ispmanager`
+- PostgreSQL user: `ispmanager`
+- Gunicorn port: `8193`
+
+### One-click install with Cloudflared tunnel mode
+
+Use this mode when:
+
+- you want Cloudflare Tunnel as the public entry point
+- you do not want to expose public `80/443` directly from the server
+- you want Nginx to listen only on localhost for the tunnel origin
+
+Recommended command when no existing cloudflared service is present:
+
+```bash
+sudo ENABLE_CLOUDFLARED=1 \
+  APP_DOMAIN=app.example.com \
+  CLOUDFLARE_TUNNEL_TOKEN='paste-your-tunnel-token-here' \
+  POSTGRES_PASSWORD='replace-with-strong-password' \
+  DJANGO_SUPERUSER_USERNAME=admin \
+  DJANGO_SUPERUSER_EMAIL=admin@example.com \
+  DJANGO_SUPERUSER_PASSWORD='replace-with-strong-password' \
+  bash deploy/install_ubuntu_fresh.sh
+```
+
+What this mode does:
+
+- configures Django as HTTPS-aware from the beginning
+- binds Nginx to `127.0.0.1:8080`
+- installs `cloudflared` only if it is not already installed
+- installs a fresh `cloudflared.service` only when one does not already exist
+- skips Certbot because public TLS is handled by Cloudflare
+
+If an existing `cloudflared.service` is already on the server:
+
+- the installer preserves it
+- it does not overwrite the existing token or config
+- you must confirm in the Cloudflare dashboard that your hostname points to:
+
+```text
+http://127.0.0.1:8080
+```
+
+### Safe detection rules for Cloudflared
+
+Before using tunnel mode manually, check:
+
+```bash
+command -v cloudflared
+sudo systemctl status cloudflared
+```
+
+Interpretation:
+
+- if `cloudflared` exists and `cloudflared.service` already runs:
+  - preserve it
+  - do not blindly reinstall it
+  - reuse the existing tunnel service if it already fits your environment
+- if `cloudflared` exists but there is no service:
+  - you may install a service if you have the correct tunnel token
+- if `cloudflared` does not exist:
+  - fresh install is fine
+  - then install the service with the tunnel token
+
+## Manual Fresh Installation Workflow
+
+Use this path if you want to do everything manually instead of using the one-click installer.
+
+## Step 1: Backup Old App Paths Safely
+
+Create a backup root:
+
+```bash
+sudo mkdir -p /opt/backups/ispmanager
+```
+
+If the old app exists at `/opt/isp-manager`, back it up:
+
+```bash
+sudo mv /opt/isp-manager /opt/backups/ispmanager/isp-manager-$(date +%Y%m%d-%H%M%S)
+```
+
+If an older install already exists at `/opt/ispmanager`, back that up too:
+
+```bash
+sudo mv /opt/ispmanager /opt/backups/ispmanager/ispmanager-$(date +%Y%m%d-%H%M%S)
+```
+
+Do not move or delete:
+
+```bash
+/opt/libreqos
+```
+
+That directory is outside the ISP Manager deployment path and should be preserved.
+
+## Step 2: Create Runtime User and Directories
+
+```bash
+sudo adduser --system --group --home /opt/ispmanager --shell /usr/sbin/nologin ispmanager
 sudo mkdir -p /opt/ispmanager
 sudo mkdir -p /etc/ispmanager
 sudo chown -R ispmanager:ispmanager /opt/ispmanager
 sudo chmod 750 /etc/ispmanager
 ```
 
-## Step 1: Deploy the Project Code
+## Step 3: Deploy the Project Code
 
 Clone or copy the repo into `/opt/ispmanager`:
 
@@ -113,13 +361,13 @@ sudo -u ispmanager git clone <your-repo-url> /opt/ispmanager
 cd /opt/ispmanager
 ```
 
-If you deploy from a zip or local copy instead of Git, make sure file ownership is correct:
+If you deploy from a local copy instead of Git, fix ownership:
 
 ```bash
 sudo chown -R ispmanager:ispmanager /opt/ispmanager
 ```
 
-## Step 2: Create the Python Virtual Environment
+## Step 4: Create the Python Virtual Environment
 
 ```bash
 cd /opt/ispmanager
@@ -129,7 +377,7 @@ sudo -u ispmanager ./.venv/bin/pip install -r requirements.txt
 sudo -u ispmanager ./.venv/bin/pip install gunicorn
 ```
 
-## Step 3: Prepare PostgreSQL
+## Step 5: Prepare PostgreSQL
 
 Switch to the PostgreSQL superuser:
 
@@ -152,9 +400,9 @@ sudo -u postgres psql -d ispmanager -c "ALTER SCHEMA public OWNER TO ispmanager;
 sudo -u postgres psql -d ispmanager -c "GRANT ALL ON SCHEMA public TO ispmanager;"
 ```
 
-## Step 4: Create the Production Environment File
+## Step 6: Create the Production Environment File
 
-A safe starter template is included in the repo:
+A starter template is included in the repo:
 
 - `deploy/ispmanager_ubuntu.env.template`
 
@@ -165,15 +413,15 @@ sudo cp /opt/ispmanager/deploy/ispmanager_ubuntu.env.template /etc/ispmanager/is
 sudo nano /etc/ispmanager/ispmanager.env
 ```
 
-Recommended baseline:
+Recommended baseline for real HTTPS production:
 
 ```env
 SECRET_KEY=replace-with-a-strong-random-secret
 DEBUG=False
-ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com,server-ip
-APP_BASE_URL=https://yourdomain.com
-CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
-CSRF_TRUSTED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+ALLOWED_HOSTS=isp.example.com,www.isp.example.com,server-ip,localhost,127.0.0.1
+APP_BASE_URL=https://isp.example.com
+CORS_ALLOWED_ORIGINS=https://isp.example.com,https://www.isp.example.com
+CSRF_TRUSTED_ORIGINS=https://isp.example.com,https://www.isp.example.com
 SESSION_COOKIE_SECURE=True
 CSRF_COOKIE_SECURE=True
 SECURE_SSL_REDIRECT=True
@@ -196,20 +444,17 @@ DISABLE_SCHEDULER=1
 
 Why `DISABLE_SCHEDULER=1` here:
 
-- it prevents accidental scheduler startup behavior in the web service
-- it keeps Gunicorn workers from owning job execution
+- it prevents accidental scheduler startup inside Gunicorn workers
 - it reserves recurring jobs for the dedicated scheduler service
 
-Secure the environment file:
+Secure the env file:
 
 ```bash
 sudo chown root:ispmanager /etc/ispmanager/ispmanager.env
 sudo chmod 640 /etc/ispmanager/ispmanager.env
 ```
 
-## Step 5: Run Django Migrations and Static Collection
-
-Load the env file and run setup commands:
+## Step 7: Run Django Migrations and Static Collection
 
 ```bash
 cd /opt/ispmanager
@@ -218,6 +463,7 @@ source /etc/ispmanager/ispmanager.env
 set +a
 
 sudo -u ispmanager ./.venv/bin/python manage.py migrate
+sudo -u ispmanager mkdir -p /opt/ispmanager/media
 sudo -u ispmanager ./.venv/bin/python manage.py collectstatic --noinput
 sudo -u ispmanager ./.venv/bin/python manage.py check
 ```
@@ -228,7 +474,7 @@ Create the first admin user if needed:
 sudo -u ispmanager ./.venv/bin/python manage.py createsuperuser
 ```
 
-## Step 6: Create the Gunicorn systemd Service
+## Step 8: Create the Gunicorn systemd Service
 
 Create `/etc/systemd/system/ispmanager-web.service`:
 
@@ -242,12 +488,11 @@ User=ispmanager
 Group=ispmanager
 WorkingDirectory=/opt/ispmanager
 EnvironmentFile=/etc/ispmanager/ispmanager.env
-ExecStart=/opt/ispmanager/.venv/bin/gunicorn config.wsgi:application \
-  --bind 127.0.0.1:8193 \
-  --workers 3 \
-  --timeout 120
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/ispmanager/.venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:8193 --workers 3 --timeout 120
 Restart=always
 RestartSec=5
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target
@@ -262,7 +507,7 @@ sudo systemctl start ispmanager-web
 sudo systemctl status ispmanager-web
 ```
 
-## Step 6B: Create the Scheduler systemd Service
+## Step 8B: Create the Scheduler systemd Service
 
 Create `/etc/systemd/system/ispmanager-scheduler.service`:
 
@@ -276,9 +521,11 @@ User=ispmanager
 Group=ispmanager
 WorkingDirectory=/opt/ispmanager
 EnvironmentFile=/etc/ispmanager/ispmanager.env
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/ispmanager/.venv/bin/python manage.py run_scheduler
 Restart=always
 RestartSec=5
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target
@@ -293,14 +540,14 @@ sudo systemctl start ispmanager-scheduler
 sudo systemctl status ispmanager-scheduler
 ```
 
-## Step 7: Configure Nginx
+## Step 9: Configure Nginx
 
 Create `/etc/nginx/sites-available/ispmanager`:
 
 ```nginx
 server {
     listen 80;
-    server_name yourdomain.com www.yourdomain.com;
+    server_name isp.example.com www.isp.example.com;
 
     client_max_body_size 20M;
 
@@ -322,34 +569,93 @@ server {
 }
 ```
 
-Enable the site:
+Enable and reload:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/ispmanager /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo ln -sf /etc/nginx/sites-available/ispmanager /etc/nginx/sites-enabled/ispmanager
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## Step 8: Enable HTTPS
+### Nginx if you are using Cloudflared
+
+If the server uses Cloudflare Tunnel as the public entry point, prefer a localhost-only Nginx listener:
+
+```nginx
+server {
+    listen 127.0.0.1:8080;
+    server_name app.example.com;
+
+    client_max_body_size 20M;
+
+    location /static/ {
+        alias /opt/ispmanager/staticfiles/;
+    }
+
+    location /media/ {
+        alias /opt/ispmanager/media/;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8193;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+```
+
+This keeps the app private to the tunnel while still letting Django understand requests as HTTPS.
+
+### Cloudflared published application route
+
+Cloudflare’s published application route should point the public hostname to the local Nginx origin, for example:
+
+- hostname: `app.example.com`
+- service URL: `http://127.0.0.1:8080`
+
+If you are using a remotely-managed tunnel, install the service with:
+
+```bash
+sudo cloudflared service install <TUNNEL_TOKEN>
+sudo systemctl enable --now cloudflared
+```
+
+If `cloudflared.service` already exists for another workload:
+
+- do not overwrite it blindly
+- add or update the application route in the Cloudflare dashboard instead
+- verify the ISP Manager hostname targets the local origin above
+
+## Step 10: Enable HTTPS
 
 Once DNS is pointing correctly:
 
 ```bash
-sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+sudo certbot --nginx -d isp.example.com -d www.isp.example.com
 ```
 
-Then re-check your env file values:
+If you are using Cloudflared tunnel mode, you normally skip this step because Cloudflare already terminates public HTTPS.
 
-- `APP_BASE_URL=https://yourdomain.com`
-- `CSRF_TRUSTED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com`
+Then re-check the env file values:
+
+- `APP_BASE_URL=https://isp.example.com`
+- `CSRF_TRUSTED_ORIGINS=https://isp.example.com,https://www.isp.example.com`
 - `SESSION_COOKIE_SECURE=True`
 - `CSRF_COOKIE_SECURE=True`
 - `SECURE_SSL_REDIRECT=True`
 - `SECURE_PROXY_SSL_HEADER=HTTP_X_FORWARDED_PROTO,https`
 
-## Step 9: Manual Smoke Test
+Restart services after env changes:
 
-Run these checks after deployment:
+```bash
+sudo systemctl restart ispmanager-web
+sudo systemctl restart ispmanager-scheduler
+```
+
+## Step 11: Manual Smoke Test
 
 ```bash
 sudo systemctl status postgresql
@@ -357,20 +663,68 @@ sudo systemctl status ispmanager-web
 sudo systemctl status ispmanager-scheduler
 sudo systemctl status nginx
 curl -I http://127.0.0.1:8193
-curl -I https://yourdomain.com
+curl -I http://isp.example.com
+```
+
+If HTTPS is active:
+
+```bash
+curl -I https://isp.example.com
+```
+
+If you are using Cloudflared, also test the local tunnel origin:
+
+```bash
+curl -I http://127.0.0.1:8080
+sudo systemctl status cloudflared
 ```
 
 Validate in browser:
 
-- login page loads
+- public homepage loads
+- admin login loads
 - dashboard loads
 - subscriber list/detail loads
 - billing snapshots page loads
 - accounting pages load
 - routers page loads
-- public billing short links resolve correctly
+- public billing links resolve correctly
+
+## Rollback Basics
+
+If the fresh deployment must be rolled back:
+
+1. stop the new services
+2. restore the previous app directory from `/opt/backups/ispmanager`
+3. restore:
+   - old env file
+   - old systemd units
+   - old Nginx site file
+4. reload systemd
+5. reload Nginx
+6. start the previous services again
+
+Typical rollback commands:
+
+```bash
+sudo systemctl stop ispmanager-web ispmanager-scheduler
+sudo systemctl daemon-reload
+sudo systemctl reload nginx
+```
+
+Then restore the backup paths you want to reactivate.
 
 ## Troubleshooting
+
+### Script or manual deploy should not touch LibreQoS
+
+LibreQoS should remain at:
+
+```bash
+/opt/libreqos
+```
+
+If anything in your plan would overwrite or move that path, stop and correct the install target first.
 
 ### Gunicorn service does not start
 
@@ -397,10 +751,10 @@ sudo journalctl -u ispmanager-scheduler -n 100 --no-pager
 
 Common causes:
 
-- missing `EnvironmentFile`
+- broken env file
 - PostgreSQL connection problem
-- web env forgot `DISABLE_SCHEDULER=1` and scheduler is colliding with web startup assumptions
-- project code not updated to latest repo state
+- app code not fully copied
+- scheduler command missing from deployed version
 
 ### PostgreSQL connection fails
 
@@ -445,6 +799,15 @@ Most common cause:
 
 - Gunicorn is not listening on `127.0.0.1:8193`
 
+If you are using Cloudflared, also check:
+
+```bash
+sudo journalctl -u cloudflared -n 100 --no-pager
+curl -I http://127.0.0.1:8080
+```
+
+Cloudflare documents that a `502` in tunnel mode often means the tunnel is up but `cloudflared` cannot reach the configured local origin service or protocol.
+
 ### HTTPS works but forms fail with CSRF
 
 Check:
@@ -464,12 +827,40 @@ The app now uses `APP_BASE_URL` for public billing links.
 
 ## Final Recommendation
 
-For Ubuntu production, keep the deployment model clean:
+For this Ubuntu production deployment:
 
-- `Nginx` handles public HTTPS
-- `Gunicorn` handles web traffic on `127.0.0.1:8193`
-- `PostgreSQL` stores all application data
-- `ispmanager-scheduler.service` runs recurring jobs
-- `/etc/ispmanager/ispmanager.env` holds deployment-specific configuration
+- preserve LibreQoS at `/opt/libreqos`
+- backup the old `/opt/isp-manager` deployment instead of deleting it blindly
+- deploy fresh into `/opt/ispmanager`
+- keep secrets in `/etc/ispmanager/ispmanager.env`
+- run scheduler as its own service
+- if Cloudflared already exists, preserve it first and reuse deliberately
+- use HTTPS before treating the server as truly live
 
-This is the safest manual deployment path for the current codebase.
+For your first real server attempt, the safest flow is:
+
+1. clone the repo to a temporary location
+2. run `deploy/install_ubuntu_fresh.sh`
+3. verify services and homepage
+4. verify billing, accounting, routers, and scheduler behavior
+5. only then decide whether to retire the old backup completely
+
+## Future Updates After Go-Live
+
+Once the server is already live, do not keep using the fresh installer for routine code updates.
+
+Use:
+
+- `deploy/redeploy_ubuntu_update.sh`
+
+That script is intended for:
+
+- new code deployment
+- dependency refresh
+- migration rollout
+- static file rebuild
+
+See also:
+
+- [Cloudflared Dashboard Route Checklist](35_cloudflared_dashboard_route_checklist.md)
+- [Ubuntu Redeploy and Upgrade Script](36_ubuntu_redeploy_upgrade_script.md)
