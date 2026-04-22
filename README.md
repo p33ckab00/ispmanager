@@ -85,6 +85,7 @@ Project documentation starts here:
 - [Landing V2 Core Discussion](docs/28_landing_v2_core_discussion.md)
 - [Landing V2 Core Implementation Plan](docs/29_landing_v2_core_implementation_plan.md)
 - [Landing V2 Core Implementation Notes](docs/30_landing_v2_core_implementation_notes.md)
+- [Landing Nav UX Refinement](docs/31_landing_nav_ux_refinement.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 
 ## Current Product Direction

@@ -93,6 +93,50 @@
       background: rgba(255, 250, 243, 0.72);
       border-bottom: 1px solid rgba(18, 32, 51, 0.06);
     }
+    .admin-preview {
+      background: linear-gradient(90deg, #132137, #1c3354);
+      color: rgba(255,255,255,0.92);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .admin-preview-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      font-size: 0.9rem;
+    }
+    .admin-preview-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+    }
+    .admin-preview-label i {
+      color: #9ec5ff;
+    }
+    .admin-preview-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .admin-preview-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: white;
+      font-weight: 600;
+      font-size: 0.88rem;
+    }
+    .admin-preview-link:hover {
+      background: rgba(255,255,255,0.14);
+    }
     .nav-bar {
       display: flex;
       align-items: center;
@@ -127,6 +171,15 @@
       display: flex;
       align-items: center;
       gap: 12px;
+    }
+    .nav-utility-link {
+      color: var(--muted);
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+    .nav-utility-link:hover,
+    .nav-utility-link:focus-visible {
+      color: var(--ink);
     }
     .menu-toggle {
       display: none;
@@ -613,6 +666,7 @@
       .feature-grid {
         grid-template-columns: 1fr;
       }
+      .admin-preview-row,
       .section-heading,
       .cta-banner,
       .footer-row {
@@ -668,6 +722,31 @@
   </div>
   {% endif %}
 
+  {% if request.user.is_authenticated %}
+  <div class="admin-preview">
+    <div class="shell admin-preview-row">
+      <div class="admin-preview-label">
+        <i class="fa-solid fa-eye"></i>
+        <span>Previewing the public homepage while logged in as staff.</span>
+      </div>
+      <div class="admin-preview-actions">
+        <a href="{% url 'landing-edit' page_type='homepage' %}" class="admin-preview-link">
+          <i class="fa-solid fa-pen-to-square"></i>
+          <span>Edit Landing</span>
+        </a>
+        <a href="{{ dashboard_url }}" class="admin-preview-link">
+          <i class="fa-solid fa-table-columns"></i>
+          <span>{{ page.dashboard_label|default:'Dashboard' }}</span>
+        </a>
+        <a href="{{ admin_logout_url }}" class="admin-preview-link">
+          <i class="fa-solid fa-right-from-bracket"></i>
+          <span>{{ page.logout_label|default:'Logout' }}</span>
+        </a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <header class="site-header" id="site-header">
     <div class="shell">
       <div class="nav-bar">
@@ -681,19 +760,11 @@
           <a href="#why-us">{{ page.nav_why_us_label|default:'Why Us' }}</a>
           <a href="#coverage">{{ page.nav_coverage_label|default:'Coverage' }}</a>
           <a href="#contact">{{ page.nav_contact_label|default:'Contact' }}</a>
-          {% if request.user.is_authenticated %}
-          <a href="{{ dashboard_url }}">{{ page.dashboard_label|default:'Dashboard' }}</a>
-          {% else %}
-          <a href="{{ admin_login_url }}">{{ page.admin_login_label|default:'Admin Login' }}</a>
-          {% endif %}
         </nav>
 
         <div class="nav-actions">
-          {% if request.user.is_authenticated %}
-          <a href="{{ dashboard_url }}" class="btn btn-secondary">{{ page.dashboard_label|default:'Dashboard' }}</a>
-          <a href="{{ admin_logout_url }}" class="btn btn-secondary">{{ page.logout_label|default:'Logout' }}</a>
-          {% else %}
-          <a href="{{ admin_login_url }}" class="btn btn-secondary">{{ page.admin_login_label|default:'Admin Login' }}</a>
+          {% if not request.user.is_authenticated %}
+          <a href="{{ admin_login_url }}" class="nav-utility-link">{{ page.admin_login_label|default:'Admin Login' }}</a>
           {% endif %}
           <a href="{{ portal_url }}" class="btn btn-secondary">{{ page.portal_button_label|default:'My Account' }}</a>
           <a href="{{ primary_url }}" class="btn btn-primary">{{ primary_label }}</a>
@@ -708,13 +779,11 @@
         <a href="#why-us">{{ page.nav_why_us_label|default:'Why Us' }}</a>
         <a href="#coverage">{{ page.nav_coverage_label|default:'Coverage' }}</a>
         <a href="#contact">{{ page.nav_contact_label|default:'Contact' }}</a>
-        {% if request.user.is_authenticated %}
-        <a href="{{ dashboard_url }}">{{ page.dashboard_label|default:'Dashboard' }}</a>
-        <a href="{{ admin_logout_url }}">{{ page.logout_label|default:'Logout' }}</a>
-        {% else %}
+        {% if not request.user.is_authenticated %}
         <a href="{{ admin_login_url }}">{{ page.admin_login_label|default:'Admin Login' }}</a>
         {% endif %}
         <a href="{{ portal_url }}">{{ page.portal_nav_label|default:'Subscriber Portal' }}</a>
+        <a href="{{ primary_url }}">{{ primary_label }}</a>
       </div>
     </div>
   </header>
