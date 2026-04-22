@@ -862,5 +862,5 @@ That script is intended for:
 
 See also:
 
-- [Cloudflared Dashboard Route Checklist](35_cloudflared_dashboard_route_checklist.md)
+- [Cloudflared Checking and Route Checklist](35_cloudflared_dashboard_route_checklist.md)
 - [Ubuntu Redeploy and Upgrade Script](36_ubuntu_redeploy_upgrade_script.md)

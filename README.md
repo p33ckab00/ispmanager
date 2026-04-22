@@ -91,7 +91,7 @@ Project documentation starts here:
 - [Data Exchange V1 Implementation Notes](docs/32_data_exchange_v1_implementation_notes.md)
 - [Router Telemetry UX Upgrade](docs/33_router_telemetry_ux_upgrade.md)
 - [Landing Helper Copy Cleanup](docs/34_landing_helper_copy_cleanup.md)
-- [Cloudflared Dashboard Route Checklist](docs/35_cloudflared_dashboard_route_checklist.md)
+- [Cloudflared Checking and Route Checklist](docs/35_cloudflared_dashboard_route_checklist.md)
 - [Ubuntu Redeploy and Upgrade Script](docs/36_ubuntu_redeploy_upgrade_script.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 - [Ubuntu Fresh Install Script](deploy/install_ubuntu_fresh.sh)

@@ -1,6 +1,9 @@
-# Cloudflared Dashboard Route Checklist
+# Cloudflared Checking and Route Checklist
 
-Practical checklist for wiring `ISP Manager` behind an existing or newly installed Cloudflare Tunnel.
+Practical checklist for wiring `ISP Manager` behind an existing or newly installed Cloudflare Tunnel, with separate flows for:
+
+- servers that already have a real public domain
+- servers that do not yet have a usable domain and must be checked locally first
 
 ## Purpose
 
@@ -9,6 +12,7 @@ Use this checklist when:
 - the Ubuntu server already has `cloudflared`
 - you want to preserve an existing `cloudflared.service`
 - you want the public hostname to route to `ISP Manager` safely
+- or you want a localhost-first validation flow before exposing the app publicly
 
 This checklist assumes:
 
@@ -19,7 +23,31 @@ This checklist assumes:
 
 Replace `app.example.com` below with your real production hostname.
 
-## Server-Side Precheck
+## Two Supported Checking Paths
+
+### Path A: Domain already exists
+
+Use this when:
+
+- your domain is already active in Cloudflare
+- you already know the public hostname you want, such as `fsehub.qzz.io`
+- you are ready to connect the hostname to the tunnel route
+
+### Path B: No domain yet, localhost first
+
+Use this when:
+
+- the server is not yet ready for public hostname exposure
+- DNS is not yet prepared
+- you want to verify the app, Nginx, Gunicorn, PostgreSQL, and scheduler locally first
+
+Important:
+
+- `localhost` mode is a validation path, not the final public production path
+- Cloudflare Tunnel published routes still require a real hostname
+- if there is no domain yet, do local server-side checks first and add the tunnel route later
+
+## Common Server-Side Precheck
 
 Run these on the Ubuntu server:
 
@@ -48,7 +76,15 @@ Important:
 - terminate at local Nginx first
 - keep `/opt/libreqos` untouched
 
-## Required Django Environment
+## Path A: Checklist if a Real Domain Already Exists
+
+Use this path for example with:
+
+- `fsehub.qzz.io`
+- `app.example.com`
+- any real Cloudflare-managed hostname
+
+### Required Django Environment
 
 Confirm `/etc/ispmanager/ispmanager.env` contains:
 
@@ -72,7 +108,7 @@ sudo systemctl restart ispmanager-web
 sudo systemctl restart ispmanager-scheduler
 ```
 
-## Cloudflare Dashboard Checklist
+### Cloudflare Dashboard Checklist
 
 Go to:
 
@@ -97,6 +133,109 @@ Expected result:
 
 - public hostname `app.example.com`
 - local origin `http://127.0.0.1:8080`
+
+### Domain and Public Route Check
+
+Confirm:
+
+- the hostname exists in Cloudflare
+- the hostname is proxied through the tunnel
+- the route belongs to the correct tunnel
+- the route points to `http://127.0.0.1:8080`
+
+### Public Validation
+
+After saving the route, test:
+
+```bash
+curl -I https://app.example.com
+```
+
+Then validate in browser:
+
+- landing page loads
+- admin login works
+- dashboard works
+- subscriber list works
+- billing snapshot pages work
+- router pages work
+
+## Path B: Checklist if No Domain Is Ready Yet
+
+Use this path when:
+
+- there is no real public hostname yet
+- you only want to prove the application stack is working locally
+- you want to finish app installation before attaching a Cloudflare route
+
+### Localhost or loopback-only goal
+
+In this phase, your goal is only to confirm:
+
+- PostgreSQL is healthy
+- Gunicorn is serving Django
+- Nginx can proxy to Gunicorn
+- scheduler runs correctly
+
+### Recommended local checks
+
+Run:
+
+```bash
+sudo systemctl status postgresql --no-pager
+sudo systemctl status ispmanager-web --no-pager
+sudo systemctl status ispmanager-scheduler --no-pager
+sudo systemctl status nginx --no-pager
+curl -I http://127.0.0.1:8193
+curl -I http://127.0.0.1:8080
+```
+
+Expected:
+
+- `127.0.0.1:8193` responds from Gunicorn
+- `127.0.0.1:8080` responds from Nginx
+- app services remain healthy after restart
+
+### Environment guidance without a real domain
+
+If you are not attaching the app to a real hostname yet, keep your checks local.
+
+For local-only verification, the important thing is that the stack runs and responds on loopback.
+
+You can inspect the env file with:
+
+```bash
+sudo grep -E 'APP_BASE_URL|ALLOWED_HOSTS|CSRF_TRUSTED_ORIGINS|SECURE_PROXY_SSL_HEADER|DISABLE_SCHEDULER' /etc/ispmanager/ispmanager.env
+```
+
+Practical note:
+
+- if no public hostname exists yet, do not treat the deployment as fully production-ready
+- complete the domain and route setup later using Path A
+
+### Optional local browser access through SSH tunnel
+
+If you want to view the local site from your own machine before a public domain exists, you can forward the local Nginx port over SSH:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 user@your-server-ip
+```
+
+Then on your own machine open:
+
+```text
+http://127.0.0.1:8080
+```
+
+This is only for temporary validation.
+
+### When to switch from localhost mode to domain mode
+
+Move to Path A only when:
+
+- your final domain is ready in Cloudflare
+- you know which hostname you want to use
+- you are ready to map that hostname to the tunnel route
 
 ## If `cloudflared.service` Already Exists
 
@@ -137,33 +276,6 @@ sudo cloudflared service install <TUNNEL_TOKEN>
 sudo systemctl enable --now cloudflared
 ```
 
-## DNS and Hostname Check
-
-Confirm the public hostname resolves through Cloudflare and is tied to the tunnel route you created.
-
-What you want:
-
-- one public hostname for the app
-- the hostname is proxied by Cloudflare
-- the route belongs to the correct tunnel
-
-## Post-Route Validation
-
-After saving the route, test:
-
-```bash
-curl -I https://app.example.com
-```
-
-Then validate in browser:
-
-- landing page loads
-- admin login works
-- dashboard works
-- subscriber list works
-- billing snapshot pages work
-- router pages work
-
 ## Common Mistakes to Avoid
 
 - pointing the tunnel directly to `127.0.0.1:8193`
@@ -172,6 +284,7 @@ Then validate in browser:
 - forgetting `SECURE_PROXY_SSL_HEADER=HTTP_X_FORWARDED_PROTO,https`
 - running scheduler inside Gunicorn instead of the separate scheduler service
 - reinstalling `cloudflared` over an existing service without checking what else uses it
+- treating localhost-only checks as if the public deployment is already finished
 
 ## Troubleshooting Shortlist
 
@@ -192,6 +305,17 @@ If login or forms fail with CSRF:
 - check `SECURE_PROXY_SSL_HEADER`
 - confirm Nginx sends `X-Forwarded-Proto https` in Cloudflared mode
 
+If you are still in localhost-first mode and cannot reach the app:
+
+```bash
+curl -I http://127.0.0.1:8193
+curl -I http://127.0.0.1:8080
+sudo systemctl status ispmanager-web --no-pager
+sudo systemctl status nginx --no-pager
+sudo journalctl -u ispmanager-web -n 100 --no-pager
+sudo journalctl -u nginx -n 50 --no-pager
+```
+
 ## Final Recommendation
 
 For `ISP Manager`, the cleanest Cloudflare Tunnel route is:
@@ -201,3 +325,9 @@ For `ISP Manager`, the cleanest Cloudflare Tunnel route is:
 - Nginx upstream: `http://127.0.0.1:8193`
 
 That keeps the deployment private, clean, and aligned with the current production architecture.
+
+If no domain is ready yet:
+
+- finish the localhost checks first
+- confirm the app stack is healthy on `127.0.0.1`
+- only then attach a real hostname through Cloudflare Tunnel
