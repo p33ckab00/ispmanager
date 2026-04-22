@@ -805,7 +805,13 @@
           </span>
           <h1 class="headline">{{ page.hero_title|default:'Internet service that feels local, responsive, and dependable.' }}</h1>
           <p class="hero-copy">
-            {{ page.hero_subtitle|default:'Launch your public site with a cleaner story: clear plans, direct support channels, payment guidance, and a fast path into the subscriber portal.' }}
+            {% if page.hero_subtitle %}
+            {{ page.hero_subtitle }}
+            {% elif request.user.is_authenticated and request.user.is_staff %}
+            Launch your public site with a cleaner story: clear plans, direct support channels, payment guidance, and a fast path into the subscriber portal.
+            {% else %}
+            Choose a plan, check support hours, and access your subscriber account in one place.
+            {% endif %}
           </p>
           <div class="hero-actions">
             <a href="{{ primary_url }}" class="btn btn-primary">{{ primary_label }} <i class="fa-solid fa-arrow-right"></i></a>
@@ -814,11 +820,27 @@
           <div class="hero-stats">
             <div class="stat-box">
               <span class="stat-value">{{ plans|length }}</span>
-              <span class="stat-label">{{ page.hero_stat_plans_label|default:'Published plan option ready for comparison' }}</span>
+              <span class="stat-label">
+                {% if page.hero_stat_plans_label %}
+                {{ page.hero_stat_plans_label }}
+                {% elif request.user.is_authenticated and request.user.is_staff %}
+                Published plan option ready for comparison
+                {% else %}
+                Plans ready for comparison
+                {% endif %}
+              </span>
             </div>
             <div class="stat-box">
               <span class="stat-value">{{ page.support_hours|default:'Mon-Sat' }}</span>
-              <span class="stat-label">{{ page.hero_stat_support_label|default:'Support window you can highlight for new and existing subscribers' }}</span>
+              <span class="stat-label">
+                {% if page.hero_stat_support_label %}
+                {{ page.hero_stat_support_label }}
+                {% elif request.user.is_authenticated and request.user.is_staff %}
+                Support window you can highlight for new and existing subscribers
+                {% else %}
+                Support hours for new and existing subscribers
+                {% endif %}
+              </span>
             </div>
             <div class="stat-box">
               <span class="stat-value">{{ page.hero_stat_portal_value|default:'24/7' }}</span>
@@ -831,7 +853,15 @@
           <div class="network-card">
             <span class="network-label">{{ page.network_promise_eyebrow|default:'Network Promise' }}</span>
             <h2>{{ page.network_promise_title|default:'Fast answers matter as much as fast speeds.' }}</h2>
-            <p>{{ page.network_promise_body|default:'Use this homepage to set expectations clearly: transparent plans, reachable support, and an easier path to billing and account actions.' }}</p>
+            <p>
+              {% if page.network_promise_body %}
+              {{ page.network_promise_body }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Use this homepage to set expectations clearly: transparent plans, reachable support, and an easier path to billing and account actions.
+              {% else %}
+              Transparent plans, reachable support, and a simpler path to billing and account access.
+              {% endif %}
+            </p>
           </div>
 
           <div class="quick-links">
@@ -847,7 +877,15 @@
               <a href="#plans" class="quick-link">
                 <span>
                   {{ page.quick_link_plans_title|default:'Compare Plans' }}
-                  <small>{{ page.quick_link_plans_text|default:'Show your featured offer and monthly pricing up front' }}</small>
+                  <small>
+                    {% if page.quick_link_plans_text %}
+                    {{ page.quick_link_plans_text }}
+                    {% elif request.user.is_authenticated and request.user.is_staff %}
+                    Show your featured offer and monthly pricing up front
+                    {% else %}
+                    See available plans, speeds, and monthly pricing
+                    {% endif %}
+                  </small>
                 </span>
                 <i class="fa-solid fa-layer-group"></i>
               </a>
@@ -863,7 +901,15 @@
               <a href="#contact" class="quick-link">
                 <span>
                   {{ page.quick_link_contact_title|default:'Contact Us' }}
-                  <small>{{ page.quick_link_contact_text|default:'Share your office line, mobile, or messenger handoff here' }}</small>
+                  <small>
+                    {% if page.quick_link_contact_text %}
+                    {{ page.quick_link_contact_text }}
+                    {% elif request.user.is_authenticated and request.user.is_staff %}
+                    Share your office line, mobile, or messenger handoff here
+                    {% else %}
+                    Reach our team for installations, support, and account concerns
+                    {% endif %}
+                  </small>
                 </span>
                 <i class="fa-solid fa-headset"></i>
               </a>
@@ -872,14 +918,28 @@
           </div>
 
           <div class="coverage-pillars">
-            <span class="section-eyebrow">{{ page.operations_eyebrow|default:'Built for ISP Operations' }}</span>
+            <span class="section-eyebrow">
+              {% if page.operations_eyebrow %}
+              {{ page.operations_eyebrow }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Built for ISP Operations
+              {% else %}
+              Why {{ isp_name }}
+              {% endif %}
+            </span>
             <ul>
               {% for point in page.operations_point_list %}
               <li><i class="fa-solid fa-circle-check"></i><span>{{ point }}</span></li>
               {% empty %}
+              {% if request.user.is_authenticated and request.user.is_staff %}
               <li><i class="fa-solid fa-circle-check"></i><span>Promote your best-fit plans without forcing visitors into a generic template.</span></li>
               <li><i class="fa-solid fa-circle-check"></i><span>Surface support, billing, and portal access right away so fewer people get lost.</span></li>
               <li><i class="fa-solid fa-circle-check"></i><span>Keep content editable from the admin side instead of hardcoding every homepage change.</span></li>
+              {% else %}
+              <li><i class="fa-solid fa-circle-check"></i><span>Clear plans for homes, shops, and small offices.</span></li>
+              <li><i class="fa-solid fa-circle-check"></i><span>Reachable support for service, billing, and account concerns.</span></li>
+              <li><i class="fa-solid fa-circle-check"></i><span>Portal access for subscriber billing and account activity.</span></li>
+              {% endif %}
               {% endfor %}
             </ul>
           </div>
@@ -895,7 +955,15 @@
             <div class="section-eyebrow">{{ page.plans_section_eyebrow|default:'Service Plans' }}</div>
             <h2 class="section-title">{{ page.plans_section_title|default:'Straightforward options people can compare in one look.' }}</h2>
           </div>
-          <p class="section-intro">{{ page.plans_section_intro|default:'Your plans are pulled directly from the landing admin panel. Featured packages float to the top visually so promos and anchor offers stand out without burying the essentials.' }}</p>
+          <p class="section-intro">
+            {% if page.plans_section_intro %}
+            {{ page.plans_section_intro }}
+            {% elif request.user.is_authenticated and request.user.is_staff %}
+            Your plans are pulled directly from the landing admin panel. Featured packages float to the top visually so promos and anchor offers stand out without burying the essentials.
+            {% else %}
+            Compare monthly plans, speeds, and key inclusions in one place.
+            {% endif %}
+          </p>
         </div>
         <div class="plans-grid">
           {% for plan in plans %}
@@ -935,25 +1003,89 @@
         <div class="section-heading">
           <div>
             <div class="section-eyebrow">{{ page.why_section_eyebrow|default:'Why Choose' }} {{ isp_name }}</div>
-            <h2 class="section-title">{{ page.why_section_title|default:'The landing page should answer the questions people actually ask before they sign up.' }}</h2>
+            <h2 class="section-title">
+              {% if page.why_section_title %}
+              {{ page.why_section_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              The landing page should answer the questions people actually ask before they sign up.
+              {% else %}
+              Why subscribers choose {{ isp_name }}
+              {% endif %}
+            </h2>
           </div>
-          <p class="section-intro">{{ page.why_section_intro|default:'This section keeps the message practical: what support feels like, how billing stays understandable, and how customers can manage their accounts after installation.' }}</p>
+          <p class="section-intro">
+            {% if page.why_section_intro %}
+            {{ page.why_section_intro }}
+            {% elif request.user.is_authenticated and request.user.is_staff %}
+            This section keeps the message practical: what support feels like, how billing stays understandable, and how customers can manage their accounts after installation.
+            {% else %}
+            We focus on responsive support, clear billing, and reliable day-to-day service.
+            {% endif %}
+          </p>
         </div>
         <div class="feature-grid">
           <article class="section-card">
             <div class="section-eyebrow">{{ page.why_card_1_eyebrow|default:'Fast Support' }}</div>
-            <h3>{{ page.why_card_1_title|default:'Local communication, not just a phone number on a poster.' }}</h3>
-            <p>{{ page.why_card_1_body|default:'Surface your office line, support email, and service window clearly so expectations are set before a new subscriber even applies.' }}</p>
+            <h3>
+              {% if page.why_card_1_title %}
+              {{ page.why_card_1_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Local communication, not just a phone number on a poster.
+              {% else %}
+              Responsive local support
+              {% endif %}
+            </h3>
+            <p>
+              {% if page.why_card_1_body %}
+              {{ page.why_card_1_body }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Surface your office line, support email, and service window clearly so expectations are set before a new subscriber even applies.
+              {% else %}
+              Reach a real team for installation updates, service concerns, and account questions.
+              {% endif %}
+            </p>
           </article>
           <article class="section-card">
             <div class="section-eyebrow">{{ page.why_card_2_eyebrow|default:'Clear Billing' }}</div>
-            <h3>{{ page.why_card_2_title|default:'Plans, due expectations, and portal access should feel easy to follow.' }}</h3>
-            <p>{{ page.why_card_2_body|default:'Use the public site to reduce confusion around monthly packages, statements, and where subscribers can check their account details.' }}</p>
+            <h3>
+              {% if page.why_card_2_title %}
+              {{ page.why_card_2_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Plans, due expectations, and portal access should feel easy to follow.
+              {% else %}
+              Clear billing and account access
+              {% endif %}
+            </h3>
+            <p>
+              {% if page.why_card_2_body %}
+              {{ page.why_card_2_body }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Use the public site to reduce confusion around monthly packages, statements, and where subscribers can check their account details.
+              {% else %}
+              Check your plan, bills, and account details more easily through the subscriber portal.
+              {% endif %}
+            </p>
           </article>
           <article class="section-card">
             <div class="section-eyebrow">{{ page.why_card_3_eyebrow|default:'Operational Ready' }}</div>
-            <h3>{{ page.why_card_3_title|default:'Built to work with the same ISP Manager backend your team uses daily.' }}</h3>
-            <p>{{ page.why_card_3_body|default:'The public site can point directly into the subscriber portal while your staff keeps dashboards, billing, and support workflows inside the system.' }}</p>
+            <h3>
+              {% if page.why_card_3_title %}
+              {{ page.why_card_3_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Built to work with the same ISP Manager backend your team uses daily.
+              {% else %}
+              Built for everyday reliability
+              {% endif %}
+            </h3>
+            <p>
+              {% if page.why_card_3_body %}
+              {{ page.why_card_3_body }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              The public site can point directly into the subscriber portal while your staff keeps dashboards, billing, and support workflows inside the system.
+              {% else %}
+              Our network is designed to support homes, remote work, streaming, and online gaming.
+              {% endif %}
+            </p>
           </article>
         </div>
       </div>
@@ -964,15 +1096,47 @@
         <div class="section-heading">
           <div>
             <div class="section-eyebrow">{{ page.coverage_section_eyebrow|default:'Availability and Reach' }}</div>
-            <h2 class="section-title">{{ page.coverage_section_title|default:'Let visitors know where service is available and how to ask for installation.' }}</h2>
+            <h2 class="section-title">
+              {% if page.coverage_section_title %}
+              {{ page.coverage_section_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Let visitors know where service is available and how to ask for installation.
+              {% else %}
+              Check if service is available in your area.
+              {% endif %}
+            </h2>
           </div>
-          <p class="section-intro">{{ page.coverage_section_intro|default:'Even a simple availability section helps reduce repetitive chats. It gives your sales or support team a clearer starting point for inquiries.' }}</p>
+          <p class="section-intro">
+            {% if page.coverage_section_intro %}
+            {{ page.coverage_section_intro }}
+            {% elif request.user.is_authenticated and request.user.is_staff %}
+            Even a simple availability section helps reduce repetitive chats. It gives your sales or support team a clearer starting point for inquiries.
+            {% else %}
+            Share your location and our team can confirm availability and installation options.
+            {% endif %}
+          </p>
         </div>
         <div class="coverage-grid">
           <article class="section-card">
             <div class="section-eyebrow">{{ page.coverage_title|default:'Areas We Serve' }}</div>
-            <h3>{{ page.coverage_card_title|default:'Coverage can start simple and still feel professional.' }}</h3>
-            <p>{{ page.coverage_text|default:'List the barangays, subdivisions, puroks, sitios, or business areas where your network is already active. You can also mention nearby expansion targets so visitors know whether to inquire.' }}</p>
+            <h3>
+              {% if page.coverage_card_title %}
+              {{ page.coverage_card_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Coverage can start simple and still feel professional.
+              {% else %}
+              Check your area
+              {% endif %}
+            </h3>
+            <p>
+              {% if page.coverage_text %}
+              {{ page.coverage_text }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              List the barangays, subdivisions, puroks, sitios, or business areas where your network is already active. You can also mention nearby expansion targets so visitors know whether to inquire.
+              {% else %}
+              Contact us with your barangay, subdivision, or landmark to confirm service availability.
+              {% endif %}
+            </p>
           </article>
           <article class="section-card">
             <div class="section-eyebrow">{{ page.payment_section_eyebrow|default:'Payment Channels' }}</div>
@@ -988,8 +1152,13 @@
               {% for note in page.payment_empty_note_list %}
               <li><i class="fa-solid fa-wallet"></i><span>{{ note }}</span></li>
               {% empty %}
+              {% if request.user.is_authenticated and request.user.is_staff %}
               <li><i class="fa-solid fa-wallet"></i><span>Add GCash, Maya, bank transfer, or office walk-in options from the landing page editor.</span></li>
               <li><i class="fa-solid fa-wallet"></i><span>If you support portal-based billing views, keep the portal button visible from the hero area too.</span></li>
+              {% else %}
+              <li><i class="fa-solid fa-wallet"></i><span>Contact our team for the available payment channels.</span></li>
+              <li><i class="fa-solid fa-wallet"></i><span>Use the subscriber portal to review billing and account access.</span></li>
+              {% endif %}
               {% endfor %}
             </ul>
             {% endif %}
@@ -1003,9 +1172,25 @@
         <div class="section-heading">
           <div>
             <div class="section-eyebrow">{{ page.faq_section_eyebrow|default:'Frequently Asked Questions' }}</div>
-            <h2 class="section-title">{{ page.faq_section_title|default:'Answer the practical questions before someone has to ask by chat or phone.' }}</h2>
+            <h2 class="section-title">
+              {% if page.faq_section_title %}
+              {{ page.faq_section_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Answer the practical questions before someone has to ask by chat or phone.
+              {% else %}
+              Answers to common questions
+              {% endif %}
+            </h2>
           </div>
-          <p class="section-intro">{{ page.faq_section_intro|default:'This section is fully editable from the landing admin area. Use it to cover installation, billing, payments, due dates, service area, and support expectations.' }}</p>
+          <p class="section-intro">
+            {% if page.faq_section_intro %}
+            {{ page.faq_section_intro }}
+            {% elif request.user.is_authenticated and request.user.is_staff %}
+            This section is fully editable from the landing admin area. Use it to cover installation, billing, payments, due dates, service area, and support expectations.
+            {% else %}
+            Browse quick answers about installation, billing, payments, coverage, and support.
+            {% endif %}
+          </p>
         </div>
         {% if faqs %}
         <div class="faq-list">
@@ -1021,9 +1206,33 @@
         </div>
         {% else %}
         <div class="section-card">
-          <div class="section-eyebrow">{{ page.faq_empty_eyebrow|default:'FAQ Placeholder' }}</div>
-          <h3>{{ page.faq_empty_title|default:'Start adding your most common ISP questions.' }}</h3>
-          <p>{{ page.faq_empty_body|default:'Examples: what areas are covered, how long installation takes, how billing due dates work, what happens when payment is late, and which payment channels are accepted.' }}</p>
+          <div class="section-eyebrow">
+            {% if page.faq_empty_eyebrow %}
+            {{ page.faq_empty_eyebrow }}
+            {% elif request.user.is_authenticated and request.user.is_staff %}
+            FAQ Placeholder
+            {% else %}
+            FAQ
+            {% endif %}
+          </div>
+          <h3>
+            {% if page.faq_empty_title %}
+            {{ page.faq_empty_title }}
+            {% elif request.user.is_authenticated and request.user.is_staff %}
+            Start adding your most common ISP questions.
+            {% else %}
+            More questions? Contact our team.
+            {% endif %}
+          </h3>
+          <p>
+            {% if page.faq_empty_body %}
+            {{ page.faq_empty_body }}
+            {% elif request.user.is_authenticated and request.user.is_staff %}
+            Examples: what areas are covered, how long installation takes, how billing due dates work, what happens when payment is late, and which payment channels are accepted.
+            {% else %}
+            We can help with service area, installation, due dates, and payment options.
+            {% endif %}
+          </p>
         </div>
         {% endif %}
       </div>
@@ -1034,22 +1243,60 @@
         <div class="section-heading">
           <div>
             <div class="section-eyebrow">{{ page.inquiry_section_eyebrow|default:'Inquiry Form' }}</div>
-            <h2 class="section-title">{{ page.inquiry_section_title|default:'Turn homepage traffic into real leads your team can follow up.' }}</h2>
+            <h2 class="section-title">
+              {% if page.inquiry_section_title %}
+              {{ page.inquiry_section_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Turn homepage traffic into real leads your team can follow up.
+              {% else %}
+              Send us your details and we'll help you get started.
+              {% endif %}
+            </h2>
           </div>
-          <p class="section-intro">{{ page.inquiry_section_intro|default:'Keep the first contact simple. Ask for the basics, capture where the customer is located, and let the staff team handle availability confirmation after submission.' }}</p>
+          <p class="section-intro">
+            {% if page.inquiry_section_intro %}
+            {{ page.inquiry_section_intro }}
+            {% elif request.user.is_authenticated and request.user.is_staff %}
+            Keep the first contact simple. Ask for the basics, capture where the customer is located, and let the staff team handle availability confirmation after submission.
+            {% else %}
+            Share your name, mobile number, service area, and preferred plan so we can guide you faster.
+            {% endif %}
+          </p>
         </div>
         <div class="inquiry-grid">
           <article class="inquiry-panel">
             <div class="section-eyebrow">{{ page.inquiry_info_eyebrow|default:'What happens next' }}</div>
-            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.55rem; margin:8px 0 10px;">{{ page.inquiry_info_title|default:'Your team gets a cleaner starting point for every inquiry.' }}</h3>
-            <p style="color:var(--muted); line-height:1.8; margin:0;">{{ page.inquiry_info_body|default:'Every inquiry is saved inside the system so staff can review, contact, and update the lead status from the landing management area.' }}</p>
+            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.55rem; margin:8px 0 10px;">
+              {% if page.inquiry_info_title %}
+              {{ page.inquiry_info_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Your team gets a cleaner starting point for every inquiry.
+              {% else %}
+              What happens next
+              {% endif %}
+            </h3>
+            <p style="color:var(--muted); line-height:1.8; margin:0;">
+              {% if page.inquiry_info_body %}
+              {{ page.inquiry_info_body }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Every inquiry is saved inside the system so staff can review, contact, and update the lead status from the landing management area.
+              {% else %}
+              Our team reviews each inquiry and will contact you about availability, plans, and installation.
+              {% endif %}
+            </p>
             <ul class="inquiry-helper-list">
               {% for point in page.inquiry_highlight_list %}
               <li><i class="fa-solid fa-circle-check"></i><span>{{ point }}</span></li>
               {% empty %}
+              {% if request.user.is_authenticated and request.user.is_staff %}
               <li><i class="fa-solid fa-circle-check"></i><span>Ask for the address or area so serviceability is easier to confirm.</span></li>
               <li><i class="fa-solid fa-circle-check"></i><span>Let people choose a preferred plan, or leave it open if they still need guidance.</span></li>
               <li><i class="fa-solid fa-circle-check"></i><span>Keep the form short to reduce hesitation and incomplete submissions.</span></li>
+              {% else %}
+              <li><i class="fa-solid fa-circle-check"></i><span>Share your exact area for faster serviceability checks.</span></li>
+              <li><i class="fa-solid fa-circle-check"></i><span>Choose a preferred plan if you already have one in mind.</span></li>
+              <li><i class="fa-solid fa-circle-check"></i><span>Add landmarks or schedule preferences if helpful.</span></li>
+              {% endif %}
               {% endfor %}
             </ul>
           </article>
@@ -1108,7 +1355,15 @@
         <div class="contact-grid">
           <article class="contact-card">
             <div class="section-eyebrow">{{ page.contact_card_eyebrow|default:'Contact Details' }}</div>
-            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; margin:8px 0 10px;">{{ page.contact_card_title|default:'Talk to the team.' }}</h3>
+            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; margin:8px 0 10px;">
+              {% if page.contact_card_title %}
+              {{ page.contact_card_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Talk to the team.
+              {% else %}
+              Get in touch
+              {% endif %}
+            </h3>
             <ul class="contact-list">
               {% if page.contact_phone %}<li><i class="fa-solid fa-phone"></i><span>{{ page.contact_phone }}</span></li>{% endif %}
               {% if page.contact_email %}<li><i class="fa-solid fa-envelope"></i><span>{{ page.contact_email }}</span></li>{% endif %}
@@ -1119,14 +1374,38 @@
           <article class="contact-card">
             <div class="section-eyebrow">{{ page.about_card_eyebrow|default:'About' }} {{ isp_name }}</div>
             <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; margin:8px 0 10px;">{{ page.about_card_title|default:'Tell the story behind the network.' }}</h3>
-            <p style="color:var(--muted); line-height:1.8; margin:0;">{{ page.about_text|default:'Use this space to explain who you serve, how your team supports installations and billing concerns, and what kind of subscriber experience people can expect once they are connected.' }}</p>
+            <p style="color:var(--muted); line-height:1.8; margin:0;">
+              {% if page.about_text %}
+              {{ page.about_text }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Use this space to explain who you serve, how your team supports installations and billing concerns, and what kind of subscriber experience people can expect once they are connected.
+              {% else %}
+              We provide internet service for homes and businesses with a focus on stable performance and responsive support.
+              {% endif %}
+            </p>
           </article>
         </div>
 
         <div class="cta-banner">
           <div>
-            <h3>{{ page.cta_banner_title|default:'Ready to turn this into your real public homepage?' }}</h3>
-            <p>{{ page.cta_banner_body|default:'Keep `/` as the site front door, send existing subscribers to the portal, and let the internal team stay focused on dashboards, billing, routers, and support operations.' }}</p>
+            <h3>
+              {% if page.cta_banner_title %}
+              {{ page.cta_banner_title }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Ready to turn this into your real public homepage?
+              {% else %}
+              Ready to get connected?
+              {% endif %}
+            </h3>
+            <p>
+              {% if page.cta_banner_body %}
+              {{ page.cta_banner_body }}
+              {% elif request.user.is_authenticated and request.user.is_staff %}
+              Keep `/` as the site front door, send existing subscribers to the portal, and let the internal team stay focused on dashboards, billing, routers, and support operations.
+              {% else %}
+              View plans, send an inquiry, or open the subscriber portal to manage your account.
+              {% endif %}
+            </p>
           </div>
           <div style="display:flex; flex-wrap:wrap; gap:12px;">
             <a href="{{ primary_url }}" class="btn btn-primary">{{ primary_label }}</a>
@@ -1139,7 +1418,15 @@
 
   <footer>
     <div class="shell footer-row">
-      <div>{{ page.footer_text|default:'Built to present your ISP clearly and guide subscribers into the right workflow.' }}</div>
+      <div>
+        {% if page.footer_text %}
+        {{ page.footer_text }}
+        {% elif request.user.is_authenticated and request.user.is_staff %}
+        Built to present your ISP clearly and guide subscribers into the right workflow.
+        {% else %}
+        Reliable internet for homes, businesses, and growing communities.
+        {% endif %}
+      </div>
       <div>{{ isp_name }} &copy; {% now "Y" %}</div>
     </div>
   </footer>
