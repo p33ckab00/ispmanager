@@ -25,7 +25,7 @@
 | accounting | DONE | Income/expense, monthly P&L, CSV export |
 | sms | DONE | Semaphore balance, bulk send, billing SMS from snapshot |
 | notifications | DONE | Telegram per-event log, test button |
-| diagnostics | DONE | Disk, DB, router ping, scheduler status |
+| diagnostics | DONE | Operations health center, alerts, scheduler truth, router/billing/messaging/usage health |
 | landing | DONE | Homepage editor, captive portal, publish toggle |
 | nms | DONE | Leaflet map, router + NAP + subscriber markers |
 | data_exchange | DONE | CSV exports, subscriber/payment imports, dry-run, job history |
@@ -60,6 +60,22 @@ Data Exchange v1 is now part of the operator workflow.
 - Central Data Exchange dashboard for templates, imports, exports, and job history
 - Dry-run validation before subscriber and payment imports
 - Payment imports reuse the billing allocation flow so linked accounting income stays consistent
+
+---
+
+## Diagnostics
+
+Diagnostics is now an operations health center instead of a small system-info page.
+
+- overall health badge with active alerts
+- PostgreSQL-aware runtime and database checks
+- production-aware scheduler diagnostics using persisted APScheduler job history
+- router and telemetry freshness checks
+- billing integrity and palugit visibility
+- messaging and notification failure visibility
+- usage sampling freshness
+- data exchange recent failures and audit activity
+- dashboard widget now uses `/api/v1/diagnostics/health/` for truthful compact health status
 
 ---
 

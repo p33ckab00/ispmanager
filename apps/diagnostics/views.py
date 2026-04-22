@@ -1,55 +1,21 @@
-import platform
-import shutil
-import os
-from django.shortcuts import render, get_object_or_404, redirect
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from zoneinfo import ZoneInfo
-from apps.routers.models import Router
+
+from apps.diagnostics.services import build_diagnostics_snapshot
 from apps.routers import mikrotik
-from apps.subscribers.models import Subscriber
-from apps.billing.models import Invoice
-from apps.sms.models import SMSLog
+from apps.routers.models import Router
 
 
 @login_required
 def diagnostics_dashboard(request):
-    disk = shutil.disk_usage('/')
-    disk_used_pct = round((disk.used / disk.total) * 100, 1)
-
-    from django.db import connection
-    db_path = connection.settings_dict.get('NAME', '')
-    db_size_bytes = os.path.getsize(db_path) if os.path.exists(str(db_path)) else 0
-    db_size_kb = round(db_size_bytes / 1024, 1)
-
-    routers = Router.objects.filter(is_active=True)
-    router_statuses = []
-    for r in routers:
-        router_statuses.append({
-            'router': r,
-            'online': r.status == 'online',
-        })
-
-    stats = {
-        'total_subscribers': Subscriber.objects.count(),
-        'active_subscribers': Subscriber.objects.filter(status='active').count(),
-        'online_mt': Subscriber.objects.filter(mt_status='online').count(),
-        'open_bills': Invoice.objects.filter(status__in=['open','partial']).count(),
-        'overdue_bills': Invoice.objects.filter(status='overdue').count(),
-        'sms_sent_today': SMSLog.objects.filter(created_at__date=timezone.now().date()).count(),
-    }
-
-    return render(request, 'diagnostics/dashboard.html', {
-        'disk_total_gb': round(disk.total / (1024**3), 1),
-        'disk_used_gb': round(disk.used / (1024**3), 1),
-        'disk_used_pct': disk_used_pct,
-        'db_size_kb': db_size_kb,
-        'python_version': platform.python_version(),
-        'os_info': f"{platform.system()} {platform.release()}",
-        'router_statuses': router_statuses,
-        'stats': stats,
-    })
+    snapshot = build_diagnostics_snapshot()
+    return render(request, 'diagnostics/dashboard.html', snapshot)
 
 
 @login_required
@@ -70,38 +36,77 @@ def router_ping(request, pk):
             'total_memory': resource.get('total-memory', ''),
             'version': resource.get('version', ''),
         })
-    except Exception as e:
+    except Exception as exc:
         router.status = 'offline'
         router.save(update_fields=['status'])
-        return JsonResponse({'ok': False, 'error': str(e)})
+        return JsonResponse({'ok': False, 'error': str(exc)})
 
 
 @login_required
 def scheduler_status(request):
-    from apps.core.scheduler import get_scheduler
-    scheduler = get_scheduler()
-    jobs = []
-    if scheduler.running:
-        for job in scheduler.get_jobs():
-            jobs.append({
-                'id': job.id,
-                'name': job.name,
-                'next_run': job.next_run_time,
-            })
-    return render(request, 'diagnostics/scheduler.html', {
-        'running': scheduler.running,
-        'jobs': jobs,
-    })
+    snapshot = build_diagnostics_snapshot()
+    scheduler = snapshot['scheduler']
+    context = {
+        'generated_at': snapshot['generated_at'],
+        'overall_health': snapshot['overall_health'],
+        'alerts': snapshot['alerts'],
+        'expected_mode': scheduler['expected_mode'],
+        'embedded_running': scheduler['embedded_running'],
+        'service_health': scheduler['service_health'],
+        'service_health_classes': scheduler['service_health_classes'],
+        'service_message': scheduler['service_message'],
+        'jobs': scheduler['job_rows'],
+        'failed_jobs': scheduler['failed_jobs'],
+        'stale_jobs': scheduler['stale_jobs'],
+        'recent_failures': scheduler['recent_failures'],
+        'summary_cards': [
+            {
+                'label': 'Automation Health',
+                'value': scheduler['service_health'].title(),
+                'meta': scheduler['service_message'],
+                'accent': scheduler['service_health_classes'],
+            },
+            {
+                'label': 'Registered Jobs',
+                'value': str(scheduler['registered_job_count']),
+                'meta': f"{scheduler['embedded_job_count']} loaded in this process",
+                'accent': 'bg-sky-50 text-sky-700 ring-sky-200',
+            },
+            {
+                'label': 'Failed Jobs',
+                'value': str(len(scheduler['failed_jobs'])),
+                'meta': 'Jobs whose latest state is failed',
+                'accent': 'bg-rose-50 text-rose-700 ring-rose-200' if scheduler['failed_jobs'] else 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+            },
+            {
+                'label': 'Stale / Pending',
+                'value': str(len(scheduler['stale_jobs'])),
+                'meta': 'Enabled jobs missing a recent success',
+                'accent': 'bg-amber-50 text-amber-700 ring-amber-200' if scheduler['stale_jobs'] else 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+            },
+        ],
+    }
+    return render(request, 'diagnostics/scheduler.html', context)
 
 
 @login_required
 def run_job_now(request, job_id):
     from apps.core.scheduler import get_scheduler
+
     scheduler = get_scheduler()
+    if not scheduler.running:
+        messages.warning(
+            request,
+            'Run now is only available when this web process is running the embedded scheduler. '
+            'In production, use the dedicated scheduler service and wait for the persisted next run.',
+        )
+        return redirect('scheduler-status')
+
     job = scheduler.get_job(job_id)
-    if job:
-        from datetime import datetime
-        job.modify(next_run_time=datetime.now(tz=ZoneInfo('Asia/Manila')))
-        from django.contrib import messages
-        messages.success(request, f"Job '{job.name}' triggered.")
+    if not job:
+        messages.warning(request, 'This job is not loaded in the current embedded scheduler process.')
+        return redirect('scheduler-status')
+
+    job.modify(next_run_time=datetime.now(tz=ZoneInfo('Asia/Manila')))
+    messages.success(request, f"Job '{job.name}' was queued for immediate execution in this process.")
     return redirect('scheduler-status')

@@ -1,3 +1,8 @@
 from django.urls import path
 
-urlpatterns = []
+from apps.diagnostics import api_views
+
+
+urlpatterns = [
+    path('health/', api_views.DiagnosticsHealthView.as_view(), name='api-diagnostics-health'),
+]

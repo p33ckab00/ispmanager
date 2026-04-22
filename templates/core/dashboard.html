@@ -141,36 +141,32 @@ function updateStats() {
 }
 
 function checkSystemStatus() {
-  // Check scheduler
-  fetch('/diagnostics/scheduler/')
-    .then(r => {
-      const el = document.getElementById('sched-status')
-      if (r.ok) { el.textContent = 'Running'; el.className = 'text-green-600 font-medium' }
-    }).catch(() => {})
+  const applyStatus = (id, state, label) => {
+    const el = document.getElementById(id)
+    el.textContent = label
+    if (state === 'healthy') {
+      el.className = 'text-green-600 font-medium'
+    } else if (state === 'warning') {
+      el.className = 'text-amber-600 font-medium'
+    } else if (state === 'critical') {
+      el.className = 'text-red-600 font-medium'
+    } else {
+      el.className = 'text-gray-400 font-medium'
+    }
+  }
 
-  // Check telegram config
-  fetch('/api/v1/settings/telegram/')
+  fetch('/api/v1/diagnostics/health/')
     .then(r => r.json())
     .then(d => {
-      const el = document.getElementById('tg-status')
-      if (d.bot_configured && d.enable_notifications) {
-        el.textContent = 'Configured'; el.className = 'text-green-600 font-medium'
-      } else {
-        el.textContent = 'Not configured'; el.className = 'text-gray-400 font-medium'
-      }
-    }).catch(() => {})
-
-  // Check SMS config
-  fetch('/api/v1/settings/sms/')
-    .then(r => r.json())
-    .then(d => {
-      const el = document.getElementById('sms-status')
-      if (d.enable_billing_sms) {
-        el.textContent = 'Configured'; el.className = 'text-green-600 font-medium'
-      } else {
-        el.textContent = 'Not configured'; el.className = 'text-gray-400 font-medium'
-      }
-    }).catch(() => {})
+      applyStatus('sched-status', d.scheduler.state, d.scheduler.label)
+      applyStatus('tg-status', d.telegram.state, d.telegram.label)
+      applyStatus('sms-status', d.sms.state, d.sms.label)
+    })
+    .catch(() => {
+      applyStatus('sched-status', 'critical', 'Unavailable')
+      applyStatus('tg-status', 'critical', 'Unavailable')
+      applyStatus('sms-status', 'critical', 'Unavailable')
+    })
 }
 
 // Run on load then every 30 seconds

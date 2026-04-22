@@ -1,82 +1,189 @@
 {% extends "base.html" %}
 {% block title %}Scheduler - {{ isp_name }}{% endblock %}
 {% block content %}
-<div class="mb-4">
-  <a href="/diagnostics/" class="text-sm text-blue-600 hover:underline">
-    <i class="fa fa-arrow-left mr-1"></i> Back to Diagnostics
-  </a>
-</div>
-<div class="flex items-center justify-between mb-6">
-  <h2 class="text-2xl font-bold text-gray-800">Scheduler</h2>
-  <span class="px-3 py-1 rounded-full text-sm font-semibold
-    {% if running %}bg-green-100 text-green-700{% else %}bg-red-100 text-red-600{% endif %}">
-    {% if running %}Running{% else %}Stopped{% endif %}
-  </span>
-</div>
-{% include "partials/messages.html" %}
+<div class="space-y-6">
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <a href="/diagnostics/" class="inline-flex items-center gap-2 text-sm font-medium text-sky-700 hover:text-sky-800">
+        <i class="fa fa-arrow-left"></i>
+        Back to Diagnostics
+      </a>
+      <p class="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-sky-600">Automation Health</p>
+      <h2 class="mt-2 text-3xl font-bold text-slate-900">Scheduler</h2>
+      <p class="mt-2 max-w-3xl text-sm text-slate-500">This view is production-aware: it combines current process state with persisted APScheduler jobs and execution history.</p>
+    </div>
+    <div class="flex flex-col items-start gap-3 lg:items-end">
+      <span class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ring-1 ring-inset {{ service_health_classes }}">
+        <span class="h-2 w-2 rounded-full bg-current opacity-80"></span>
+        {{ service_health|title }}
+      </span>
+      <p class="text-xs text-slate-500">Snapshot generated {{ generated_at|date:"M d, Y H:i:s" }}</p>
+    </div>
+  </div>
 
-{% if not running %}
-<div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6 text-sm text-yellow-800">
-  Scheduler is not running. Restart the Django server to start it. It starts automatically on server boot.
-</div>
-{% endif %}
+  {% include "partials/messages.html" %}
 
-<div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-  <table class="w-full text-sm">
-    <thead class="bg-gray-50 border-b border-gray-100">
-      <tr>
-        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Job</th>
-        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">ID</th>
-        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Next Run</th>
-        <th class="px-4 py-3"></th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-gray-50">
-      {% for job in jobs %}
-      <tr class="hover:bg-gray-50">
-        <td class="px-4 py-3 font-medium">{{ job.name }}</td>
-        <td class="px-4 py-3 font-mono text-xs text-gray-400">{{ job.id }}</td>
-        <td class="px-4 py-3 text-xs text-gray-600">
-          {% if job.next_run %}{{ job.next_run }}{% else %}-{% endif %}
-        </td>
-        <td class="px-4 py-3 text-right">
-          <a href="/diagnostics/scheduler/{{ job.id }}/run/"
-            onclick="return confirm('Run this job now?')"
-            class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1 rounded-lg">
-            Run Now
-          </a>
-        </td>
-      </tr>
-      {% empty %}
-      <tr>
-        <td colspan="4" class="px-4 py-8 text-center text-gray-400">
-          No jobs registered. Start the server to register jobs.
-        </td>
-      </tr>
+  {% if alerts %}
+  <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div class="border-b border-slate-100 px-5 py-4">
+      <h3 class="text-sm font-semibold text-slate-900">Diagnostics context</h3>
+      <p class="mt-1 text-xs text-slate-500">Scheduler alerts are shown alongside the broader system context so automation issues are easier to prioritize.</p>
+    </div>
+    <div class="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">
+      {% for alert in alerts|slice:":6" %}
+      <div class="rounded-2xl border border-slate-200 p-4 ring-1 ring-inset {{ alert.classes }}">
+        <p class="text-xs font-semibold uppercase tracking-wide">{{ alert.severity }}</p>
+        <h4 class="mt-2 text-sm font-semibold">{{ alert.title }}</h4>
+        <p class="mt-3 text-sm leading-6">{{ alert.detail }}</p>
+      </div>
       {% endfor %}
-    </tbody>
-  </table>
-</div>
+    </div>
+  </div>
+  {% endif %}
 
-<div class="mt-6 bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-  <h3 class="font-semibold text-gray-700 mb-3">Job Schedule</h3>
-  <dl class="space-y-2 text-sm">
-    <div class="flex justify-between">
-      <dt class="text-gray-500">Mark Overdue Bills</dt>
-      <dd class="font-medium">Daily at 12:05 AM</dd>
+  <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    {% for card in summary_cards %}
+    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{ card.label }}</p>
+          <p class="mt-3 text-3xl font-bold text-slate-900">{{ card.value }}</p>
+        </div>
+        <span class="inline-flex rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset {{ card.accent }}">Live</span>
+      </div>
+      <p class="mt-4 text-sm leading-6 text-slate-500">{{ card.meta }}</p>
     </div>
-    <div class="flex justify-between">
-      <dt class="text-gray-500">Auto Generate Bills</dt>
-      <dd class="font-medium">Daily at 12:10 AM (if enabled in Billing Settings)</dd>
+    {% endfor %}
+  </section>
+
+  <section class="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div class="border-b border-slate-100 px-5 py-4">
+        <h3 class="text-lg font-semibold text-slate-900">Job Health</h3>
+        <p class="mt-1 text-sm text-slate-500">Per-job health, next run time, latest success, latest error, and whether this process can queue a run immediately.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-100 text-sm">
+          <thead class="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-5 py-3">Job</th>
+              <th class="px-5 py-3">Schedule</th>
+              <th class="px-5 py-3">Health</th>
+              <th class="px-5 py-3">Next run</th>
+              <th class="px-5 py-3">Last success</th>
+              <th class="px-5 py-3">Last error</th>
+              <th class="px-5 py-3 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 bg-white align-top">
+            {% for job in jobs %}
+            <tr>
+              <td class="px-5 py-4">
+                <div>
+                  <p class="font-semibold text-slate-900">{{ job.label }}</p>
+                  <p class="mt-1 text-xs text-slate-500">{{ job.id }} • {{ job.group }}</p>
+                  <p class="mt-2 max-w-sm text-xs leading-6 text-slate-500">{{ job.note }}</p>
+                </div>
+              </td>
+              <td class="px-5 py-4 text-xs text-slate-600">{{ job.schedule }}</td>
+              <td class="px-5 py-4">
+                <div class="space-y-2">
+                  <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset {{ job.health_classes }}">{{ job.health|title }}</span>
+                  <div class="text-xs text-slate-500">
+                    <p>Enabled: {{ job.enabled|yesno:"Yes,No" }}</p>
+                    <p>Persisted: {{ job.persisted|yesno:"Yes,No" }}</p>
+                    <p>This process: {{ job.embedded_present|yesno:"Loaded,Not loaded" }}</p>
+                  </div>
+                </div>
+              </td>
+              <td class="px-5 py-4 text-xs text-slate-600">{% if job.next_run %}{{ job.next_run|date:"M d, Y H:i:s" }}{% else %}Not scheduled{% endif %}</td>
+              <td class="px-5 py-4 text-xs text-slate-600">
+                {% if job.last_success %}
+                <div>{{ job.last_success.run_time|date:"M d, Y H:i:s" }}</div>
+                <div class="mt-1 text-slate-400">{{ job.last_success.run_time|timesince }} ago</div>
+                {% else %}
+                Never
+                {% endif %}
+              </td>
+              <td class="px-5 py-4 text-xs text-slate-600">
+                {% if job.last_error %}
+                <div>{{ job.last_error.run_time|date:"M d, Y H:i:s" }}</div>
+                <div class="mt-1 text-rose-700">{{ job.last_error.exception|default:"Error without stored exception." }}</div>
+                {% else %}
+                None
+                {% endif %}
+              </td>
+              <td class="px-5 py-4 text-right">
+                {% if job.can_run_now %}
+                <a href="/diagnostics/scheduler/{{ job.id }}/run/" onclick="return confirm('Queue this job now in the embedded scheduler process?')" class="inline-flex items-center gap-2 rounded-xl bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 transition hover:bg-sky-100">
+                  <i class="fa fa-play"></i>
+                  Run now
+                </a>
+                {% else %}
+                <span class="text-xs text-slate-400">Use the service schedule</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="7" class="px-5 py-10 text-center text-sm text-slate-500">No jobs were found in the persistent scheduler store.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-    <div class="flex justify-between">
-      <dt class="text-gray-500">Send Billing SMS</dt>
-      <dd class="font-medium">Daily at 8:00 AM (if enabled in SMS Settings)</dd>
+
+    <div class="space-y-6">
+      <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="border-b border-slate-100 px-5 py-4">
+          <h3 class="text-lg font-semibold text-slate-900">Mode Summary</h3>
+        </div>
+        <div class="space-y-4 p-5 text-sm">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Expected mode</p>
+            <p class="mt-2 font-semibold text-slate-900">{{ expected_mode }}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Embedded scheduler running</p>
+            <p class="mt-2 font-semibold text-slate-900">{{ embedded_running|yesno:"Yes,No" }}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Interpretation</p>
+            <p class="mt-2 leading-6 text-slate-600">{{ service_message }}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="border-b border-slate-100 px-5 py-4">
+          <h3 class="text-lg font-semibold text-slate-900">Recent Job Failures</h3>
+          <p class="mt-1 text-sm text-slate-500">Latest APScheduler execution failures persisted in the database.</p>
+        </div>
+        <div class="space-y-3 p-5">
+          {% for failure in recent_failures %}
+          <div class="rounded-xl border border-slate-200 p-3">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-sm font-semibold text-slate-900">{{ failure.job_id }}</p>
+                <p class="mt-1 text-xs text-slate-500">{{ failure.run_time|date:"M d, Y H:i:s" }} • {{ failure.run_time|timesince }} ago</p>
+              </div>
+              <span class="inline-flex rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-200">Error</span>
+            </div>
+            <p class="mt-2 text-xs leading-6 text-rose-700">{{ failure.exception|default:"No stored exception message." }}</p>
+            {% if failure.traceback %}
+            <details class="mt-2">
+              <summary class="cursor-pointer text-xs font-medium text-slate-500">Traceback</summary>
+              <pre class="mt-2 overflow-x-auto rounded-xl bg-slate-950 p-3 text-[11px] leading-5 text-slate-100">{{ failure.traceback }}</pre>
+            </details>
+            {% endif %}
+          </div>
+          {% empty %}
+          <p class="text-sm text-slate-500">No recent scheduler failures were recorded.</p>
+          {% endfor %}
+        </div>
+      </div>
     </div>
-    <div class="flex justify-between">
-      <dt class="text-gray-500">Router Status Check</dt>
-      <dd class="font-medium">Every 5 minutes</dd>
-    </div>
-  </dl>
+  </section>
 </div>
 {% endblock %}

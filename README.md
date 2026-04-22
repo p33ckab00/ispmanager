@@ -93,6 +93,7 @@ Project documentation starts here:
 - [Landing Helper Copy Cleanup](docs/34_landing_helper_copy_cleanup.md)
 - [Cloudflared Checking and Route Checklist](docs/35_cloudflared_dashboard_route_checklist.md)
 - [Ubuntu Redeploy and Upgrade Script](docs/36_ubuntu_redeploy_upgrade_script.md)
+- [Diagnostics Operations Health Center](docs/37_diagnostics_operations_health_center.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 - [Ubuntu Fresh Install Script](deploy/install_ubuntu_fresh.sh)
 - [Ubuntu Redeploy Script](deploy/redeploy_ubuntu_update.sh)
