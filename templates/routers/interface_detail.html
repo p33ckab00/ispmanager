@@ -8,6 +8,76 @@ const historyLabels = []
 const rxSeries = []
 const txSeries = []
 let liveChart = null
+const liveTelemetry = {
+  currentRx: 0,
+  targetRx: 0,
+  currentTx: 0,
+  targetTx: 0,
+  meta: null,
+  initialized: false,
+}
+
+function formatTelemetryRate(mbps) {
+  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`
+  if (mbps >= 100) return `${mbps.toFixed(0)} Mbps`
+  if (mbps >= 10) return `${mbps.toFixed(1)} Mbps`
+  return `${mbps.toFixed(2)} Mbps`
+}
+
+function formatPacketsPerSecond(pps) {
+  const value = Number(pps || 0)
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
+  return `${Math.round(value)}`
+}
+
+function telemetryStateLabel(state) {
+  const labels = {
+    'linked-idle': 'Idle',
+    low: 'Low Traffic',
+    medium: 'Medium Traffic',
+    high: 'Heavy Traffic',
+    burst: 'Bursting',
+    stale: 'Stale Cache',
+    down: 'Link Down',
+    error: 'Polling Error',
+    unknown: 'Unknown',
+  }
+  return labels[state] || 'Unknown'
+}
+
+function trafficDirectionLabel(direction) {
+  const labels = {
+    quiet: 'Quiet line',
+    'rx-heavy': 'Download-heavy',
+    'tx-heavy': 'Upload-heavy',
+    balanced: 'Balanced traffic',
+  }
+  return labels[direction] || 'Balanced traffic'
+}
+
+function describeFreshness(meta) {
+  if (!meta || !meta.sampled_at) return 'Awaiting sample'
+  const sampledAt = Date.parse(meta.sampled_at)
+  if (Number.isNaN(sampledAt)) return 'Awaiting sample'
+  const ageSeconds = Math.max(0, (Date.now() - sampledAt) / 1000)
+  if (ageSeconds < 2) return 'Live now'
+  if (ageSeconds < 60) return `Updated ${Math.round(ageSeconds)}s ago`
+  return `Updated ${Math.round(ageSeconds / 60)}m ago`
+}
+
+function resolveDisplayState(meta) {
+  if (!meta) return 'unknown'
+  if (meta.error) return 'error'
+  if (meta.link_state === 'down') return 'down'
+  if (!meta.sampled_at) return meta.activity_level || 'unknown'
+  const sampledAt = Date.parse(meta.sampled_at)
+  if (Number.isNaN(sampledAt)) return meta.activity_level || 'unknown'
+  const staleAfterSeconds = Number(meta.stale_after_seconds || 0)
+  const ageSeconds = Math.max(0, (Date.now() - sampledAt) / 1000)
+  if (staleAfterSeconds && ageSeconds > staleAfterSeconds) return 'stale'
+  return meta.activity_level || meta.display_state || 'unknown'
+}
 
 function initLiveChart() {
   const ctx = document.getElementById('liveTrafficChart')
@@ -68,24 +138,51 @@ function setBadgeState(state) {
   const badge = document.getElementById('live-activity-badge')
   if (!badge) return
   badge.className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium'
-  if (state === 'active') badge.classList.add('bg-green-100', 'text-green-700')
-  else if (state === 'idle') badge.classList.add('bg-amber-100', 'text-amber-700')
+  if (state === 'low' || state === 'medium') badge.classList.add('bg-green-100', 'text-green-700')
+  else if (state === 'high' || state === 'burst') badge.classList.add('bg-emerald-100', 'text-emerald-700')
+  else if (state === 'linked-idle' || state === 'stale') badge.classList.add('bg-amber-100', 'text-amber-700')
   else if (state === 'down' || state === 'error') badge.classList.add('bg-red-100', 'text-red-700')
   else badge.classList.add('bg-gray-100', 'text-gray-500')
-  badge.textContent = state ? state.toUpperCase() : 'UNKNOWN'
+  badge.textContent = telemetryStateLabel(state)
+}
+
+function renderLiveTelemetry() {
+  document.getElementById('live-rx-mbps').textContent = formatTelemetryRate(liveTelemetry.currentRx).replace(' Mbps', '').replace(' Gbps', '')
+  document.getElementById('live-rx-unit').textContent = liveTelemetry.currentRx >= 1000 ? 'Gbps' : 'Mbps'
+  document.getElementById('live-tx-mbps').textContent = formatTelemetryRate(liveTelemetry.currentTx).replace(' Mbps', '').replace(' Gbps', '')
+  document.getElementById('live-tx-unit').textContent = liveTelemetry.currentTx >= 1000 ? 'Gbps' : 'Mbps'
+  document.getElementById('live-rx-pps').textContent = formatPacketsPerSecond(liveTelemetry.meta?.rx_pps || 0)
+  document.getElementById('live-tx-pps').textContent = formatPacketsPerSecond(liveTelemetry.meta?.tx_pps || 0)
+  document.getElementById('live-sampled-at').textContent = describeFreshness(liveTelemetry.meta)
+  document.getElementById('live-direction').textContent = trafficDirectionLabel(liveTelemetry.meta?.traffic_direction)
+  document.getElementById('live-state-detail').textContent = telemetryStateLabel(resolveDisplayState(liveTelemetry.meta))
+  document.getElementById('live-error').textContent = liveTelemetry.meta?.error || ''
+  setBadgeState(resolveDisplayState(liveTelemetry.meta))
+}
+
+function animateLiveTelemetry() {
+  liveTelemetry.currentRx += (liveTelemetry.targetRx - liveTelemetry.currentRx) * 0.18
+  liveTelemetry.currentTx += (liveTelemetry.targetTx - liveTelemetry.currentTx) * 0.18
+
+  if (Math.abs(liveTelemetry.targetRx - liveTelemetry.currentRx) < 0.02) liveTelemetry.currentRx = liveTelemetry.targetRx
+  if (Math.abs(liveTelemetry.targetTx - liveTelemetry.currentTx) < 0.02) liveTelemetry.currentTx = liveTelemetry.targetTx
+
+  renderLiveTelemetry()
+  requestAnimationFrame(animateLiveTelemetry)
 }
 
 function refreshInterfaceTelemetry() {
   fetch(liveCacheUrl)
     .then(r => r.json())
     .then(data => {
-      document.getElementById('live-rx-mbps').textContent = `${Number(data.rx_mbps || 0).toFixed(2)}`
-      document.getElementById('live-tx-mbps').textContent = `${Number(data.tx_mbps || 0).toFixed(2)}`
-      document.getElementById('live-rx-pps').textContent = data.rx_pps || 0
-      document.getElementById('live-tx-pps').textContent = data.tx_pps || 0
-      document.getElementById('live-sampled-at').textContent = data.sampled_at ? new Date(data.sampled_at).toLocaleTimeString() : 'Waiting for telemetry'
-      document.getElementById('live-error').textContent = data.error || ''
-      setBadgeState(data.activity_state)
+      liveTelemetry.meta = data
+      liveTelemetry.targetRx = Number(data.rx_mbps || 0)
+      liveTelemetry.targetTx = Number(data.tx_mbps || 0)
+      if (!liveTelemetry.initialized) {
+        liveTelemetry.currentRx = liveTelemetry.targetRx
+        liveTelemetry.currentTx = liveTelemetry.targetTx
+        liveTelemetry.initialized = true
+      }
       pushPoint(new Date().toLocaleTimeString(), Number(data.rx_mbps || 0), Number(data.tx_mbps || 0))
     })
     .catch(() => {
@@ -94,8 +191,19 @@ function refreshInterfaceTelemetry() {
 }
 
 initLiveChart()
+liveTelemetry.meta = {
+  rx_pps: 0,
+  tx_pps: 0,
+  activity_level: 'unknown',
+  link_state: {% if iface.is_running %}'up'{% else %}'down'{% endif %},
+  sampled_at: null,
+  stale_after_seconds: {{ telemetry_stale_after_seconds|default:30 }},
+  traffic_direction: 'quiet',
+  error: '',
+}
+requestAnimationFrame(animateLiveTelemetry)
 refreshInterfaceTelemetry()
-setInterval(refreshInterfaceTelemetry, {{ telemetry_poll_ms|default:500 }})
+setInterval(refreshInterfaceTelemetry, {{ telemetry_poll_ms|default:1000 }})
 </script>
 {% endblock %}
 {% block content %}
@@ -129,12 +237,12 @@ setInterval(refreshInterfaceTelemetry, {{ telemetry_poll_ms|default:500 }})
       <div class="text-center rounded-xl bg-blue-50 p-4">
         <p class="text-xs text-blue-500 uppercase tracking-wide mb-1">Download (RX)</p>
         <p class="text-3xl font-bold text-blue-600" id="live-rx-mbps">0.00</p>
-        <p class="text-xs text-blue-400">Mbps</p>
+        <p class="text-xs text-blue-400" id="live-rx-unit">Mbps</p>
       </div>
       <div class="text-center rounded-xl bg-green-50 p-4">
         <p class="text-xs text-green-500 uppercase tracking-wide mb-1">Upload (TX)</p>
         <p class="text-3xl font-bold text-green-600" id="live-tx-mbps">0.00</p>
-        <p class="text-xs text-green-400">Mbps</p>
+        <p class="text-xs text-green-400" id="live-tx-unit">Mbps</p>
       </div>
       <div class="text-center rounded-xl bg-gray-50 p-4">
         <p class="text-xs text-gray-400 mb-1">RX Packets/s</p>
@@ -144,6 +252,10 @@ setInterval(refreshInterfaceTelemetry, {{ telemetry_poll_ms|default:500 }})
         <p class="text-xs text-gray-400 mb-1">TX Packets/s</p>
         <p class="text-lg font-semibold text-gray-700" id="live-tx-pps">0</p>
       </div>
+    </div>
+    <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-400 mb-4">
+      <span id="live-direction">Quiet line</span>
+      <span id="live-state-detail">Unknown</span>
     </div>
     <div class="relative h-64">
       <canvas id="liveTrafficChart"></canvas>

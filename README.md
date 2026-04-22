@@ -89,6 +89,7 @@ Project documentation starts here:
 - [Landing V2 Core Implementation Notes](docs/30_landing_v2_core_implementation_notes.md)
 - [Landing Nav UX Refinement](docs/31_landing_nav_ux_refinement.md)
 - [Data Exchange V1 Implementation Notes](docs/32_data_exchange_v1_implementation_notes.md)
+- [Router Telemetry UX Upgrade](docs/33_router_telemetry_ux_upgrade.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 
 ## Current Product Direction

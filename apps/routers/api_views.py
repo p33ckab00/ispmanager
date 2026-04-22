@@ -2,9 +2,15 @@ from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from apps.routers.models import Router, RouterInterface, InterfaceTrafficCache
-from apps.routers.serializers import RouterSerializer, RouterInterfaceSerializer, TrafficCacheSerializer
-from apps.routers.services import sync_interfaces, get_live_traffic
+from apps.routers.serializers import RouterSerializer, RouterInterfaceSerializer
+from apps.routers.services import (
+    sync_interfaces,
+    get_live_traffic,
+    get_telemetry_stale_after_seconds,
+    serialize_telemetry_cache,
+)
 from apps.routers import mikrotik
+from apps.settings_app.models import RouterSettings
 
 
 class RouterListCreateView(generics.ListCreateAPIView):
@@ -52,23 +58,10 @@ class InterfaceTrafficCacheView(APIView):
             iface = RouterInterface.objects.get(pk=iface_pk, router=router)
         except (Router.DoesNotExist, RouterInterface.DoesNotExist):
             return Response({'error': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+        router_settings = RouterSettings.get_settings()
+        stale_after_seconds = get_telemetry_stale_after_seconds(router_settings.polling_interval_seconds)
         cache = InterfaceTrafficCache.objects.filter(interface=iface).first()
-        if not cache:
-            return Response({
-                'interface': iface.pk,
-                'interface_name': iface.name,
-                'interface_display_name': iface.display_name,
-                'rx_bits_per_second': 0,
-                'tx_bits_per_second': 0,
-                'rx_packets_per_second': 0,
-                'tx_packets_per_second': 0,
-                'rx_mbps': 0,
-                'tx_mbps': 0,
-                'activity_state': 'unknown',
-                'error': '',
-                'sampled_at': None,
-            })
-        return Response(TrafficCacheSerializer(cache).data)
+        return Response(serialize_telemetry_cache(iface, cache, stale_after_seconds))
 
 
 class TestConnectionView(APIView):

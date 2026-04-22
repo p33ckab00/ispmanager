@@ -2,28 +2,138 @@
 {% block title %}{{ router.name }} - {{ isp_name }}{% endblock %}
 {% block extra_css %}
 <style>
+  .telemetry-card {
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  }
+  .telemetry-card:hover {
+    transform: translateY(-2px);
+  }
+  .telemetry-card-state-linked-idle {
+    border-color: rgba(245, 158, 11, 0.38);
+    box-shadow: 0 12px 28px rgba(148, 163, 184, 0.14);
+  }
+  .telemetry-card-state-low,
+  .telemetry-card-state-medium {
+    border-color: rgba(34, 197, 94, 0.35);
+    box-shadow: 0 14px 32px rgba(34, 197, 94, 0.1);
+  }
+  .telemetry-card-state-high,
+  .telemetry-card-state-burst {
+    border-color: rgba(16, 185, 129, 0.45);
+    box-shadow: 0 18px 36px rgba(16, 185, 129, 0.16);
+  }
+  .telemetry-card-state-stale {
+    border-color: rgba(251, 191, 36, 0.42);
+    box-shadow: 0 14px 30px rgba(245, 158, 11, 0.14);
+  }
+  .telemetry-card-state-down,
+  .telemetry-card-state-error {
+    border-color: rgba(239, 68, 68, 0.38);
+    box-shadow: 0 14px 30px rgba(239, 68, 68, 0.12);
+  }
+  .telemetry-activity-panel {
+    background:
+      radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 44%),
+      linear-gradient(135deg, #0f172a 0%, #111827 100%);
+  }
+  .telemetry-role-chip {
+    background-color: #eff6ff;
+    color: #1d4ed8;
+  }
+  .telemetry-led-shell {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15rem;
+    height: 1.15rem;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
   .telemetry-led {
-    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 9999px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease, opacity 0.2s ease;
   }
-  .telemetry-led-active {
+  .telemetry-link-up {
     background-color: #22c55e;
-    box-shadow: 0 0 0.7rem rgba(34, 197, 94, 0.55);
-    animation: telemetryPulse 1s ease-in-out infinite;
+    box-shadow: 0 0 0.65rem rgba(34, 197, 94, 0.6);
   }
-  .telemetry-led-idle {
-    background-color: #f59e0b;
-    box-shadow: 0 0 0.5rem rgba(245, 158, 11, 0.35);
-  }
-  .telemetry-led-down {
+  .telemetry-link-down,
+  .telemetry-activity-down,
+  .telemetry-activity-error {
     background-color: #ef4444;
-    box-shadow: 0 0 0.5rem rgba(239, 68, 68, 0.25);
+    box-shadow: 0 0 0.6rem rgba(239, 68, 68, 0.45);
   }
-  .telemetry-led-unknown {
-    background-color: #9ca3af;
+  .telemetry-link-unknown,
+  .telemetry-activity-unknown {
+    background-color: #94a3b8;
+    box-shadow: 0 0 0.45rem rgba(148, 163, 184, 0.3);
   }
-  @keyframes telemetryPulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.18); }
+  .telemetry-activity-linked-idle,
+  .telemetry-activity-stale {
+    background-color: #f59e0b;
+    box-shadow: 0 0 0.55rem rgba(245, 158, 11, 0.4);
+  }
+  .telemetry-activity-low,
+  .telemetry-activity-medium,
+  .telemetry-activity-high,
+  .telemetry-activity-burst {
+    background-color: #22c55e;
+  }
+  .telemetry-activity-low {
+    box-shadow: 0 0 0.55rem rgba(34, 197, 94, 0.38);
+    animation: telemetryBlinkSlow 1.4s ease-in-out infinite;
+  }
+  .telemetry-activity-medium {
+    box-shadow: 0 0 0.7rem rgba(34, 197, 94, 0.48);
+    animation: telemetryBlinkMedium 0.95s ease-in-out infinite;
+  }
+  .telemetry-activity-high {
+    box-shadow: 0 0 0.85rem rgba(34, 197, 94, 0.58);
+    animation: telemetryBlinkFast 0.62s ease-in-out infinite;
+  }
+  .telemetry-activity-burst {
+    background-color: #a3e635;
+    box-shadow: 0 0 1rem rgba(163, 230, 53, 0.7);
+    animation: telemetryBlinkBurst 0.4s ease-in-out infinite;
+  }
+  .telemetry-meter {
+    position: relative;
+    overflow: hidden;
+    height: 0.4rem;
+    border-radius: 9999px;
+    background: #e2e8f0;
+  }
+  .telemetry-meter-fill {
+    display: block;
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    transition: width 0.45s ease;
+  }
+  .telemetry-meter-fill-rx {
+    background: linear-gradient(90deg, #38bdf8 0%, #2563eb 100%);
+  }
+  .telemetry-meter-fill-tx {
+    background: linear-gradient(90deg, #4ade80 0%, #16a34a 100%);
+  }
+  @keyframes telemetryBlinkSlow {
+    0%, 100% { opacity: 0.52; transform: scale(0.95); }
+    50% { opacity: 1; transform: scale(1.12); }
+  }
+  @keyframes telemetryBlinkMedium {
+    0%, 100% { opacity: 0.46; transform: scale(0.9); }
+    50% { opacity: 1; transform: scale(1.15); }
+  }
+  @keyframes telemetryBlinkFast {
+    0%, 100% { opacity: 0.4; transform: scale(0.88); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
+  @keyframes telemetryBlinkBurst {
+    0%, 100% { opacity: 0.38; transform: scale(0.84); }
+    50% { opacity: 1; transform: scale(1.26); }
   }
 </style>
 {% endblock %}
@@ -103,43 +213,103 @@
 
 <!-- Physical Ports -->
 <div class="mb-8">
-  <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-    Physical Ports ({{ physical|length }})
-  </h3>
+  <div class="flex flex-col gap-2 mb-3 lg:flex-row lg:items-end lg:justify-between">
+    <div>
+      <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+        Physical Ports ({{ physical|length }})
+      </h3>
+      <p class="text-xs text-gray-400 mt-1">
+        Smoothed live telemetry from the router cache. Link LED shows port state, activity LED reacts to RX/TX load.
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2 text-[11px] text-gray-400 uppercase tracking-[0.16em]">
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-white border border-gray-200 px-2.5 py-1">
+        <span class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_0.45rem_rgba(34,197,94,0.45)]"></span> Link Up
+      </span>
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-white border border-gray-200 px-2.5 py-1">
+        <span class="w-2 h-2 rounded-full bg-amber-500 shadow-[0_0_0.45rem_rgba(245,158,11,0.35)]"></span> Idle / Stale
+      </span>
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-white border border-gray-200 px-2.5 py-1">
+        <span class="w-2 h-2 rounded-full bg-lime-400 shadow-[0_0_0.55rem_rgba(163,230,53,0.55)]"></span> Heavy Activity
+      </span>
+    </div>
+  </div>
   {% if physical %}
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
       {% for iface in physical %}
       <a href="/routers/{{ router.pk }}/interfaces/{{ iface.pk }}/"
-        class="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md hover:border-blue-300 transition cursor-pointer block"
+        class="telemetry-card bg-white rounded-2xl border border-gray-200 p-4 hover:border-blue-300 hover:shadow-lg cursor-pointer block"
         data-telemetry-card
-        data-iface-id="{{ iface.pk }}">
-        <div class="flex items-center justify-between mb-2">
-          <span class="w-2.5 h-2.5 rounded-full telemetry-led {% if iface.is_running %}telemetry-led-idle{% else %}telemetry-led-unknown{% endif %}" data-telemetry-led></span>
-          <span class="text-xs text-gray-400">{{ iface.get_iface_type_display }}</span>
+        data-iface-id="{{ iface.pk }}"
+        data-link-running="{{ iface.is_running|yesno:'1,0' }}">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <p class="text-sm font-semibold text-gray-800 truncate">{{ iface.display_name }}</p>
+              <span class="telemetry-role-chip inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold">
+                {{ iface.get_role_display }}
+              </span>
+            </div>
+            {% if iface.label and iface.label != iface.name %}
+              <p class="text-xs text-gray-400 truncate mt-1">{{ iface.name }}</p>
+            {% endif %}
+          </div>
+          <span class="text-[10px] uppercase tracking-[0.18em] text-gray-400">{{ iface.get_iface_type_display }}</span>
         </div>
-        <p class="text-sm font-semibold text-gray-800 truncate">{{ iface.display_name }}</p>
-        {% if iface.label and iface.label != iface.name %}
-          <p class="text-xs text-gray-400 truncate">{{ iface.name }}</p>
+
+        <div class="telemetry-activity-panel mt-4 rounded-2xl p-3">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+              <span class="telemetry-led-shell">
+                <span class="telemetry-led {% if iface.is_running %}telemetry-link-up{% else %}telemetry-link-down{% endif %}" data-telemetry-link-led></span>
+              </span>
+              <span>Link</span>
+            </div>
+            <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+              <span class="telemetry-led-shell">
+                <span class="telemetry-led telemetry-activity-unknown" data-telemetry-activity-led></span>
+              </span>
+              <span data-telemetry-state-badge>Waiting</span>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center justify-between gap-3 text-[11px]">
+            <span class="text-slate-400" data-telemetry-direction>Quiet line</span>
+            <span class="text-slate-500" data-telemetry-freshness>Awaiting sample</span>
+          </div>
+        </div>
+
+        {% if iface.mac_address %}
+          <p class="text-xs text-gray-300 mt-3 font-mono truncate">{{ iface.mac_address }}</p>
         {% endif %}
-        <div class="mt-2">
-          <span class="inline-block text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">
-            {{ iface.get_role_display }}
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <div class="rounded-xl bg-slate-50 px-3 py-3">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-[10px] uppercase tracking-[0.18em] text-slate-400">RX</p>
+              <p class="text-sm font-semibold text-sky-600" data-telemetry-rx>0.00 Mbps</p>
+            </div>
+            <div class="telemetry-meter mt-3">
+              <span class="telemetry-meter-fill telemetry-meter-fill-rx" data-telemetry-rx-bar></span>
+            </div>
+            <p class="text-[10px] text-slate-400 mt-2"><span data-telemetry-rx-pps>0</span> pps</p>
+          </div>
+          <div class="rounded-xl bg-slate-50 px-3 py-3">
+            <div class="flex items-center justify-between gap-2">
+              <p class="text-[10px] uppercase tracking-[0.18em] text-slate-400">TX</p>
+              <p class="text-sm font-semibold text-green-600" data-telemetry-tx>0.00 Mbps</p>
+            </div>
+            <div class="telemetry-meter mt-3">
+              <span class="telemetry-meter-fill telemetry-meter-fill-tx" data-telemetry-tx-bar></span>
+            </div>
+            <p class="text-[10px] text-slate-400 mt-2"><span data-telemetry-tx-pps>0</span> pps</p>
+          </div>
+        </div>
+
+        <div class="mt-4 flex items-center justify-between gap-3">
+          <p class="text-[10px] uppercase tracking-[0.18em] text-gray-400" data-telemetry-state>Waiting for telemetry</p>
+          <span class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-500" data-telemetry-summary>
+            Standby
           </span>
         </div>
-        {% if iface.mac_address %}
-          <p class="text-xs text-gray-300 mt-1 font-mono">{{ iface.mac_address }}</p>
-        {% endif %}
-        <div class="mt-3 grid grid-cols-2 gap-2">
-          <div class="rounded-lg bg-gray-50 px-2 py-2">
-            <p class="text-[10px] uppercase tracking-wide text-gray-400">RX</p>
-            <p class="text-sm font-semibold text-blue-600" data-telemetry-rx>--</p>
-          </div>
-          <div class="rounded-lg bg-gray-50 px-2 py-2">
-            <p class="text-[10px] uppercase tracking-wide text-gray-400">TX</p>
-            <p class="text-sm font-semibold text-green-600" data-telemetry-tx>--</p>
-          </div>
-        </div>
-        <p class="mt-2 text-[10px] uppercase tracking-wide text-gray-400" data-telemetry-state>Waiting for telemetry</p>
       </a>
       {% endfor %}
     </div>
@@ -236,14 +406,212 @@
 {% block extra_js %}
 <script>
 const routerTelemetryUrl = '/routers/{{ router.pk }}/live-traffic-cache/'
+const telemetryCardState = new Map()
+const telemetryActivityClasses = [
+  'telemetry-activity-linked-idle',
+  'telemetry-activity-low',
+  'telemetry-activity-medium',
+  'telemetry-activity-high',
+  'telemetry-activity-burst',
+  'telemetry-activity-stale',
+  'telemetry-activity-down',
+  'telemetry-activity-error',
+  'telemetry-activity-unknown',
+]
+const telemetryLinkClasses = ['telemetry-link-up', 'telemetry-link-down', 'telemetry-link-unknown']
+const telemetryCardClasses = [
+  'telemetry-card-state-linked-idle',
+  'telemetry-card-state-low',
+  'telemetry-card-state-medium',
+  'telemetry-card-state-high',
+  'telemetry-card-state-burst',
+  'telemetry-card-state-stale',
+  'telemetry-card-state-down',
+  'telemetry-card-state-error',
+]
 
-function applyTelemetryState(led, state) {
+function formatTelemetryRate(mbps) {
+  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`
+  if (mbps >= 100) return `${mbps.toFixed(0)} Mbps`
+  if (mbps >= 10) return `${mbps.toFixed(1)} Mbps`
+  return `${mbps.toFixed(2)} Mbps`
+}
+
+function formatPacketsPerSecond(pps) {
+  const value = Number(pps || 0)
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
+  return `${Math.round(value)}`
+}
+
+function telemetryStateLabel(state) {
+  const labels = {
+    'linked-idle': 'Idle',
+    low: 'Low Traffic',
+    medium: 'Medium Traffic',
+    high: 'Heavy Traffic',
+    burst: 'Bursting',
+    stale: 'Stale Cache',
+    down: 'Link Down',
+    error: 'Polling Error',
+    unknown: 'Waiting',
+  }
+  return labels[state] || 'Unknown'
+}
+
+function telemetrySummaryLabel(state) {
+  const labels = {
+    'linked-idle': 'Idle',
+    low: 'Low',
+    medium: 'Medium',
+    high: 'Heavy',
+    burst: 'Burst',
+    stale: 'Stale',
+    down: 'Down',
+    error: 'Error',
+    unknown: 'Standby',
+  }
+  return labels[state] || 'Standby'
+}
+
+function trafficDirectionLabel(direction) {
+  const labels = {
+    quiet: 'Quiet line',
+    'rx-heavy': 'Download-heavy',
+    'tx-heavy': 'Upload-heavy',
+    balanced: 'Balanced traffic',
+  }
+  return labels[direction] || 'Balanced traffic'
+}
+
+function describeFreshness(meta) {
+  if (!meta || !meta.sampled_at) return 'Awaiting sample'
+  const sampledAt = Date.parse(meta.sampled_at)
+  if (Number.isNaN(sampledAt)) return 'Awaiting sample'
+  const ageSeconds = Math.max(0, (Date.now() - sampledAt) / 1000)
+  if (ageSeconds < 2) return 'Live now'
+  if (ageSeconds < 60) return `Updated ${Math.round(ageSeconds)}s ago`
+  return `Updated ${Math.round(ageSeconds / 60)}m ago`
+}
+
+function resolveDisplayState(meta, card) {
+  if (!meta) {
+    return card?.dataset.linkRunning === '1' ? 'unknown' : 'down'
+  }
+  if (meta.error) return 'error'
+  if (meta.link_state === 'down') return 'down'
+  if (!meta.sampled_at) return meta.activity_level || 'unknown'
+  const sampledAt = Date.parse(meta.sampled_at)
+  if (Number.isNaN(sampledAt)) return meta.activity_level || 'unknown'
+  const staleAfterSeconds = Number(meta.stale_after_seconds || 0)
+  const ageSeconds = Math.max(0, (Date.now() - sampledAt) / 1000)
+  if (staleAfterSeconds && ageSeconds > staleAfterSeconds) return 'stale'
+  return meta.activity_level || meta.display_state || 'unknown'
+}
+
+function ensureTelemetryCardState(card) {
+  if (!telemetryCardState.has(card)) {
+    telemetryCardState.set(card, {
+      currentRx: 0,
+      currentTx: 0,
+      targetRx: 0,
+      targetTx: 0,
+      currentRxSignal: 0,
+      currentTxSignal: 0,
+      targetRxSignal: 0,
+      targetTxSignal: 0,
+      meta: null,
+      initialized: false,
+    })
+  }
+  return telemetryCardState.get(card)
+}
+
+function applyLinkState(led, linkState) {
   if (!led) return
-  led.classList.remove('telemetry-led-active', 'telemetry-led-idle', 'telemetry-led-down', 'telemetry-led-unknown')
-  if (state === 'active') led.classList.add('telemetry-led-active')
-  else if (state === 'idle') led.classList.add('telemetry-led-idle')
-  else if (state === 'down' || state === 'error') led.classList.add('telemetry-led-down')
-  else led.classList.add('telemetry-led-unknown')
+  led.classList.remove(...telemetryLinkClasses)
+  if (linkState === 'up') led.classList.add('telemetry-link-up')
+  else if (linkState === 'down') led.classList.add('telemetry-link-down')
+  else led.classList.add('telemetry-link-unknown')
+}
+
+function applyActivityState(led, state) {
+  if (!led) return
+  led.classList.remove(...telemetryActivityClasses)
+  led.classList.add(`telemetry-activity-${state}`)
+}
+
+function applyCardState(card, state) {
+  if (!card) return
+  card.classList.remove(...telemetryCardClasses)
+  if (state !== 'unknown') card.classList.add(`telemetry-card-state-${state}`)
+}
+
+function renderTelemetryCard(card, state) {
+  const meta = state.meta
+  const displayState = resolveDisplayState(meta, card)
+  const linkState = meta?.link_state || (card.dataset.linkRunning === '1' ? 'up' : 'down')
+  const rx = card.querySelector('[data-telemetry-rx]')
+  const tx = card.querySelector('[data-telemetry-tx]')
+  const rxBar = card.querySelector('[data-telemetry-rx-bar]')
+  const txBar = card.querySelector('[data-telemetry-tx-bar]')
+  const rxPps = card.querySelector('[data-telemetry-rx-pps]')
+  const txPps = card.querySelector('[data-telemetry-tx-pps]')
+  const stateText = card.querySelector('[data-telemetry-state]')
+  const summary = card.querySelector('[data-telemetry-summary]')
+  const freshness = card.querySelector('[data-telemetry-freshness]')
+  const direction = card.querySelector('[data-telemetry-direction]')
+  const stateBadge = card.querySelector('[data-telemetry-state-badge]')
+
+  if (rx) rx.textContent = formatTelemetryRate(state.currentRx)
+  if (tx) tx.textContent = formatTelemetryRate(state.currentTx)
+  if (rxBar) rxBar.style.width = `${Math.max(0, Math.min(100, state.currentRxSignal))}%`
+  if (txBar) txBar.style.width = `${Math.max(0, Math.min(100, state.currentTxSignal))}%`
+  if (rxPps) rxPps.textContent = formatPacketsPerSecond(meta?.rx_pps || 0)
+  if (txPps) txPps.textContent = formatPacketsPerSecond(meta?.tx_pps || 0)
+  if (stateText) stateText.textContent = meta?.error || telemetryStateLabel(displayState)
+  if (summary) summary.textContent = telemetrySummaryLabel(displayState)
+  if (freshness) freshness.textContent = describeFreshness(meta)
+  if (direction) direction.textContent = trafficDirectionLabel(meta?.traffic_direction)
+  if (stateBadge) stateBadge.textContent = telemetrySummaryLabel(displayState)
+
+  applyLinkState(card.querySelector('[data-telemetry-link-led]'), linkState)
+  applyActivityState(card.querySelector('[data-telemetry-activity-led]'), displayState)
+  applyCardState(card, displayState)
+}
+
+function setTelemetryTargets(card, current) {
+  const state = ensureTelemetryCardState(card)
+  state.meta = current
+  state.targetRx = Number(current?.rx_mbps || 0)
+  state.targetTx = Number(current?.tx_mbps || 0)
+  state.targetRxSignal = Number(current?.rx_signal_percent || 0)
+  state.targetTxSignal = Number(current?.tx_signal_percent || 0)
+  if (!state.initialized) {
+    state.currentRx = state.targetRx
+    state.currentTx = state.targetTx
+    state.currentRxSignal = state.targetRxSignal
+    state.currentTxSignal = state.targetTxSignal
+    state.initialized = true
+  }
+}
+
+function animateTelemetryCards() {
+  telemetryCardState.forEach((state, card) => {
+    state.currentRx += (state.targetRx - state.currentRx) * 0.18
+    state.currentTx += (state.targetTx - state.currentTx) * 0.18
+    state.currentRxSignal += (state.targetRxSignal - state.currentRxSignal) * 0.22
+    state.currentTxSignal += (state.targetTxSignal - state.currentTxSignal) * 0.22
+
+    if (Math.abs(state.targetRx - state.currentRx) < 0.02) state.currentRx = state.targetRx
+    if (Math.abs(state.targetTx - state.currentTx) < 0.02) state.currentTx = state.targetTx
+    if (Math.abs(state.targetRxSignal - state.currentRxSignal) < 0.2) state.currentRxSignal = state.targetRxSignal
+    if (Math.abs(state.targetTxSignal - state.currentTxSignal) < 0.2) state.currentTxSignal = state.targetTxSignal
+
+    renderTelemetryCard(card, state)
+  })
+
+  requestAnimationFrame(animateTelemetryCards)
 }
 
 function refreshRouterTelemetry() {
@@ -253,21 +621,45 @@ function refreshRouterTelemetry() {
       const cacheById = new Map((data.interfaces || []).map(item => [String(item.interface_id), item]))
       document.querySelectorAll('[data-telemetry-card]').forEach(card => {
         const ifaceId = card.dataset.ifaceId
-        const current = cacheById.get(ifaceId)
-        if (!current) return
-
-        applyTelemetryState(card.querySelector('[data-telemetry-led]'), current.activity_state)
-        const rx = card.querySelector('[data-telemetry-rx]')
-        const tx = card.querySelector('[data-telemetry-tx]')
-        const state = card.querySelector('[data-telemetry-state]')
-        if (rx) rx.textContent = `${current.rx_mbps.toFixed(2)} Mbps`
-        if (tx) tx.textContent = `${current.tx_mbps.toFixed(2)} Mbps`
-        if (state) state.textContent = current.error ? current.error : current.activity_state.toUpperCase()
+        const current = cacheById.get(ifaceId) || {
+          interface_id: Number(ifaceId),
+          rx_mbps: 0,
+          tx_mbps: 0,
+          rx_pps: 0,
+          tx_pps: 0,
+          rx_signal_percent: 0,
+          tx_signal_percent: 0,
+          activity_level: card.dataset.linkRunning === '1' ? 'unknown' : 'down',
+          link_state: card.dataset.linkRunning === '1' ? 'up' : 'down',
+          sampled_at: null,
+          stale_after_seconds: Number(data.stale_after_seconds || 0),
+          traffic_direction: 'quiet',
+          error: '',
+        }
+        setTelemetryTargets(card, current)
       })
     })
     .catch(() => {})
 }
 
+document.querySelectorAll('[data-telemetry-card]').forEach(card => {
+  setTelemetryTargets(card, {
+    rx_mbps: 0,
+    tx_mbps: 0,
+    rx_pps: 0,
+    tx_pps: 0,
+    rx_signal_percent: 0,
+    tx_signal_percent: 0,
+    activity_level: card.dataset.linkRunning === '1' ? 'unknown' : 'down',
+    link_state: card.dataset.linkRunning === '1' ? 'up' : 'down',
+    sampled_at: null,
+    stale_after_seconds: {{ telemetry_stale_after_seconds|default:30 }},
+    traffic_direction: 'quiet',
+    error: '',
+  })
+})
+
+requestAnimationFrame(animateTelemetryCards)
 refreshRouterTelemetry()
 setInterval(refreshRouterTelemetry, {{ telemetry_poll_ms|default:1000 }})
 </script>

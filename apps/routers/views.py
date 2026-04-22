@@ -6,9 +6,15 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 from apps.routers.models import Router, RouterInterface, InterfaceTrafficCache
 from apps.routers.forms import RouterForm, RouterCoordinatesForm, InterfaceLabelForm
-from apps.routers.services import sync_interfaces, get_live_traffic
+from apps.routers.services import (
+    sync_interfaces,
+    get_live_traffic,
+    get_telemetry_stale_after_seconds,
+    serialize_telemetry_cache,
+)
 from apps.routers import mikrotik
 from apps.core.models import AuditLog
+from apps.settings_app.models import RouterSettings
 
 
 @login_required
@@ -49,6 +55,7 @@ def router_add(request):
 @login_required
 def router_detail(request, pk):
     router = get_object_or_404(Router, pk=pk)
+    router_settings = RouterSettings.get_settings()
     physical = router.interfaces.filter(iface_type='ether').order_by('name')
     sessions = router.interfaces.filter(iface_type='pppoe-in').order_by('name')
     vlans = router.interfaces.filter(iface_type='vlan').order_by('name')
@@ -62,6 +69,7 @@ def router_detail(request, pk):
         'bridges': bridges,
         'tunnels': tunnels,
         'telemetry_poll_ms': 1000,
+        'telemetry_stale_after_seconds': get_telemetry_stale_after_seconds(router_settings.polling_interval_seconds),
     })
 
 
@@ -109,6 +117,7 @@ def router_sync(request, pk):
 def interface_detail(request, router_pk, iface_pk):
     router = get_object_or_404(Router, pk=router_pk)
     iface = get_object_or_404(RouterInterface, pk=iface_pk, router=router)
+    router_settings = RouterSettings.get_settings()
     form = InterfaceLabelForm(instance=iface)
     if request.method == 'POST':
         form = InterfaceLabelForm(request.POST, instance=iface)
@@ -120,7 +129,8 @@ def interface_detail(request, router_pk, iface_pk):
         'router': router,
         'iface': iface,
         'form': form,
-        'telemetry_poll_ms': 500,
+        'telemetry_poll_ms': 1000,
+        'telemetry_stale_after_seconds': get_telemetry_stale_after_seconds(router_settings.polling_interval_seconds),
     })
 
 
@@ -138,26 +148,20 @@ def interface_traffic_poll(request, router_pk, iface_pk):
 @login_required
 def router_live_traffic_cache(request, pk):
     router = get_object_or_404(Router, pk=pk)
-    caches = InterfaceTrafficCache.objects.filter(interface__router=router).select_related('interface')
+    router_settings = RouterSettings.get_settings()
+    stale_after_seconds = get_telemetry_stale_after_seconds(router_settings.polling_interval_seconds)
+    interfaces = router.interfaces.exclude(iface_type='pppoe-in').select_related('traffic_cache').order_by('name')
     payload = {
         'router_id': router.pk,
         'router_status': router.status,
+        'stale_after_seconds': stale_after_seconds,
         'interfaces': [
-            {
-                'interface_id': cache.interface_id,
-                'name': cache.interface.name,
-                'display_name': cache.interface.display_name,
-                'rx_mbps': cache.rx_mbps,
-                'tx_mbps': cache.tx_mbps,
-                'rx_bps': cache.rx_bits_per_second,
-                'tx_bps': cache.tx_bits_per_second,
-                'rx_pps': cache.rx_packets_per_second,
-                'tx_pps': cache.tx_packets_per_second,
-                'activity_state': cache.activity_state,
-                'sampled_at': cache.sampled_at.isoformat(),
-                'error': cache.error,
-            }
-            for cache in caches
+            serialize_telemetry_cache(
+                iface,
+                iface.traffic_cache if hasattr(iface, 'traffic_cache') else None,
+                stale_after_seconds,
+            )
+            for iface in interfaces
         ],
     }
     return JsonResponse(payload)
@@ -167,34 +171,10 @@ def router_live_traffic_cache(request, pk):
 def interface_live_traffic_cache(request, router_pk, iface_pk):
     router = get_object_or_404(Router, pk=router_pk)
     iface = get_object_or_404(RouterInterface, pk=iface_pk, router=router)
+    router_settings = RouterSettings.get_settings()
+    stale_after_seconds = get_telemetry_stale_after_seconds(router_settings.polling_interval_seconds)
     cache = InterfaceTrafficCache.objects.filter(interface=iface).first()
-    if not cache:
-        return JsonResponse({
-            'interface_id': iface.pk,
-            'display_name': iface.display_name,
-            'rx_mbps': 0,
-            'tx_mbps': 0,
-            'rx_bps': 0,
-            'tx_bps': 0,
-            'rx_pps': 0,
-            'tx_pps': 0,
-            'activity_state': 'unknown',
-            'sampled_at': None,
-            'error': '',
-        })
-    return JsonResponse({
-        'interface_id': iface.pk,
-        'display_name': iface.display_name,
-        'rx_mbps': cache.rx_mbps,
-        'tx_mbps': cache.tx_mbps,
-        'rx_bps': cache.rx_bits_per_second,
-        'tx_bps': cache.tx_bits_per_second,
-        'rx_pps': cache.rx_packets_per_second,
-        'tx_pps': cache.tx_packets_per_second,
-        'activity_state': cache.activity_state,
-        'sampled_at': cache.sampled_at.isoformat(),
-        'error': cache.error,
-    })
+    return JsonResponse(serialize_telemetry_cache(iface, cache, stale_after_seconds))
 
 
 def test_connection_view(request):
