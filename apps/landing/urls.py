@@ -7,6 +7,6 @@ urlpatterns = [
     path('<str:page_type>/publish/', views.landing_publish, name='landing-publish'),
     path('<str:page_type>/plans/add/', views.landing_plan_add, name='landing-plan-add'),
     path('plans/<int:pk>/delete/', views.landing_plan_delete, name='landing-plan-delete'),
-    path('home/', views.public_homepage, name='public-homepage'),
+    path('home/', views.public_homepage, name='public-homepage-preview'),
     path('captive/', views.public_captive, name='public-captive'),
 ]

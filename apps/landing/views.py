@@ -21,9 +21,18 @@ def landing_edit(request, page_type):
     plans = page.plans.all()
 
     if request.method == 'POST':
+        page.hero_badge = request.POST.get('hero_badge', '')
         page.hero_title = request.POST.get('hero_title', '')
         page.hero_subtitle = request.POST.get('hero_subtitle', '')
+        page.hero_primary_cta_label = request.POST.get('hero_primary_cta_label', '')
+        page.hero_primary_cta_url = request.POST.get('hero_primary_cta_url', '')
+        page.hero_secondary_cta_label = request.POST.get('hero_secondary_cta_label', '')
+        page.hero_secondary_cta_url = request.POST.get('hero_secondary_cta_url', '')
         page.about_text = request.POST.get('about_text', '')
+        page.coverage_title = request.POST.get('coverage_title', '')
+        page.coverage_text = request.POST.get('coverage_text', '')
+        page.support_hours = request.POST.get('support_hours', '')
+        page.payment_channels = request.POST.get('payment_channels', '')
         page.contact_phone = request.POST.get('contact_phone', '')
         page.contact_email = request.POST.get('contact_email', '')
         page.contact_address = request.POST.get('contact_address', '')

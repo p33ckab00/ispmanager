@@ -81,6 +81,7 @@ Project documentation starts here:
 - [Overdue and Palugit Current Workflow](docs/24_overdue_grace_current_workflow.md)
 - [Overdue Palugit Implementation Plan](docs/25_overdue_grace_workflow_implementation_plan.md)
 - [Overdue Grace Implementation Notes](docs/26_overdue_grace_implementation_notes.md)
+- [Landing Public Homepage and Admin Auth Update](docs/27_landing_public_homepage_and_auth.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 
 ## Current Product Direction

@@ -4,90 +4,844 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ page.hero_title|default:isp_name }}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>:root { --primary: {{ page.primary_color }}; }</style>
+  <meta name="description" content="{{ page.hero_subtitle|default:page.about_text|default:isp_name }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    :root {
+      --brand: {{ page.primary_color|default:'#2563eb' }};
+      --brand-soft: {{ page.primary_color|default:'#2563eb' }}14;
+      --brand-mid: {{ page.primary_color|default:'#2563eb' }}22;
+      --ink: #122033;
+      --muted: #5d6878;
+      --paper: #f6f1e8;
+      --cream: #fffaf3;
+      --line: rgba(18, 32, 51, 0.10);
+      --card: rgba(255, 255, 255, 0.82);
+      --shadow: 0 24px 80px rgba(18, 32, 51, 0.10);
+      --radius-lg: 32px;
+      --radius-md: 22px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: 'Instrument Sans', sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, var(--brand-soft), transparent 28%),
+        radial-gradient(circle at 85% 12%, rgba(255, 187, 92, 0.25), transparent 24%),
+        linear-gradient(180deg, #fffdf8 0%, #fff9f0 36%, #f8f5ef 100%);
+    }
+
+    a { color: inherit; text-decoration: none; }
+    img { max-width: 100%; display: block; }
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+    .eyebrow, .section-eyebrow {
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.78);
+      border: 1px solid var(--line);
+      box-shadow: 0 10px 30px rgba(18, 32, 51, 0.06);
+    }
+    .eyebrow-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--brand);
+      box-shadow: 0 0 0 8px var(--brand-soft);
+    }
+    .section-eyebrow { color: var(--muted); margin-bottom: 12px; }
+    .headline, .section-title, .price, .brandmark {
+      font-family: 'Space Grotesk', sans-serif;
+      letter-spacing: -0.04em;
+    }
+    .announcement {
+      background: linear-gradient(90deg, #201812, #33271d);
+      color: #f9ead0;
+      font-size: 0.95rem;
+      padding: 12px 0;
+    }
+    .announcement .shell {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: center;
+      text-align: center;
+    }
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: blur(18px);
+      background: rgba(255, 250, 243, 0.72);
+      border-bottom: 1px solid rgba(18, 32, 51, 0.06);
+    }
+    .nav-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 16px 0;
+    }
+    .brandmark {
+      font-size: 1.25rem;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brandmark-badge {
+      width: 14px;
+      height: 14px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, var(--brand), #ffba65);
+      box-shadow: 0 10px 25px var(--brand-mid);
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .nav-links a:hover,
+    .nav-links a:focus-visible { color: var(--ink); }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .menu-toggle {
+      display: none;
+      border: 0;
+      background: transparent;
+      color: var(--ink);
+      font-size: 1.25rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border-radius: 999px;
+      padding: 14px 22px;
+      font-weight: 700;
+      font-size: 0.95rem;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+      border: 1px solid transparent;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--brand), #0f172a);
+      color: white;
+      box-shadow: 0 18px 40px var(--brand-mid);
+    }
+    .btn-secondary {
+      background: rgba(255,255,255,0.82);
+      color: var(--ink);
+      border-color: var(--line);
+    }
+    .hero {
+      padding: 52px 0 40px;
+      overflow: hidden;
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 28px;
+      align-items: stretch;
+    }
+    .hero-panel, .hero-aside, .section-card, .plan-card, .contact-card, .cta-banner {
+      background: var(--card);
+      border: 1px solid rgba(255,255,255,0.55);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(14px);
+    }
+    .hero-panel {
+      padding: 42px;
+      border-radius: var(--radius-lg);
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-panel::after {
+      content: '';
+      position: absolute;
+      inset: auto -80px -120px auto;
+      width: 240px;
+      height: 240px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--brand-mid), transparent 64%);
+      pointer-events: none;
+    }
+    .headline {
+      font-size: clamp(2.8rem, 7vw, 5.4rem);
+      line-height: 0.95;
+      margin: 18px 0 18px;
+      max-width: 11ch;
+    }
+    .hero-copy {
+      font-size: 1.08rem;
+      line-height: 1.8;
+      color: var(--muted);
+      max-width: 58ch;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 28px;
+    }
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 34px;
+    }
+    .stat-box {
+      padding: 18px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.72);
+      border: 1px solid var(--line);
+    }
+    .stat-value {
+      display: block;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.65rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .stat-label {
+      display: block;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.4;
+    }
+    .hero-aside {
+      border-radius: var(--radius-lg);
+      padding: 22px;
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+    .network-card,
+    .quick-links,
+    .coverage-pillars {
+      border-radius: 24px;
+      padding: 24px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.72));
+      border: 1px solid var(--line);
+    }
+    .network-card {
+      background: linear-gradient(160deg, #131d2d 0%, #1d314f 42%, var(--brand) 140%);
+      color: white;
+      min-height: 240px;
+      position: relative;
+      overflow: hidden;
+    }
+    .network-card::after {
+      content: '';
+      position: absolute;
+      inset: auto -40px -46px auto;
+      width: 180px;
+      height: 180px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255,255,255,0.28), transparent 70%);
+    }
+    .network-label {
+      font-size: 0.8rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      opacity: 0.74;
+    }
+    .network-card h2 {
+      margin: 16px 0 12px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 2rem;
+      line-height: 1;
+      max-width: 9ch;
+    }
+    .network-card p {
+      margin: 0;
+      line-height: 1.7;
+      color: rgba(255,255,255,0.82);
+      max-width: 26ch;
+    }
+    .quick-link-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .quick-link {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+      color: var(--ink);
+      font-weight: 600;
+    }
+    .quick-link small {
+      display: block;
+      color: var(--muted);
+      font-weight: 400;
+      margin-top: 3px;
+    }
+    .coverage-pillars ul {
+      margin: 14px 0 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+    .coverage-pillars li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .coverage-pillars i { color: var(--brand); margin-top: 4px; }
+    .section {
+      padding: 28px 0 90px;
+    }
+    .section-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 26px;
+    }
+    .section-title {
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      line-height: 0.98;
+      margin: 0;
+    }
+    .section-intro {
+      max-width: 42ch;
+      color: var(--muted);
+      line-height: 1.8;
+      margin: 0;
+    }
+    .plans-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .plan-card {
+      padding: 28px;
+      border-radius: 28px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .plan-card.featured {
+      transform: translateY(-10px);
+      background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,255,255,0.84));
+      border-color: var(--brand-mid);
+    }
+    .plan-badge {
+      align-self: flex-start;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: white;
+      background: linear-gradient(135deg, var(--brand), #132137);
+    }
+    .plan-name {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin: 0;
+    }
+    .plan-speed {
+      color: var(--muted);
+      font-weight: 600;
+      min-height: 1.4em;
+    }
+    .price {
+      font-size: 2.4rem;
+      font-weight: 700;
+      line-height: 1;
+      margin: 6px 0 0;
+    }
+    .plan-features {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 11px;
+      color: var(--muted);
+    }
+    .plan-features li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      line-height: 1.5;
+    }
+    .plan-features i { color: var(--brand); margin-top: 4px; }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 18px;
+    }
+    .section-card {
+      padding: 26px;
+      border-radius: 28px;
+    }
+    .section-card h3 {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.35rem;
+      margin: 8px 0 10px;
+    }
+    .section-card p,
+    .section-card li {
+      color: var(--muted);
+      line-height: 1.8;
+    }
+    .coverage-grid,
+    .contact-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 18px;
+      margin-top: 18px;
+    }
+    .contact-card {
+      padding: 28px;
+      border-radius: 28px;
+    }
+    .contact-list,
+    .payment-list {
+      list-style: none;
+      padding: 0;
+      margin: 16px 0 0;
+      display: grid;
+      gap: 12px;
+    }
+    .contact-list li,
+    .payment-list li {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+    .contact-list i,
+    .payment-list i { color: var(--brand); margin-top: 4px; }
+    .cta-banner {
+      margin-top: 26px;
+      border-radius: 30px;
+      padding: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      background: linear-gradient(135deg, #142034 0%, var(--brand) 160%);
+      color: white;
+    }
+    .cta-banner h3 {
+      margin: 0 0 8px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 1.9rem;
+      line-height: 1;
+    }
+    .cta-banner p {
+      margin: 0;
+      color: rgba(255,255,255,0.82);
+      line-height: 1.7;
+      max-width: 44ch;
+    }
+    .cta-banner .btn-secondary {
+      background: rgba(255,255,255,0.14);
+      color: white;
+      border-color: rgba(255,255,255,0.22);
+    }
+    footer {
+      padding: 26px 0 40px;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+    .footer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(18, 32, 51, 0.08);
+    }
+
+    @media (max-width: 1024px) {
+      .hero-grid,
+      .coverage-grid,
+      .contact-grid,
+      .plans-grid,
+      .feature-grid {
+        grid-template-columns: 1fr;
+      }
+      .section-heading,
+      .cta-banner,
+      .footer-row {
+        align-items: start;
+        flex-direction: column;
+      }
+      .plan-card.featured { transform: none; }
+    }
+
+    @media (max-width: 820px) {
+      .menu-toggle { display: inline-flex; }
+      .nav-links,
+      .nav-actions { display: none; }
+      .site-header.open .nav-sheet {
+        display: grid;
+      }
+      .nav-sheet {
+        display: none;
+        gap: 12px;
+        padding: 0 0 18px;
+      }
+      .nav-sheet a {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: rgba(255,255,255,0.82);
+        border: 1px solid var(--line);
+        color: var(--ink);
+      }
+      .hero-panel,
+      .hero-aside,
+      .section-card,
+      .contact-card,
+      .cta-banner { padding: 22px; }
+      .headline { max-width: none; }
+      .hero-stats { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
-<body class="bg-white text-gray-800 font-sans">
+<body>
+  {% url 'portal-request-otp' as portal_url %}
+  {% url 'public-homepage' as homepage_url %}
+  {% url 'login' as admin_login_url %}
+  {% url 'logout' as admin_logout_url %}
+  {% url 'dashboard' as dashboard_url %}
+  {% with primary_label=page.hero_primary_cta_label|default:'See Plans' primary_url=page.hero_primary_cta_url|default:'#plans' secondary_label=page.hero_secondary_cta_label|default:'Subscriber Portal' secondary_url=page.hero_secondary_cta_url|default:portal_url %}
 
   {% if page.announcement %}
-  <div class="bg-yellow-50 border-b border-yellow-200 text-yellow-800 text-sm text-center py-2 px-4">
-    <i class="fa fa-triangle-exclamation mr-1"></i> {{ page.announcement }}
+  <div class="announcement">
+    <div class="shell">
+      <i class="fa-solid fa-bullhorn"></i>
+      <span>{{ page.announcement }}</span>
+    </div>
   </div>
   {% endif %}
 
-  <header class="bg-white border-b border-gray-100 px-6 py-4">
-    <div class="max-w-5xl mx-auto flex items-center justify-between">
-      <span class="text-xl font-bold" style="color: {{ page.primary_color }}">{{ isp_name }}</span>
-      <nav class="hidden md:flex gap-6 text-sm text-gray-600">
-        <a href="#plans" class="hover:text-gray-900">Plans</a>
-        <a href="#about" class="hover:text-gray-900">About</a>
-        <a href="#contact" class="hover:text-gray-900">Contact</a>
-        <a href="/subscribers/portal/" class="font-semibold" style="color: {{ page.primary_color }}">My Account</a>
-      </nav>
+  <header class="site-header" id="site-header">
+    <div class="shell">
+      <div class="nav-bar">
+        <a href="{{ homepage_url }}" class="brandmark">
+          <span class="brandmark-badge"></span>
+          <span>{{ isp_name }}</span>
+        </a>
+
+        <nav class="nav-links" aria-label="Primary navigation">
+          <a href="#plans">Plans</a>
+          <a href="#why-us">Why Us</a>
+          <a href="#coverage">Coverage</a>
+          <a href="#contact">Contact</a>
+          {% if request.user.is_authenticated %}
+          <a href="{{ dashboard_url }}">Dashboard</a>
+          {% else %}
+          <a href="{{ admin_login_url }}">Admin Login</a>
+          {% endif %}
+        </nav>
+
+        <div class="nav-actions">
+          {% if request.user.is_authenticated %}
+          <a href="{{ dashboard_url }}" class="btn btn-secondary">Dashboard</a>
+          <a href="{{ admin_logout_url }}" class="btn btn-secondary">Logout</a>
+          {% else %}
+          <a href="{{ admin_login_url }}" class="btn btn-secondary">Admin Login</a>
+          {% endif %}
+          <a href="{{ portal_url }}" class="btn btn-secondary">My Account</a>
+          <a href="{{ primary_url }}" class="btn btn-primary">{{ primary_label }}</a>
+        </div>
+
+        <button type="button" class="menu-toggle" aria-label="Toggle menu" onclick="document.getElementById('site-header').classList.toggle('open')">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+      </div>
+      <div class="nav-sheet" aria-label="Mobile navigation">
+        <a href="#plans">Plans</a>
+        <a href="#why-us">Why Us</a>
+        <a href="#coverage">Coverage</a>
+        <a href="#contact">Contact</a>
+        {% if request.user.is_authenticated %}
+        <a href="{{ dashboard_url }}">Dashboard</a>
+        <a href="{{ admin_logout_url }}">Logout</a>
+        {% else %}
+        <a href="{{ admin_login_url }}">Admin Login</a>
+        {% endif %}
+        <a href="{{ portal_url }}">Subscriber Portal</a>
+      </div>
     </div>
   </header>
 
-  <section class="py-20 px-6 text-center" style="background: linear-gradient(135deg, {{ page.primary_color }}15, #fff)">
-    <div class="max-w-3xl mx-auto">
-      <h1 class="text-4xl md:text-5xl font-bold text-gray-900 mb-4">{{ page.hero_title|default:"Fast Internet" }}</h1>
-      <p class="text-xl text-gray-500 mb-8">{{ page.hero_subtitle }}</p>
-      <a href="#plans" class="inline-block text-white font-semibold px-8 py-3 rounded-full text-sm transition"
-        style="background-color: {{ page.primary_color }}">See Plans</a>
-    </div>
-  </section>
-
-  {% if plans %}
-  <section id="plans" class="py-16 px-6 bg-gray-50">
-    <div class="max-w-5xl mx-auto">
-      <h2 class="text-3xl font-bold text-center text-gray-800 mb-10">Our Plans</h2>
-      <div class="grid grid-cols-1 md:grid-cols-{{ plans|length|default:3 }} gap-6">
-        {% for plan in plans %}
-        <div class="bg-white rounded-2xl shadow-sm border {% if plan.is_featured %}border-blue-400{% else %}border-gray-100{% endif %} p-6 relative">
-          {% if plan.is_featured %}
-          <span class="absolute -top-3 left-1/2 -translate-x-1/2 text-xs font-semibold text-white px-3 py-1 rounded-full"
-            style="background-color: {{ page.primary_color }}">Most Popular</span>
-          {% endif %}
-          <h3 class="text-xl font-bold text-gray-800 mb-1">{{ plan.name }}</h3>
-          {% if plan.speed %}<p class="text-sm text-gray-500 mb-3">{{ plan.speed }}</p>{% endif %}
-          <p class="text-3xl font-bold mb-4" style="color: {{ page.primary_color }}">{{ plan.price }}</p>
-          {% if plan.feature_list %}
-          <ul class="space-y-2 text-sm text-gray-600">
-            {% for f in plan.feature_list %}
-            <li class="flex items-center gap-2"><span style="color: {{ page.primary_color }}">&#10003;</span> {{ f }}</li>
-            {% endfor %}
-          </ul>
-          {% endif %}
+  <main>
+    <section class="hero">
+      <div class="shell hero-grid">
+        <div class="hero-panel">
+          <span class="eyebrow">
+            <span class="eyebrow-dot"></span>
+            {{ page.hero_badge|default:'Reliable neighborhood internet for homes and growing businesses' }}
+          </span>
+          <h1 class="headline">{{ page.hero_title|default:'Internet service that feels local, responsive, and dependable.' }}</h1>
+          <p class="hero-copy">
+            {{ page.hero_subtitle|default:'Launch your public site with a cleaner story: clear plans, direct support channels, payment guidance, and a fast path into the subscriber portal.' }}
+          </p>
+          <div class="hero-actions">
+            <a href="{{ primary_url }}" class="btn btn-primary">{{ primary_label }} <i class="fa-solid fa-arrow-right"></i></a>
+            <a href="{{ secondary_url }}" class="btn btn-secondary">{{ secondary_label }}</a>
+          </div>
+          <div class="hero-stats">
+            <div class="stat-box">
+              <span class="stat-value">{{ plans|length }}</span>
+              <span class="stat-label">Published plan option{{ plans|length|pluralize }} ready for comparison</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-value">{{ page.support_hours|default:'Mon-Sat' }}</span>
+              <span class="stat-label">Support window you can highlight for new and existing subscribers</span>
+            </div>
+            <div class="stat-box">
+              <span class="stat-value">24/7</span>
+              <span class="stat-label">Subscriber portal access for viewing bills and account activity</span>
+            </div>
+          </div>
         </div>
-        {% endfor %}
+
+        <aside class="hero-aside">
+          <div class="network-card">
+            <span class="network-label">Network Promise</span>
+            <h2>Fast answers matter as much as fast speeds.</h2>
+            <p>Use this homepage to set expectations clearly: transparent plans, reachable support, and an easier path to billing and account actions.</p>
+          </div>
+
+          <div class="quick-links">
+            <span class="section-eyebrow">Quick Actions</span>
+            <div class="quick-link-list">
+              <a href="{{ portal_url }}" class="quick-link">
+                <span>
+                  Subscriber Portal
+                  <small>View balances, account details, and payment-related access</small>
+                </span>
+                <i class="fa-solid fa-arrow-up-right-from-square"></i>
+              </a>
+              <a href="#plans" class="quick-link">
+                <span>
+                  Compare Plans
+                  <small>Show your featured offer and monthly pricing up front</small>
+                </span>
+                <i class="fa-solid fa-layer-group"></i>
+              </a>
+              {% if page.contact_phone %}
+              <a href="tel:{{ page.contact_phone }}" class="quick-link">
+                <span>
+                  Call Support
+                  <small>{{ page.contact_phone }}</small>
+                </span>
+                <i class="fa-solid fa-phone"></i>
+              </a>
+              {% else %}
+              <a href="#contact" class="quick-link">
+                <span>
+                  Contact Us
+                  <small>Share your office line, mobile, or messenger handoff here</small>
+                </span>
+                <i class="fa-solid fa-headset"></i>
+              </a>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="coverage-pillars">
+            <span class="section-eyebrow">Built for ISP Operations</span>
+            <ul>
+              <li><i class="fa-solid fa-circle-check"></i><span>Promote your best-fit plans without forcing visitors into a generic template.</span></li>
+              <li><i class="fa-solid fa-circle-check"></i><span>Surface support, billing, and portal access right away so fewer people get lost.</span></li>
+              <li><i class="fa-solid fa-circle-check"></i><span>Keep content editable from the admin side instead of hardcoding every homepage change.</span></li>
+            </ul>
+          </div>
+        </aside>
       </div>
-    </div>
-  </section>
-  {% endif %}
+    </section>
 
-  {% if page.about_text %}
-  <section id="about" class="py-16 px-6">
-    <div class="max-w-3xl mx-auto text-center">
-      <h2 class="text-3xl font-bold text-gray-800 mb-6">About Us</h2>
-      <p class="text-gray-600 leading-relaxed">{{ page.about_text }}</p>
-    </div>
-  </section>
-  {% endif %}
-
-  <section id="contact" class="py-16 px-6 bg-gray-50">
-    <div class="max-w-2xl mx-auto text-center">
-      <h2 class="text-3xl font-bold text-gray-800 mb-6">Contact Us</h2>
-      <div class="space-y-3 text-gray-600">
-        {% if page.contact_phone %}<p><i class="fa fa-phone mr-2"></i>{{ page.contact_phone }}</p>{% endif %}
-        {% if page.contact_email %}<p><i class="fa fa-envelope mr-2"></i>{{ page.contact_email }}</p>{% endif %}
-        {% if page.contact_address %}<p><i class="fa fa-location-dot mr-2"></i>{{ page.contact_address }}</p>{% endif %}
+    {% if plans %}
+    <section class="section" id="plans">
+      <div class="shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-eyebrow">Service Plans</div>
+            <h2 class="section-title">Straightforward options people can compare in one look.</h2>
+          </div>
+          <p class="section-intro">Your plans are pulled directly from the landing admin panel. Featured packages float to the top visually so promos and anchor offers stand out without burying the essentials.</p>
+        </div>
+        <div class="plans-grid">
+          {% for plan in plans %}
+          <article class="plan-card {% if plan.is_featured %}featured{% endif %}">
+            {% if plan.is_featured %}<span class="plan-badge">Featured Plan</span>{% endif %}
+            <h3 class="plan-name">{{ plan.name }}</h3>
+            <div class="plan-speed">{{ plan.speed|default:'Custom speed profile available' }}</div>
+            <div class="price">{{ plan.price|default:'Contact us' }}</div>
+            {% if plan.feature_list %}
+            <ul class="plan-features">
+              {% for feature in plan.feature_list %}
+              <li><i class="fa-solid fa-bolt"></i><span>{{ feature }}</span></li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <ul class="plan-features">
+              <li><i class="fa-solid fa-bolt"></i><span>Flexible setup for homes, shops, and small offices</span></li>
+              <li><i class="fa-solid fa-bolt"></i><span>Talk to the team for installation schedule and area availability</span></li>
+            </ul>
+            {% endif %}
+            <div style="margin-top:auto; padding-top:10px;">
+              <a href="#contact" class="btn btn-secondary" style="width:100%;">Ask About This Plan</a>
+            </div>
+          </article>
+          {% endfor %}
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
+    {% endif %}
 
-  <footer class="bg-gray-900 text-gray-400 text-center py-6 text-sm">
-    {{ page.footer_text|default:isp_name }} &copy; {% now "Y" %}
+    <section class="section" id="why-us">
+      <div class="shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-eyebrow">Why Choose {{ isp_name }}</div>
+            <h2 class="section-title">The landing page should answer the questions people actually ask before they sign up.</h2>
+          </div>
+          <p class="section-intro">This section keeps the message practical: what support feels like, how billing stays understandable, and how customers can manage their accounts after installation.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="section-card">
+            <div class="section-eyebrow">Fast Support</div>
+            <h3>Local communication, not just a phone number on a poster.</h3>
+            <p>Surface your office line, support email, and service window clearly so expectations are set before a new subscriber even applies.</p>
+          </article>
+          <article class="section-card">
+            <div class="section-eyebrow">Clear Billing</div>
+            <h3>Plans, due expectations, and portal access should feel easy to follow.</h3>
+            <p>Use the public site to reduce confusion around monthly packages, statements, and where subscribers can check their account details.</p>
+          </article>
+          <article class="section-card">
+            <div class="section-eyebrow">Operational Ready</div>
+            <h3>Built to work with the same ISP Manager backend your team uses daily.</h3>
+            <p>The public site can point directly into the subscriber portal while your staff keeps dashboards, billing, and support workflows inside the system.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="coverage">
+      <div class="shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-eyebrow">Availability and Reach</div>
+            <h2 class="section-title">Let visitors know where service is available and how to ask for installation.</h2>
+          </div>
+          <p class="section-intro">Even a simple availability section helps reduce repetitive chats. It gives your sales or support team a clearer starting point for inquiries.</p>
+        </div>
+        <div class="coverage-grid">
+          <article class="section-card">
+            <div class="section-eyebrow">{{ page.coverage_title|default:'Areas We Serve' }}</div>
+            <h3>Coverage can start simple and still feel professional.</h3>
+            <p>{{ page.coverage_text|default:'List the barangays, subdivisions, puroks, sitios, or business areas where your network is already active. You can also mention nearby expansion targets so visitors know whether to inquire.' }}</p>
+          </article>
+          <article class="section-card">
+            <div class="section-eyebrow">Payment Channels</div>
+            <h3>Tell subscribers where payments can be settled.</h3>
+            {% if page.payment_channel_list %}
+            <ul class="payment-list">
+              {% for channel in page.payment_channel_list %}
+              <li><i class="fa-solid fa-wallet"></i><span>{{ channel }}</span></li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <ul class="payment-list">
+              <li><i class="fa-solid fa-wallet"></i><span>Add GCash, Maya, bank transfer, or office walk-in options from the landing page editor.</span></li>
+              <li><i class="fa-solid fa-wallet"></i><span>If you support portal-based billing views, keep the portal button visible from the hero area too.</span></li>
+            </ul>
+            {% endif %}
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="contact">
+      <div class="shell">
+        <div class="section-heading">
+          <div>
+            <div class="section-eyebrow">Contact and Support</div>
+            <h2 class="section-title">Give people one obvious place to reach you.</h2>
+          </div>
+          <p class="section-intro">The public homepage should make contact effortless. Phone, email, address, support hours, and portal access all belong here so both prospects and subscribers know where to go.</p>
+        </div>
+        <div class="contact-grid">
+          <article class="contact-card">
+            <div class="section-eyebrow">Contact Details</div>
+            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; margin:8px 0 10px;">Talk to the team.</h3>
+            <ul class="contact-list">
+              {% if page.contact_phone %}<li><i class="fa-solid fa-phone"></i><span>{{ page.contact_phone }}</span></li>{% endif %}
+              {% if page.contact_email %}<li><i class="fa-solid fa-envelope"></i><span>{{ page.contact_email }}</span></li>{% endif %}
+              {% if page.contact_address %}<li><i class="fa-solid fa-location-dot"></i><span>{{ page.contact_address }}</span></li>{% endif %}
+              {% if page.support_hours %}<li><i class="fa-solid fa-clock"></i><span>{{ page.support_hours }}</span></li>{% endif %}
+            </ul>
+          </article>
+          <article class="contact-card">
+            <div class="section-eyebrow">About {{ isp_name }}</div>
+            <h3 style="font-family:'Space Grotesk',sans-serif; font-size:1.5rem; margin:8px 0 10px;">Tell the story behind the network.</h3>
+            <p style="color:var(--muted); line-height:1.8; margin:0;">{{ page.about_text|default:'Use this space to explain who you serve, how your team supports installations and billing concerns, and what kind of subscriber experience people can expect once they are connected.' }}</p>
+          </article>
+        </div>
+
+        <div class="cta-banner">
+          <div>
+            <h3>Ready to turn this into your real public homepage?</h3>
+            <p>Keep `/` as the site front door, send existing subscribers to the portal, and let the internal team stay focused on dashboards, billing, routers, and support operations.</p>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:12px;">
+            <a href="{{ primary_url }}" class="btn btn-primary">{{ primary_label }}</a>
+            <a href="{{ portal_url }}" class="btn btn-secondary">Subscriber Portal</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-row">
+      <div>{{ page.footer_text|default:'Built to present your ISP clearly and guide subscribers into the right workflow.' }}</div>
+      <div>{{ isp_name }} &copy; {% now "Y" %}</div>
+    </div>
   </footer>
-
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  {% endwith %}
 </body>
 </html>

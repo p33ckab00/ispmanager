@@ -23,7 +23,7 @@
       <a href="/landing/homepage/publish/" class="flex-1 text-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold py-2 rounded-lg">
         {% if homepage.is_published %}Unpublish{% else %}Publish{% endif %}
       </a>
-      <a href="/landing/home/" target="_blank" class="flex-1 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-sm font-semibold py-2 rounded-lg">Preview</a>
+      <a href="{% url 'public-homepage' %}" target="_blank" class="flex-1 text-center bg-gray-50 hover:bg-gray-100 text-gray-600 text-sm font-semibold py-2 rounded-lg">Preview</a>
     </div>
   </div>
 

@@ -62,7 +62,7 @@ def logout_view(request):
     if request.user.is_authenticated:
         AuditLog.log('logout', 'core', f"User {request.user.username} logged out", user=request.user)
     logout(request)
-    return redirect('/auth/login/')
+    return redirect('/')
 
 
 @login_required

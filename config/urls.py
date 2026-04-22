@@ -2,9 +2,11 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from apps.landing.views import public_homepage
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('', public_homepage, name='public-homepage'),
     path('', include('apps.core.urls')),
     path('auth/', include('apps.core.auth_urls')),
     path('dashboard/', include('apps.core.dashboard_urls')),
