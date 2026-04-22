@@ -56,12 +56,12 @@ Any -> Archived (hidden from all active views, data preserved)
 ```bash
 # PostgreSQL-backed local/dev start
 python manage.py migrate
-python manage.py runserver 0.0.0.0:8000
+python manage.py runserver 0.0.0.0:8193
 ```
 
 ## Raspberry Pi Deployment
 
 ```bash
 pip install gunicorn
-gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
+gunicorn config.wsgi:application --bind 0.0.0.0:8193 --workers 2
 ```

@@ -155,22 +155,22 @@ Possible behaviors:
 - auto-start scheduler for convenience
 - allow disabling with environment variable
 
-Suggested control variable:
+Current control variable:
 
-- `ENABLE_INTERNAL_SCHEDULER`
+- `DISABLE_SCHEDULER`
 
 Meaning:
 
-- `true`: allow scheduler to auto-start in local/dev
-- `false`: disable internal startup
+- `0`: allow normal startup behavior in local/dev
+- `1`: prevent scheduler startup in web processes
 
 ## Production Mode
 
 Recommended behavior:
 
-- `ENABLE_INTERNAL_SCHEDULER=false`
+- `DISABLE_SCHEDULER=1` in the web service
 - Gunicorn should not start APScheduler
-- dedicated scheduler service should start it explicitly
+- dedicated scheduler service should start `python manage.py run_scheduler` explicitly
 
 ## 5. Dedicated Scheduler Process Design
 

@@ -1,119 +1,140 @@
-# Ubuntu Scheduler Workaround Guide
+# Ubuntu Scheduler Service Guide
 
-Temporary production operations guide for `ISP Manager` while the codebase does not yet expose a dedicated standalone scheduler entrypoint.
+Production operations guide for running the `ISP Manager` scheduler safely on Ubuntu.
 
 ## Purpose
 
-This guide explains how to run the application safely on Ubuntu today, without accidentally starting duplicate APScheduler instances under Gunicorn.
+This document explains how to run scheduled jobs without letting Gunicorn workers own APScheduler execution.
 
-## Current Limitation
+## Recommended Production Rule
 
-The current codebase still starts the scheduler from Django app startup logic.
-
-Safe web deployment therefore requires preventing scheduler startup inside the Gunicorn service.
-
-## Recommended Temporary Production Rule
-
-For the web service environment, set:
-
-```env
-DISABLE_SCHEDULER=1
-```
-
-This prevents the web workers from starting APScheduler.
-
-## What This Means Operationally
-
-With `DISABLE_SCHEDULER=1` enabled in production web service:
-
-- HTTP pages work normally
-- PostgreSQL works normally
-- billing, accounting, and router pages remain available
-- automatic scheduled jobs should be considered disabled until a dedicated scheduler service is implemented
-
-That affects:
-
-- auto invoice generation
-- auto billing snapshot generation
-- scheduled billing SMS
-- overdue marking
-- auto-suspension
-- usage sampling
-- router status polling
-- telemetry cache refresh
-
-## Temporary Workaround Options
-
-### Option 1: Manual operational triggers
-
-Use this if the deployment is early-stage or controlled by staff.
-
-Examples:
-
-- generate snapshots manually from subscriber pages
-- record payments manually
-- use manual accounting sync/reconciliation tools if needed
-- use router sync buttons manually
-- use diagnostics routes manually for controlled checks
-
-### Option 2: Controlled maintenance window runs
-
-If a job absolutely must run before the dedicated scheduler entrypoint exists, run it manually in a controlled admin shell session instead of letting Gunicorn workers do it implicitly.
-
-Do this only when:
-
-- you know exactly which job you are running
-- the job is idempotent or low risk
-- you monitor DB writes during the run
-
-## systemd Guidance
-
-### Web service
-
-The production web service should include:
-
-```ini
-EnvironmentFile=/etc/ispmanager/ispmanager.env
-```
-
-And the env file should contain:
-
-```env
-DISABLE_SCHEDULER=1
-```
-
-### Do not do this yet
-
-Do not create a fake second Gunicorn service hoping it will behave like a scheduler service.
-
-That would still rely on Django app startup side effects and can reintroduce duplicate or unclear job execution.
-
-## Recommended Next Implementation
-
-The long-term fix should be a dedicated scheduler entrypoint such as:
-
-- a management command
-- or a dedicated scheduler runner module
-
-Then production can use:
+Use two separate services:
 
 - `ispmanager-web.service`
 - `ispmanager-scheduler.service`
 
-with the scheduler process intentionally started once.
+And keep this in the shared environment file:
+
+```env
+DISABLE_SCHEDULER=1
+```
+
+Why this is correct:
+
+- the web service should not auto-start APScheduler
+- the scheduler should run once as an intentional long-running process
+- logs, restarts, and failures become easier to reason about
+
+## Scheduler Entry Point
+
+The project now includes a dedicated scheduler command:
+
+```bash
+python manage.py run_scheduler
+```
+
+This command is intended to be the process target for the scheduler service.
+
+## Recommended systemd Service
+
+Create `/etc/systemd/system/ispmanager-scheduler.service`:
+
+```ini
+[Unit]
+Description=ISP Manager Scheduler Service
+After=network.target postgresql.service
+
+[Service]
+User=ispmanager
+Group=ispmanager
+WorkingDirectory=/opt/ispmanager
+EnvironmentFile=/etc/ispmanager/ispmanager.env
+ExecStart=/opt/ispmanager/.venv/bin/python manage.py run_scheduler
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Reload and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable ispmanager-scheduler
+sudo systemctl start ispmanager-scheduler
+sudo systemctl status ispmanager-scheduler
+```
+
+## What the Scheduler Service Owns
+
+The scheduler service is the correct place for recurring jobs such as:
+
+- invoice generation
+- billing snapshot generation
+- scheduled billing SMS
+- overdue marking
+- auto-suspension logic
+- subscriber usage sampling
+- router polling
+- telemetry cache refresh
+
+## What the Web Service Must Not Do
+
+The web service should:
+
+- serve HTTP requests
+- use `DISABLE_SCHEDULER=1`
+- avoid owning recurring job execution
+
+Do not rely on Gunicorn workers to run scheduler jobs in production.
 
 ## Verification Checklist
 
-When using this workaround, confirm:
+Confirm:
 
-- Gunicorn starts successfully
-- pages load normally
-- scheduler is not silently running inside every worker
-- operators understand which jobs are now manual
-- billing automation is not assumed to be active
+- `ispmanager-web.service` is running
+- `ispmanager-scheduler.service` is running
+- PostgreSQL is running
+- `journalctl -u ispmanager-scheduler` shows job activity without repeated duplicate startups
+- billing and telemetry jobs execute from the scheduler service, not from the web service
 
-## Risk Reminder
+## Troubleshooting
 
-This workaround keeps the deployment safer than running duplicate web-started schedulers, but it is still an operational compromise.
+### Scheduler service exits immediately
 
-Treat it as a temporary production-safe workaround until the dedicated scheduler process is implemented in code.
+Check:
+
+```bash
+sudo journalctl -u ispmanager-scheduler -n 100 --no-pager
+```
+
+Common causes:
+
+- broken env file
+- PostgreSQL connection failure
+- missing app dependencies
+- migrations not applied
+
+### Jobs do not appear to run
+
+Check:
+
+- service status
+- scheduler logs
+- database connectivity
+- application settings related to billing, usage, router polling, and notifications
+
+### Duplicate job behavior appears
+
+Check:
+
+- web service env still has `DISABLE_SCHEDULER=1`
+- only one `ispmanager-scheduler.service` instance exists
+- you are not manually running `manage.py run_scheduler` in another shell at the same time
+
+## Final Recommendation
+
+For Ubuntu production, treat scheduler execution as a first-class service, not as a side effect of web startup.
+
+That gives the cleanest operational model for the current codebase.

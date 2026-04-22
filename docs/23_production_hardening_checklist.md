@@ -9,8 +9,13 @@ Confirm all of the following:
 - `DEBUG=False`
 - strong `SECRET_KEY`
 - strict `ALLOWED_HOSTS`
+- `APP_BASE_URL` set to the real HTTPS domain
 - `CSRF_TRUSTED_ORIGINS` configured for the real HTTPS domain
-- secure cookie settings reviewed for production
+- `SESSION_COOKIE_SECURE=True`
+- `CSRF_COOKIE_SECURE=True`
+- `SECURE_SSL_REDIRECT=True`
+- `SECURE_PROXY_SSL_HEADER=HTTP_X_FORWARDED_PROTO,https`
+- HSTS reviewed before enabling preload
 - no real secrets committed in Git
 
 ## 2. Database Hardening
@@ -36,12 +41,13 @@ Confirm:
 
 ## 4. Scheduler Safety
 
-Because the current repo does not yet expose a production-ready standalone scheduler command, confirm:
+Confirm:
 
 - web service uses `DISABLE_SCHEDULER=1`
-- staff know which jobs are currently manual
-- duplicate scheduler startup is not possible through Gunicorn workers
-- scheduler separation is tracked as a follow-up implementation
+- scheduler runs through `manage.py run_scheduler`
+- `ispmanager-scheduler.service` exists and restarts on failure
+- duplicate scheduler startup through Gunicorn workers is not possible
+- scheduler logs are monitored separately from web logs
 
 ## 5. Billing and Accounting Safety
 
@@ -76,7 +82,7 @@ Confirm:
 
 Minimum recommended:
 
-- `journalctl` checked for Gunicorn and Nginx errors
+- `journalctl` checked for Gunicorn, scheduler, and Nginx errors
 - PostgreSQL service monitored
 - disk space monitored
 - backup success monitored
@@ -98,7 +104,7 @@ Do not call the deployment production-ready unless:
 
 - PostgreSQL is stable
 - web service is stable
+- scheduler service is stable
 - HTTPS is working
 - billing and accounting flows are validated
 - router pages are validated
-- scheduler strategy is explicitly understood

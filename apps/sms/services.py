@@ -1,6 +1,7 @@
 from apps.sms.models import SMSLog
 from apps.sms.semaphore import send_sms as semaphore_send
 from apps.settings_app.models import SMSSettings
+from django.conf import settings
 
 
 def send_billing_sms(snapshot, sent_by='system'):
@@ -15,7 +16,9 @@ def send_billing_sms(snapshot, sent_by='system'):
 
     from apps.core.models import SystemSetup
     setup = SystemSetup.get_setup()
-    short_url = f"http://localhost:8000/b/{snapshot.subscriber.invoices.filter(period_start=snapshot.period_start).first().short_code if snapshot.subscriber.invoices.filter(period_start=snapshot.period_start).exists() else ''}/"
+    invoice = snapshot.subscriber.invoices.filter(period_start=snapshot.period_start).first()
+    short_code = invoice.short_code if invoice else ''
+    short_url = f"{settings.APP_BASE_URL}/b/{short_code}/" if short_code else settings.APP_BASE_URL
 
     template = settings.billing_sms_template
     message = template.format(

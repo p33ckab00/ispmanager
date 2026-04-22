@@ -4,7 +4,7 @@ Manual installation and troubleshooting guide for deploying `ISP Manager` on an 
 
 ## Purpose
 
-This document is a practical step-by-step guide for taking the current project from local development to a manually installed Ubuntu production-style deployment.
+This document is a practical step-by-step guide for taking the current project from local development to a manually installed Ubuntu production deployment.
 
 It covers:
 
@@ -15,30 +15,26 @@ It covers:
 - Gunicorn and Nginx setup
 - HTTPS setup
 - environment file layout
+- dedicated scheduler service setup
 - manual smoke tests
 - troubleshooting common deployment issues
 
-## Important Current Project Note
+## Current Production Model
 
-The web application itself can be deployed on Ubuntu now.
+The current recommended Ubuntu production layout is:
 
-However, there is one important operational limitation in the current codebase:
+- `Nginx` as the public reverse proxy
+- `Gunicorn` serving Django on `127.0.0.1:8193`
+- `PostgreSQL` as the only application database
+- `ispmanager-web.service` for web traffic
+- `ispmanager-scheduler.service` for APScheduler jobs
 
-- the project documentation recommends a separate scheduler service
-- the current repo does not yet include a first-class standalone scheduler management command
-- under `Gunicorn`, scheduled jobs should not be assumed to be fully production-safe until a dedicated scheduler entrypoint is added
+Important rule:
 
-That means:
-
-- web serving can be production-style now
-- PostgreSQL can be production-style now
-- billing, telemetry, and other scheduled automation should be treated carefully until scheduler separation is completed in code
-
-For now, use this guide for the web + database deployment, and treat scheduler automation as a controlled follow-up task.
+- keep scheduler startup disabled inside the web service with `DISABLE_SCHEDULER=1`
+- run scheduled jobs through the dedicated `manage.py run_scheduler` process only
 
 ## Minimum Requirements
-
-## Server Sizing
 
 ### Minimum for small live rollout
 
@@ -158,9 +154,14 @@ sudo -u postgres psql -d ispmanager -c "GRANT ALL ON SCHEMA public TO ispmanager
 
 ## Step 4: Create the Production Environment File
 
+A safe starter template is included in the repo:
+
+- `deploy/ispmanager_ubuntu.env.template`
+
 Create `/etc/ispmanager/ispmanager.env`:
 
 ```bash
+sudo cp /opt/ispmanager/deploy/ispmanager_ubuntu.env.template /etc/ispmanager/ispmanager.env
 sudo nano /etc/ispmanager/ispmanager.env
 ```
 
@@ -170,7 +171,18 @@ Recommended baseline:
 SECRET_KEY=replace-with-a-strong-random-secret
 DEBUG=False
 ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com,server-ip
+APP_BASE_URL=https://yourdomain.com
 CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+CSRF_TRUSTED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+SESSION_COOKIE_SECURE=True
+CSRF_COOKIE_SECURE=True
+SECURE_SSL_REDIRECT=True
+SECURE_PROXY_SSL_HEADER=HTTP_X_FORWARDED_PROTO,https
+SECURE_HSTS_SECONDS=31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS=True
+SECURE_HSTS_PRELOAD=True
+SESSION_COOKIE_SAMESITE=Lax
+CSRF_COOKIE_SAMESITE=Lax
 
 POSTGRES_DB=ispmanager
 POSTGRES_USER=ispmanager
@@ -185,7 +197,8 @@ DISABLE_SCHEDULER=1
 Why `DISABLE_SCHEDULER=1` here:
 
 - it prevents accidental scheduler startup behavior in the web service
-- it is safer until a dedicated scheduler process is implemented cleanly
+- it keeps Gunicorn workers from owning job execution
+- it reserves recurring jobs for the dedicated scheduler service
 
 Secure the environment file:
 
@@ -230,7 +243,7 @@ Group=ispmanager
 WorkingDirectory=/opt/ispmanager
 EnvironmentFile=/etc/ispmanager/ispmanager.env
 ExecStart=/opt/ispmanager/.venv/bin/gunicorn config.wsgi:application \
-  --bind 127.0.0.1:8000 \
+  --bind 127.0.0.1:8193 \
   --workers 3 \
   --timeout 120
 Restart=always
@@ -247,6 +260,37 @@ sudo systemctl daemon-reload
 sudo systemctl enable ispmanager-web
 sudo systemctl start ispmanager-web
 sudo systemctl status ispmanager-web
+```
+
+## Step 6B: Create the Scheduler systemd Service
+
+Create `/etc/systemd/system/ispmanager-scheduler.service`:
+
+```ini
+[Unit]
+Description=ISP Manager Scheduler Service
+After=network.target postgresql.service
+
+[Service]
+User=ispmanager
+Group=ispmanager
+WorkingDirectory=/opt/ispmanager
+EnvironmentFile=/etc/ispmanager/ispmanager.env
+ExecStart=/opt/ispmanager/.venv/bin/python manage.py run_scheduler
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Reload and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable ispmanager-scheduler
+sudo systemctl start ispmanager-scheduler
+sudo systemctl status ispmanager-scheduler
 ```
 
 ## Step 7: Configure Nginx
@@ -269,7 +313,7 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:8000;
+        proxy_pass http://127.0.0.1:8193;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -278,345 +322,154 @@ server {
 }
 ```
 
-Enable and test:
+Enable the site:
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/ispmanager /etc/nginx/sites-enabled/ispmanager
+sudo ln -s /etc/nginx/sites-available/ispmanager /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
 
 ## Step 8: Enable HTTPS
 
-Use Certbot:
+Once DNS is pointing correctly:
 
 ```bash
 sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
 ```
 
-Then verify renewal:
+Then re-check your env file values:
 
-```bash
-sudo certbot renew --dry-run
-```
+- `APP_BASE_URL=https://yourdomain.com`
+- `CSRF_TRUSTED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com`
+- `SESSION_COOKIE_SECURE=True`
+- `CSRF_COOKIE_SECURE=True`
+- `SECURE_SSL_REDIRECT=True`
+- `SECURE_PROXY_SSL_HEADER=HTTP_X_FORWARDED_PROTO,https`
 
-## Step 9: Firewall Setup
+## Step 9: Manual Smoke Test
 
-If using UFW:
-
-```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 'Nginx Full'
-sudo ufw enable
-sudo ufw status
-```
-
-Do not open PostgreSQL publicly on the internet unless it is intentionally isolated behind private network controls.
-
-## Step 10: Production Smoke Test
-
-After services are running, test the following:
-
-- homepage loads
-- login page loads
-- admin/operator login works
-- subscriber list loads
-- subscriber detail loads
-- accounting dashboard loads
-- billing snapshot pages load
-- router pages load
-- static CSS/JS files load correctly
-
-CLI checks:
+Run these checks after deployment:
 
 ```bash
 sudo systemctl status postgresql
 sudo systemctl status ispmanager-web
+sudo systemctl status ispmanager-scheduler
 sudo systemctl status nginx
-curl -I http://127.0.0.1:8000
+curl -I http://127.0.0.1:8193
 curl -I https://yourdomain.com
 ```
 
-## Current Database Location in Production
+Validate in browser:
 
-If using PostgreSQL on Ubuntu, the project database is not stored in the repo folder.
-
-Typical PostgreSQL storage location on Ubuntu:
-
-```text
-/var/lib/postgresql/<version>/main
-```
-
-Example:
-
-```text
-/var/lib/postgresql/16/main
-```
-
-The logical application database name remains:
-
-```text
-ispmanager
-```
-
-You can verify the real data directory with:
-
-```bash
-sudo -u postgres psql -d postgres -c "SHOW data_directory;"
-```
-
-## Manual Update Workflow
-
-When deploying a new app version manually:
-
-```bash
-cd /opt/ispmanager
-sudo -u ispmanager git pull
-sudo -u ispmanager ./.venv/bin/pip install -r requirements.txt
-set -a
-source /etc/ispmanager/ispmanager.env
-set +a
-sudo -u ispmanager ./.venv/bin/python manage.py migrate
-sudo -u ispmanager ./.venv/bin/python manage.py collectstatic --noinput
-sudo systemctl restart ispmanager-web
-sudo systemctl reload nginx
-```
-
-## Backups You Should Have
-
-Minimum production backup set:
-
-- PostgreSQL database backup
-- `/etc/ispmanager/ispmanager.env`
-- Nginx site config
-- systemd unit files
-- `/opt/ispmanager/media/` if media uploads are used
+- login page loads
+- dashboard loads
+- subscriber list/detail loads
+- billing snapshots page loads
+- accounting pages load
+- routers page loads
+- public billing short links resolve correctly
 
 ## Troubleshooting
 
-## 1. `DisallowedHost`
+### Gunicorn service does not start
 
-Symptom:
+Check:
 
-- Django returns `DisallowedHost`
+```bash
+sudo journalctl -u ispmanager-web -n 100 --no-pager
+```
 
-Fix:
+Common causes:
 
-- add the real domain or server IP to `ALLOWED_HOSTS`
-- restart Gunicorn service after editing the env file
+- bad env file path
+- missing Python dependencies
+- PostgreSQL credentials incorrect
+- migrations not applied
 
-## 2. `OperationalError: connection refused`
+### Scheduler service does not start
 
-Symptom:
+Check:
 
-- Django cannot connect to PostgreSQL
+```bash
+sudo journalctl -u ispmanager-scheduler -n 100 --no-pager
+```
 
-Checks:
+Common causes:
+
+- missing `EnvironmentFile`
+- PostgreSQL connection problem
+- web env forgot `DISABLE_SCHEDULER=1` and scheduler is colliding with web startup assumptions
+- project code not updated to latest repo state
+
+### PostgreSQL connection fails
+
+Check:
 
 ```bash
 sudo systemctl status postgresql
-sudo -u postgres psql -d postgres -c "SELECT 1;"
-ss -ltnp | grep 5432
+sudo -u postgres psql
+sudo -u postgres psql -d ispmanager -c "\dt"
 ```
 
-Fix:
+Common causes:
 
-- confirm PostgreSQL is running
-- confirm `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`
-- confirm the database and role actually exist
+- wrong DB name
+- wrong user/password
+- PostgreSQL not running
+- local auth policy mismatch
 
-## 3. `password authentication failed`
+### Static files missing
 
-Symptom:
-
-- PostgreSQL rejects login
-
-Fix:
-
-- reset the role password in PostgreSQL
-- update `/etc/ispmanager/ispmanager.env`
-- restart `ispmanager-web`
-
-Example:
-
-```bash
-sudo -u postgres psql -d postgres -c "ALTER ROLE ispmanager WITH PASSWORD 'new-strong-password';"
-```
-
-## 4. `relation does not exist`
-
-Symptom:
-
-- app boots but fails when opening pages or services
-
-Cause:
-
-- migrations were not applied to PostgreSQL
-
-Fix:
+Re-run:
 
 ```bash
 cd /opt/ispmanager
 set -a
 source /etc/ispmanager/ispmanager.env
 set +a
-sudo -u ispmanager ./.venv/bin/python manage.py migrate
-```
-
-## 5. Static files missing or broken CSS
-
-Symptom:
-
-- app loads without styling
-- admin pages look unformatted
-
-Fix:
-
-```bash
 sudo -u ispmanager ./.venv/bin/python manage.py collectstatic --noinput
+```
+
+### Nginx returns `502 Bad Gateway`
+
+Check:
+
+```bash
+sudo systemctl status ispmanager-web
+sudo journalctl -u ispmanager-web -n 100 --no-pager
 sudo nginx -t
-sudo systemctl reload nginx
 ```
 
-Also verify:
+Most common cause:
 
-- Nginx `alias` points to `/opt/ispmanager/staticfiles/`
-- `staticfiles/` exists and is readable
+- Gunicorn is not listening on `127.0.0.1:8193`
 
-## 6. `502 Bad Gateway`
-
-Symptom:
-
-- Nginx returns `502`
-
-Checks:
-
-```bash
-sudo systemctl status ispmanager-web
-journalctl -u ispmanager-web -n 100 --no-pager
-```
-
-Fix:
-
-- confirm Gunicorn is running
-- confirm Gunicorn listens on `127.0.0.1:8000`
-- confirm Nginx proxy target matches Gunicorn bind address
-
-## 7. Gunicorn service fails to start
-
-Common causes:
-
-- bad env file
-- missing dependency
-- migration error
-- wrong working directory
-- wrong Python path in `ExecStart`
-
-Checks:
-
-```bash
-journalctl -u ispmanager-web -n 200 --no-pager
-```
-
-## 8. `ModuleNotFoundError: psycopg`
-
-Symptom:
-
-- app fails when Django starts with PostgreSQL settings
-
-Fix:
-
-```bash
-cd /opt/ispmanager
-sudo -u ispmanager ./.venv/bin/pip install -r requirements.txt
-```
-
-If compile/build errors occur, confirm:
-
-```bash
-sudo apt install -y libpq-dev python3-dev build-essential
-```
-
-## 9. CSRF verification failed
-
-Common causes:
-
-- HTTPS proxy headers not forwarded correctly
-- missing correct host/origin settings
-- cookies/domain mismatch
+### HTTPS works but forms fail with CSRF
 
 Check:
 
-- `ALLOWED_HOSTS`
-- HTTPS domain used in browser
-- reverse proxy headers in Nginx
+- `APP_BASE_URL`
+- `CSRF_TRUSTED_ORIGINS`
+- `SECURE_PROXY_SSL_HEADER`
+- Nginx `X-Forwarded-Proto` header
 
-## 10. PostgreSQL works but scheduler jobs do not run
-
-This is an important current project limitation.
-
-Because the codebase does not yet expose a dedicated production scheduler command, do not assume scheduled jobs are fully production-ready just because the web app is running.
-
-Recommended action:
-
-- keep web deployment stable first
-- add a dedicated scheduler entrypoint/service as a follow-up implementation
-- until then, treat billing/telemetry automation as an explicitly managed operational task
-
-## 11. Router telemetry pages load but data seems stale
-
-Checks:
-
-- confirm router connectivity from the server
-- confirm PostgreSQL writes are succeeding
-- confirm related jobs or manual sync actions are actually being run
-- confirm MikroTik credentials and reachability from the Ubuntu host
-
-## 12. Permission denied writing media or static files
-
-Fix ownership:
-
-```bash
-sudo chown -R ispmanager:ispmanager /opt/ispmanager/media
-sudo chown -R ispmanager:ispmanager /opt/ispmanager/staticfiles
-```
-
-## 13. Port 80 or 443 already in use
+### Billing SMS links point to wrong host or port
 
 Check:
 
-```bash
-sudo ss -ltnp | grep ':80\|:443'
-```
+- `APP_BASE_URL` in `/etc/ispmanager/ispmanager.env`
 
-Fix:
+The app now uses `APP_BASE_URL` for public billing links.
 
-- stop conflicting service
-- fix duplicate Nginx/site setup
-- disable unused web servers such as Apache if not needed
+## Final Recommendation
 
-## 14. Server restart test
+For Ubuntu production, keep the deployment model clean:
 
-Before calling the deployment stable, test reboot persistence:
+- `Nginx` handles public HTTPS
+- `Gunicorn` handles web traffic on `127.0.0.1:8193`
+- `PostgreSQL` stores all application data
+- `ispmanager-scheduler.service` runs recurring jobs
+- `/etc/ispmanager/ispmanager.env` holds deployment-specific configuration
 
-```bash
-sudo reboot
-```
-
-After reboot, confirm:
-
-```bash
-sudo systemctl status postgresql
-sudo systemctl status ispmanager-web
-sudo systemctl status nginx
-```
-
-## Recommended Follow-Up Improvements
-
-After this manual production-style install is stable, the next high-value follow-up tasks are:
-
-1. add a dedicated scheduler entrypoint and systemd scheduler service
-2. add structured logging and log rotation
-3. automate PostgreSQL backups
-4. harden `ALLOWED_HOSTS`, cookies, and HTTPS-related Django settings
-5. add staging deployment before first public rollout
+This is the safest manual deployment path for the current codebase.

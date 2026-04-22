@@ -125,10 +125,10 @@ pip install -r requirements.txt
 python manage.py migrate
 
 # 4. Start server
-python manage.py runserver 0.0.0.0:8000
+python manage.py runserver 0.0.0.0:8193
 
 # 5. Open browser
-http://localhost:8000
+http://localhost:8193
 # You will be redirected to /setup/ automatically
 ```
 
