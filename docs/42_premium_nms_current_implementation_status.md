@@ -31,14 +31,9 @@ The codebase now includes the current Premium NMS migration set:
 - `apps/nms/migrations/0001_initial.py`
 - `apps/nms/migrations/0002_topologylink_topologylinkvertex.py`
 - `apps/nms/migrations/0003_internaldevice_endpoint_serviceattachment_endpoint_and_more.py`
+- `apps/nms/migrations/0004_internaldevice_auto_generate_plc_outputs_and_more.py`
 
-However, the migrations still need to be applied to the database before the new premium workspace can operate fully.
-
-Until that migration is applied:
-
-- subscriber list and detail pages can still show safe topology summary fallback behavior
-- the new Premium NMS workspace remains guarded
-- the new premium attachment model is present in code, but not yet active in the live database
+For production rollout, the database migrations must be applied and the running web service must be reloaded so the live process picks up the current NMS model layer.
 
 ## Phase 1 Status: Implemented in Code
 
@@ -241,17 +236,13 @@ Implemented files:
 
 The following Phase 3 items are still pending:
 
-- PLC-specific modeling
-- PLC output-count logic
-- richer endpoint eligibility filtering UI
-- explicit reassignment review flows
-- broader endpoint-state validation workflows
+- broader endpoint-state validation workflows beyond local assignment and distribution review surfaces
 
 So the correct status is:
 
 - `Phase 3A endpoint foundation`: implemented in code
-- `Phase 3B PLC modeling`: not started
-- `Phase 3C eligibility and review rules`: not started
+- `Phase 3B PLC modeling`: implemented in code
+- `Phase 3C eligibility and review rules`: implemented in code
 
 ## Phase 4 Status: Not Started
 

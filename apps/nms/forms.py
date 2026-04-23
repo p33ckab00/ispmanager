@@ -6,7 +6,7 @@ from apps.nms.models import (
     TopologyLink,
     TopologyLinkVertex,
 )
-from apps.nms.services import has_distribution_tables
+from apps.nms.services import get_eligible_endpoints, has_distribution_tables
 from apps.subscribers.models import NetworkNode
 
 
@@ -34,24 +34,16 @@ class ServiceAttachmentForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
+        self.selected_node = kwargs.pop('selected_node', None)
         super().__init__(*args, **kwargs)
         self.fields['node'].queryset = NetworkNode.objects.filter(is_active=True).order_by('name')
         self.fields['node'].empty_label = '-- Select node --'
         if has_distribution_tables():
-            current_endpoint_id = self.instance.endpoint_id if self.instance.pk else None
-            endpoint_queryset = Endpoint.objects.select_related(
-                'internal_device',
-                'parent_node',
-                'internal_device__parent_node',
-            ).filter(status__in=['available', 'occupied']).order_by(
-                'parent_node__name',
-                'internal_device__parent_node__name',
-                'sequence',
-                'label',
+            endpoint_queryset = get_eligible_endpoints(
+                selected_node=self.selected_node,
+                current_attachment=self.instance if self.instance.pk else None,
             )
-            if current_endpoint_id:
-                endpoint_queryset = endpoint_queryset | Endpoint.objects.filter(pk=current_endpoint_id)
-            self.fields['endpoint'].queryset = endpoint_queryset.distinct()
+            self.fields['endpoint'].queryset = endpoint_queryset
             self.fields['endpoint'].empty_label = '-- No endpoint selected --'
             self.fields['endpoint'].label_from_instance = (
                 lambda endpoint: f"{endpoint.root_node.name if endpoint.root_node else 'Unknown'} / "
@@ -64,6 +56,7 @@ class ServiceAttachmentForm(forms.ModelForm):
         self.fields['endpoint_label'].label = 'Manual Endpoint Label'
         self.fields['endpoint'].required = False
         self.fields['notes'].required = False
+        self.eligible_endpoint_count = self.fields['endpoint'].queryset.count()
 
     def clean_endpoint_label(self):
         return (self.cleaned_data.get('endpoint_label') or '').strip()
@@ -103,7 +96,17 @@ class ServiceAttachmentForm(forms.ModelForm):
 class InternalDeviceForm(forms.ModelForm):
     class Meta:
         model = InternalDevice
-        fields = ['name', 'device_type', 'slot_label', 'notes', 'is_active']
+        fields = [
+            'name',
+            'device_type',
+            'slot_label',
+            'plc_model',
+            'plc_input_count',
+            'plc_output_count',
+            'auto_generate_plc_outputs',
+            'notes',
+            'is_active',
+        ]
         widgets = {
             'name': forms.TextInput(attrs={
                 'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
@@ -114,11 +117,29 @@ class InternalDeviceForm(forms.ModelForm):
             'slot_label': forms.TextInput(attrs={
                 'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
             }),
+            'plc_model': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'plc_input_count': forms.NumberInput(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+                'min': '0',
+            }),
+            'plc_output_count': forms.NumberInput(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+                'min': '0',
+            }),
             'notes': forms.Textarea(attrs={
                 'rows': 3,
                 'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
             }),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not self.instance.pk:
+            self.fields['auto_generate_plc_outputs'].initial = True
+        self.fields['plc_input_count'].required = False
+        self.fields['plc_output_count'].required = False
 
 
 class EndpointForm(forms.ModelForm):

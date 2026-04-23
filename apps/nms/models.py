@@ -81,6 +81,14 @@ class InternalDevice(models.Model):
         ('other', 'Other'),
     ]
 
+    PLC_MODEL_CHOICES = [
+        ('', 'Not a PLC'),
+        ('1x4', '1x4'),
+        ('1x8', '1x8'),
+        ('1x16', '1x16'),
+        ('1x32', '1x32'),
+    ]
+
     parent_node = models.ForeignKey(
         NetworkNode,
         on_delete=models.CASCADE,
@@ -89,6 +97,10 @@ class InternalDevice(models.Model):
     name = models.CharField(max_length=100)
     device_type = models.CharField(max_length=30, choices=DEVICE_TYPE_CHOICES, default='other')
     slot_label = models.CharField(max_length=50, blank=True)
+    plc_model = models.CharField(max_length=10, choices=PLC_MODEL_CHOICES, blank=True)
+    plc_input_count = models.PositiveIntegerField(default=0)
+    plc_output_count = models.PositiveIntegerField(default=0)
+    auto_generate_plc_outputs = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -96,6 +108,42 @@ class InternalDevice(models.Model):
 
     class Meta:
         ordering = ['parent_node__name', 'name', 'id']
+
+    def clean(self):
+        if self.device_type == 'plc':
+            if not self.plc_model and self.plc_output_count <= 0:
+                raise ValidationError('PLC devices need a PLC model or an explicit output count.')
+        else:
+            if self.plc_model:
+                raise ValidationError('Only PLC devices can use a PLC model.')
+            if self.plc_input_count or self.plc_output_count:
+                raise ValidationError('Only PLC devices can define PLC input/output counts.')
+            if self.auto_generate_plc_outputs:
+                self.auto_generate_plc_outputs = False
+
+    @property
+    def is_plc(self):
+        return self.device_type == 'plc'
+
+    @property
+    def effective_plc_input_count(self):
+        if not self.is_plc:
+            return 0
+        return self.plc_input_count or 1
+
+    @property
+    def effective_plc_output_count(self):
+        if not self.is_plc:
+            return 0
+        if self.plc_output_count:
+            return self.plc_output_count
+        if self.plc_model and 'x' in self.plc_model:
+            _, output_count = self.plc_model.lower().split('x', 1)
+            try:
+                return int(output_count)
+            except ValueError:
+                return 0
+        return 0
 
     @property
     def display_name(self):

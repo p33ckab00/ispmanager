@@ -75,6 +75,17 @@
         </div>
         {% endif %}
 
+        {% if review_flags %}
+        <div class="mt-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3">
+          <p class="text-sm font-medium text-amber-900">This mapping needs review</p>
+          <ul class="mt-2 space-y-1 text-sm text-amber-700">
+            {% for flag in review_flags %}
+            <li>{{ flag.message }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
         {% if subscriber.latitude == None or subscriber.longitude == None %}
         <div class="mt-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
           Subscriber coordinates are missing. The map can still store an assignment, but topology visualization will stay limited until coordinates are added on the subscriber record.
@@ -127,7 +138,13 @@
             <p class="text-xs text-red-600 mt-1">{{ form.endpoint.errors|join:", " }}</p>
             {% endif %}
             {% if distribution_ready %}
-            <p class="text-xs text-gray-400 mt-1">Choose a direct node endpoint or an internal-device endpoint when distribution data is available.</p>
+            <p class="text-xs text-gray-400 mt-1">
+              {% if selected_node %}
+              Showing {{ form.eligible_endpoint_count }} eligible endpoint{{ form.eligible_endpoint_count|pluralize }} for the selected node.
+              {% else %}
+              Select a serving node to narrow this list to eligible endpoints only.
+              {% endif %}
+            </p>
             {% else %}
             <p class="text-xs text-amber-600 mt-1">Endpoint tables are not applied yet, so this field stays unavailable for now.</p>
             {% endif %}
@@ -175,6 +192,7 @@
           <li>The subscriber module stays the billing and account source of truth.</li>
           <li>Saving in Premium NMS mirrors the node summary back to the subscriber page.</li>
           <li>Basic node reassignment is locked once a Premium NMS mapping exists.</li>
+          <li>Only eligible endpoints are shown per selected node, and occupied endpoints are excluded from reassignment lists.</li>
         </ul>
       </div>
 

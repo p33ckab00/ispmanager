@@ -17,12 +17,15 @@ from apps.nms.forms import (
 )
 from apps.nms.models import Endpoint, InternalDevice, ServiceAttachment, TopologyLink
 from apps.nms.services import (
+    ensure_plc_endpoints,
+    get_attachment_review_flags,
     get_basic_node_assignment,
     get_service_attachment,
     get_subscriber_topology_summary,
     has_distribution_tables,
     has_service_attachment_table,
     has_topology_link_tables,
+    refresh_attachment_review_state,
     serialize_topology_link,
     sync_basic_node_summary,
     sync_endpoint_status,
@@ -360,16 +363,22 @@ def nms_subscriber_workspace(request, subscriber_pk):
     attachment = get_service_attachment(subscriber, table_ready=True)
     basic_assignment = get_basic_node_assignment(subscriber)
     distribution_ready = has_distribution_tables()
+    selected_node = None
+    review_flags = get_attachment_review_flags(attachment) if attachment else []
 
     if request.method == 'POST':
         is_create = attachment is None
         previous_endpoint = attachment.endpoint if attachment else None
-        form = ServiceAttachmentForm(request.POST, instance=attachment)
+        selected_node_id = request.POST.get('node')
+        if selected_node_id and selected_node_id.isdigit():
+            selected_node = NetworkNode.objects.filter(pk=selected_node_id, is_active=True).first()
+        form = ServiceAttachmentForm(request.POST, instance=attachment, selected_node=selected_node)
         if form.is_valid():
             attachment = form.save(commit=False)
             attachment.subscriber = subscriber
             if attachment.endpoint_id:
                 attachment.node = attachment.endpoint.root_node
+            review_flags = refresh_attachment_review_state(attachment)
             attachment.assigned_by = request.user.username
             attachment.save()
             sync_basic_node_summary(subscriber, attachment.node, attachment.resolved_endpoint_label)
@@ -382,7 +391,13 @@ def nms_subscriber_workspace(request, subscriber_pk):
                 f"Premium NMS mapping saved for {subscriber.username}",
                 user=request.user,
             )
-            messages.success(request, f"Premium NMS mapping saved for {subscriber.display_name}.")
+            if review_flags:
+                messages.warning(
+                    request,
+                    f"Premium NMS mapping saved for {subscriber.display_name}, but it still needs review.",
+                )
+            else:
+                messages.success(request, f"Premium NMS mapping saved for {subscriber.display_name}.")
             return redirect('nms-subscriber-workspace', subscriber_pk=subscriber.pk)
     else:
         initial = {}
@@ -391,7 +406,10 @@ def nms_subscriber_workspace(request, subscriber_pk):
                 'node': basic_assignment.node,
                 'endpoint_label': basic_assignment.port_label,
             }
-        form = ServiceAttachmentForm(instance=attachment, initial=initial)
+            selected_node = basic_assignment.node
+        elif attachment:
+            selected_node = attachment.node or (attachment.endpoint.root_node if attachment.endpoint_id else None)
+        form = ServiceAttachmentForm(instance=attachment, initial=initial, selected_node=selected_node)
 
     topology_summary = get_subscriber_topology_summary(subscriber, table_ready=True)
     return render(request, 'nms/subscriber_workspace.html', {
@@ -401,6 +419,8 @@ def nms_subscriber_workspace(request, subscriber_pk):
         'form': form,
         'topology_summary': topology_summary,
         'distribution_ready': distribution_ready,
+        'review_flags': review_flags,
+        'selected_node': selected_node,
     })
 
 
@@ -452,13 +472,24 @@ def nms_distribution_detail(request, node_pk):
                 internal_device = device_form.save(commit=False)
                 internal_device.parent_node = node
                 internal_device.save()
+                generated_ports = ensure_plc_endpoints(internal_device)
                 AuditLog.log(
                     'create',
                     'nms',
                     f"Internal device added to {node.name}: {internal_device.display_name}",
                     user=request.user,
                 )
-                messages.success(request, f"Internal device added: {internal_device.display_name}.")
+                if generated_ports['created_inputs'] or generated_ports['created_outputs']:
+                    messages.success(
+                        request,
+                        (
+                            f"Internal device added: {internal_device.display_name}. "
+                            f"Generated {generated_ports['created_inputs']} input port(s) and "
+                            f"{generated_ports['created_outputs']} output port(s)."
+                        ),
+                    )
+                else:
+                    messages.success(request, f"Internal device added: {internal_device.display_name}.")
                 return redirect('nms-distribution-detail', node_pk=node.pk)
         elif action == 'create_endpoint':
             endpoint_form = EndpointForm(request.POST, parent_node=node, prefix='endpoint')
@@ -473,6 +504,27 @@ def nms_distribution_detail(request, node_pk):
                 )
                 messages.success(request, f"Endpoint added: {endpoint.display_name}.")
                 return redirect('nms-distribution-detail', node_pk=node.pk)
+        elif action == 'sync_plc_outputs':
+            internal_device = get_object_or_404(
+                InternalDevice.objects.filter(parent_node=node),
+                pk=request.POST.get('device_pk'),
+            )
+            generated_ports = ensure_plc_endpoints(internal_device)
+            AuditLog.log(
+                'update',
+                'nms',
+                f"PLC ports synced for {node.name}: {internal_device.display_name}",
+                user=request.user,
+            )
+            messages.success(
+                request,
+                (
+                    f"PLC ports synced for {internal_device.display_name}. "
+                    f"Added {generated_ports['created_inputs']} input port(s) and "
+                    f"{generated_ports['created_outputs']} output port(s)."
+                ),
+            )
+            return redirect('nms-distribution-detail', node_pk=node.pk)
         else:
             messages.error(request, 'Unknown distribution action.')
 
@@ -495,6 +547,7 @@ def nms_distribution_detail(request, node_pk):
 
     active_attachments = []
     attachment_by_endpoint_id = {}
+    review_attachments = []
     if has_service_attachment_table():
         active_attachments = list(
             ServiceAttachment.objects.select_related(
@@ -512,6 +565,10 @@ def nms_distribution_detail(request, node_pk):
             for attachment in active_attachments
             if attachment.endpoint_id
         }
+        for attachment in active_attachments:
+            attachment.review_flags = get_attachment_review_flags(attachment)
+            if attachment.review_flags:
+                review_attachments.append(attachment)
     for endpoint in all_endpoints:
         endpoint.active_attachment = attachment_by_endpoint_id.get(endpoint.id)
 
@@ -523,5 +580,6 @@ def nms_distribution_detail(request, node_pk):
         'direct_endpoints': direct_endpoints,
         'all_endpoints': all_endpoints,
         'active_attachments': active_attachments,
+        'review_attachments': review_attachments,
         'service_attachment_ready': has_service_attachment_table(),
     })

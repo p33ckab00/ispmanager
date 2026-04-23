@@ -1,5 +1,6 @@
 from django.db import DatabaseError, connection
 from django.core.exceptions import ObjectDoesNotExist
+from django.db.models import Q
 from django.urls import reverse
 from apps.nms.models import (
     Endpoint,
@@ -125,6 +126,176 @@ def sync_endpoint_status(endpoint):
         endpoint.save(update_fields=['status', 'updated_at'])
 
 
+def ensure_plc_endpoints(internal_device):
+    if (
+        internal_device is None
+        or not has_distribution_tables()
+        or not internal_device.is_plc
+        or not internal_device.auto_generate_plc_outputs
+    ):
+        return {'created_inputs': 0, 'created_outputs': 0}
+
+    desired_input_count = internal_device.effective_plc_input_count
+    desired_output_count = internal_device.effective_plc_output_count
+    created_inputs = 0
+    created_outputs = 0
+
+    existing_inputs = {
+        endpoint.label
+        for endpoint in internal_device.endpoints.filter(endpoint_type='uplink')
+    }
+    existing_outputs = {
+        endpoint.label
+        for endpoint in internal_device.endpoints.filter(endpoint_type='split_output')
+    }
+
+    for index in range(1, desired_input_count + 1):
+        label = f"IN {index}"
+        if label in existing_inputs:
+            continue
+        Endpoint.objects.create(
+            internal_device=internal_device,
+            label=label,
+            endpoint_type='uplink',
+            sequence=index,
+            status='available',
+            notes='Auto-generated PLC input port.',
+        )
+        created_inputs += 1
+
+    for index in range(1, desired_output_count + 1):
+        label = f"OUT {index}"
+        if label in existing_outputs:
+            continue
+        Endpoint.objects.create(
+            internal_device=internal_device,
+            label=label,
+            endpoint_type='split_output',
+            sequence=index,
+            status='available',
+            notes='Auto-generated PLC output port.',
+        )
+        created_outputs += 1
+
+    return {
+        'created_inputs': created_inputs,
+        'created_outputs': created_outputs,
+    }
+
+
+def get_eligible_endpoints(*, selected_node=None, current_attachment=None):
+    if not has_distribution_tables():
+        return Endpoint.objects.none()
+
+    queryset = Endpoint.objects.select_related(
+        'parent_node',
+        'internal_device',
+        'internal_device__parent_node',
+    ).filter(
+        Q(parent_node__is_active=True) | Q(internal_device__parent_node__is_active=True)
+    ).exclude(
+        status__in=['inactive', 'damaged']
+    ).filter(
+        Q(internal_device__isnull=True) | Q(internal_device__is_active=True)
+    )
+
+    if selected_node is not None:
+        selected_node_id = getattr(selected_node, 'pk', selected_node)
+        queryset = queryset.filter(
+            Q(parent_node_id=selected_node_id)
+            | Q(internal_device__parent_node_id=selected_node_id)
+        )
+
+    occupied_endpoint_ids = ServiceAttachment.objects.filter(
+        status='active',
+        endpoint_id__isnull=False,
+    )
+    if current_attachment is not None and getattr(current_attachment, 'pk', None):
+        occupied_endpoint_ids = occupied_endpoint_ids.exclude(pk=current_attachment.pk)
+
+    eligible_ids = list(
+        queryset.exclude(
+            pk__in=occupied_endpoint_ids.values_list('endpoint_id', flat=True)
+        ).values_list('pk', flat=True)
+    )
+
+    current_endpoint_id = getattr(current_attachment, 'endpoint_id', None)
+    if current_endpoint_id and current_endpoint_id not in eligible_ids:
+        eligible_ids.append(current_endpoint_id)
+
+    if not eligible_ids:
+        return Endpoint.objects.none()
+
+    return Endpoint.objects.select_related(
+        'parent_node',
+        'internal_device',
+        'internal_device__parent_node',
+    ).filter(pk__in=eligible_ids).order_by(
+        'parent_node__name',
+        'internal_device__parent_node__name',
+        'internal_device__name',
+        'sequence',
+        'label',
+    )
+
+
+def get_attachment_review_flags(attachment):
+    if attachment is None:
+        return []
+
+    flags = []
+    endpoint = attachment.endpoint
+    node = attachment.node or (endpoint.root_node if endpoint else None)
+
+    def add_flag(code, message):
+        flags.append({
+            'code': code,
+            'message': message,
+        })
+
+    if node is None:
+        add_flag('missing_node', 'No serving node is attached to this mapping.')
+    elif not node.is_active:
+        add_flag('inactive_node', 'The serving node is inactive.')
+
+    if endpoint:
+        endpoint_root = endpoint.root_node
+        if endpoint_root is None:
+            add_flag('missing_endpoint_node', 'The selected endpoint is no longer attached to a valid node.')
+        elif attachment.node_id and endpoint_root.pk != attachment.node_id:
+            add_flag('node_endpoint_mismatch', 'The selected endpoint belongs to a different node than the saved serving node.')
+
+        if endpoint.internal_device_id and not endpoint.internal_device.is_active:
+            add_flag('inactive_internal_device', 'The internal device for this endpoint is inactive.')
+
+        if endpoint.status == 'inactive':
+            add_flag('inactive_endpoint', 'The selected endpoint is inactive.')
+        elif endpoint.status == 'damaged':
+            add_flag('damaged_endpoint', 'The selected endpoint is marked as damaged.')
+
+        conflicting_attachment = ServiceAttachment.objects.filter(
+            endpoint=endpoint,
+            status='active',
+        )
+        if attachment.pk:
+            conflicting_attachment = conflicting_attachment.exclude(pk=attachment.pk)
+        if conflicting_attachment.exists():
+            add_flag('endpoint_occupied', 'The selected endpoint is already occupied by another active subscriber mapping.')
+    elif attachment.status == 'needs_review':
+        add_flag('manual_review', 'This mapping is still marked as needing review.')
+
+    return flags
+
+
+def refresh_attachment_review_state(attachment, *, preserve_manual_review=True):
+    review_flags = get_attachment_review_flags(attachment)
+    if review_flags:
+        attachment.status = 'needs_review'
+    elif not preserve_manual_review and attachment.status == 'needs_review':
+        attachment.status = 'active'
+    return review_flags
+
+
 def get_subscriber_topology_summary(subscriber, table_ready=None):
     attachment = get_service_attachment(subscriber, table_ready=table_ready)
     basic_assignment = get_basic_node_assignment(subscriber)
@@ -136,10 +307,11 @@ def get_subscriber_topology_summary(subscriber, table_ready=None):
     notes = ''
 
     if attachment:
+        review_flags = get_attachment_review_flags(attachment)
         node = attachment.node or (attachment.endpoint.root_node if attachment.endpoint_id else None)
         endpoint_label = attachment.resolved_endpoint_label
         notes = attachment.notes or ''
-        if attachment.status == 'needs_review' or attachment.node_id is None:
+        if review_flags or attachment.status == 'needs_review' or attachment.node_id is None:
             key = 'needs_review'
             label = 'Needs Review'
         else:
@@ -170,6 +342,7 @@ def get_subscriber_topology_summary(subscriber, table_ready=None):
         'endpoint_label': endpoint_label,
         'endpoint_display_name': endpoint_label,
         'notes': notes,
+        'review_flags': review_flags if attachment else [],
         'has_attachment': bool(attachment),
         'has_basic_assignment': bool(basic_assignment),
         'node_is_locked': bool(attachment),
