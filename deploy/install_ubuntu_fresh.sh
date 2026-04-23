@@ -462,7 +462,8 @@ write_scheduler_service() {
   cat > "/etc/systemd/system/${SCHEDULER_SERVICE}" <<EOF
 [Unit]
 Description=ISP Manager Scheduler Service
-After=network.target postgresql.service
+Wants=network-online.target
+After=network-online.target postgresql.service
 
 [Service]
 User=${APP_USER}

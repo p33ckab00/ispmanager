@@ -42,7 +42,8 @@ Create `/etc/systemd/system/ispmanager-scheduler.service`:
 ```ini
 [Unit]
 Description=ISP Manager Scheduler Service
-After=network.target postgresql.service
+Wants=network-online.target
+After=network-online.target postgresql.service
 
 [Service]
 User=ispmanager
