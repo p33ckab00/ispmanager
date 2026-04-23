@@ -1,12 +1,18 @@
 from django import forms
 from apps.nms.models import (
+    Cable,
     Endpoint,
     InternalDevice,
     ServiceAttachment,
     TopologyLink,
     TopologyLinkVertex,
 )
-from apps.nms.services import get_eligible_endpoints, has_distribution_tables
+from apps.nms.services import (
+    get_eligible_endpoints,
+    has_cable_tables,
+    has_distribution_tables,
+    sync_cable_cores,
+)
 from apps.subscribers.models import NetworkNode
 
 
@@ -104,6 +110,8 @@ class InternalDeviceForm(forms.ModelForm):
             'plc_input_count',
             'plc_output_count',
             'auto_generate_plc_outputs',
+            'fbt_ratio',
+            'auto_generate_fbt_outputs',
             'notes',
             'is_active',
         ]
@@ -128,6 +136,9 @@ class InternalDeviceForm(forms.ModelForm):
                 'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
                 'min': '0',
             }),
+            'fbt_ratio': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
             'notes': forms.Textarea(attrs={
                 'rows': 3,
                 'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
@@ -138,8 +149,10 @@ class InternalDeviceForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if not self.instance.pk:
             self.fields['auto_generate_plc_outputs'].initial = True
+            self.fields['auto_generate_fbt_outputs'].initial = True
         self.fields['plc_input_count'].required = False
         self.fields['plc_output_count'].required = False
+        self.fields['fbt_ratio'].required = False
 
 
 class EndpointForm(forms.ModelForm):
@@ -196,6 +209,62 @@ class EndpointForm(forms.ModelForm):
         return endpoint
 
 
+class NetworkNodeForm(forms.ModelForm):
+    class Meta:
+        model = NetworkNode
+        fields = [
+            'name',
+            'node_type',
+            'router',
+            'latitude',
+            'longitude',
+            'port_count',
+            'notes',
+            'is_active',
+        ]
+        widgets = {
+            'name': forms.TextInput(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'node_type': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'router': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'latitude': forms.NumberInput(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+                'step': '0.000001',
+            }),
+            'longitude': forms.NumberInput(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+                'step': '0.000001',
+            }),
+            'port_count': forms.NumberInput(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+                'min': '0',
+            }),
+            'notes': forms.Textarea(attrs={
+                'rows': 3,
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['router'].required = False
+        self.fields['router'].queryset = self.fields['router'].queryset.filter(
+            is_active=True,
+        ).order_by('name')
+        self.fields['router'].empty_label = '-- No linked router --'
+        self.fields['latitude'].required = False
+        self.fields['longitude'].required = False
+        self.fields['port_count'].required = False
+
+    def clean_port_count(self):
+        return self.cleaned_data.get('port_count') or 0
+
+
 class TopologyLinkForm(forms.ModelForm):
     geometry_text = forms.CharField(
         required=False,
@@ -205,6 +274,65 @@ class TopologyLinkForm(forms.ModelForm):
             'rows': 6,
             'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono',
             'placeholder': '14.59950,120.98420\n14.60010,120.98550',
+        }),
+    )
+    cable_name = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+        }),
+    )
+    cable_code = forms.CharField(
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+        }),
+    )
+    cable_total_cores = forms.IntegerField(
+        required=False,
+        min_value=0,
+        widget=forms.NumberInput(attrs={
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            'min': '0',
+        }),
+    )
+    cable_length_meters = forms.DecimalField(
+        required=False,
+        min_value=0,
+        decimal_places=2,
+        max_digits=10,
+        widget=forms.NumberInput(attrs={
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            'min': '0',
+            'step': '0.01',
+        }),
+    )
+    cable_installation_type = forms.ChoiceField(
+        required=False,
+        choices=Cable.INSTALLATION_TYPE_CHOICES,
+        widget=forms.Select(attrs={
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+        }),
+    )
+    cable_status = forms.ChoiceField(
+        required=False,
+        choices=Cable.STATUS_CHOICES,
+        widget=forms.Select(attrs={
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+        }),
+    )
+    cable_installed_on = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={
+            'type': 'date',
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+        }),
+    )
+    cable_notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={
+            'rows': 3,
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
         }),
     )
 
@@ -238,12 +366,37 @@ class TopologyLinkForm(forms.ModelForm):
         node_queryset = NetworkNode.objects.filter(is_active=True).order_by('name')
         self.fields['source_node'].queryset = node_queryset
         self.fields['target_node'].queryset = node_queryset
+        self.cable_table_ready = has_cable_tables()
 
         if self.instance.pk:
             vertices = list(self.instance.vertices.all())
             self.fields['geometry_text'].initial = '\n'.join(
                 f"{vertex.latitude},{vertex.longitude}" for vertex in vertices
             )
+            if self.cable_table_ready:
+                cable = getattr(self.instance, 'cable', None)
+                if cable:
+                    self.fields['cable_name'].initial = cable.name
+                    self.fields['cable_code'].initial = cable.code
+                    self.fields['cable_total_cores'].initial = cable.total_cores
+                    self.fields['cable_length_meters'].initial = cable.length_meters
+                    self.fields['cable_installation_type'].initial = cable.installation_type
+                    self.fields['cable_status'].initial = cable.status
+                    self.fields['cable_installed_on'].initial = cable.installed_on
+                    self.fields['cable_notes'].initial = cable.notes
+
+        if not self.cable_table_ready:
+            for field_name in [
+                'cable_name',
+                'cable_code',
+                'cable_total_cores',
+                'cable_length_meters',
+                'cable_installation_type',
+                'cable_status',
+                'cable_installed_on',
+                'cable_notes',
+            ]:
+                self.fields[field_name].disabled = True
 
     def clean_geometry_text(self):
         geometry_text = (self.cleaned_data.get('geometry_text') or '').strip()
@@ -273,6 +426,57 @@ class TopologyLinkForm(forms.ModelForm):
         self._geometry_points = geometry_points
         return geometry_text
 
+    def clean(self):
+        cleaned_data = super().clean()
+        link_type = cleaned_data.get('link_type')
+        cable_name = (cleaned_data.get('cable_name') or '').strip()
+        cable_code = (cleaned_data.get('cable_code') or '').strip()
+        cable_total_cores = cleaned_data.get('cable_total_cores') or 0
+        cable_length = cleaned_data.get('cable_length_meters')
+        cable_notes = (cleaned_data.get('cable_notes') or '').strip()
+        cable_installation_type = cleaned_data.get('cable_installation_type')
+        cable_status = cleaned_data.get('cable_status')
+        cable_installed_on = cleaned_data.get('cable_installed_on')
+
+        has_cable_data = any([
+            cable_name,
+            cable_code,
+            cable_total_cores,
+            cable_length,
+            cable_notes,
+            cable_installation_type,
+            cable_status,
+            cable_installed_on,
+        ])
+
+        if has_cable_data and link_type != 'fiber':
+            raise forms.ValidationError('Cable inventory is currently supported only for fiber links.')
+
+        if link_type == 'fiber' and has_cable_data:
+            if cable_total_cores <= 0:
+                raise forms.ValidationError('Fiber links with cable inventory need a total core count greater than zero.')
+            if not cable_name:
+                raise forms.ValidationError('Provide a cable name when adding fiber cable inventory.')
+
+        existing_cable = getattr(self.instance, 'cable', None) if self.instance.pk and self.cable_table_ready else None
+        if existing_cable and cable_total_cores and cable_total_cores < existing_cable.used_core_count:
+            raise forms.ValidationError(
+                f'Cable total cores cannot be reduced below the {existing_cable.used_core_count} used or reserved cores.'
+            )
+
+        self._cable_data = {
+            'has_cable_data': has_cable_data,
+            'name': cable_name,
+            'code': cable_code,
+            'total_cores': cable_total_cores,
+            'length_meters': cable_length,
+            'installation_type': cable_installation_type or 'aerial',
+            'status': cable_status or 'active',
+            'installed_on': cable_installed_on,
+            'notes': cable_notes,
+        }
+        return cleaned_data
+
     def save(self, commit=True):
         if not commit:
             raise ValueError('TopologyLinkForm.save requires commit=True.')
@@ -288,6 +492,25 @@ class TopologyLinkForm(forms.ModelForm):
             )
             for index, point in enumerate(getattr(self, '_geometry_points', []), start=1)
         ])
+
+        if self.cable_table_ready:
+            cable_data = getattr(self, '_cable_data', {})
+            cable = getattr(link, 'cable', None)
+            if cable_data.get('has_cable_data'):
+                if cable is None:
+                    cable = Cable(link=link)
+                cable.name = cable_data['name']
+                cable.code = cable_data['code']
+                cable.total_cores = cable_data['total_cores']
+                cable.length_meters = cable_data['length_meters']
+                cable.installation_type = cable_data['installation_type']
+                cable.status = cable_data['status']
+                cable.installed_on = cable_data['installed_on']
+                cable.notes = cable_data['notes']
+                cable.save()
+                sync_cable_cores(cable)
+            elif cable is not None and cable.used_core_count == 0:
+                cable.delete()
         return link
 
 

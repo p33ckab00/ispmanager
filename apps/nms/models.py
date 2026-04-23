@@ -89,6 +89,13 @@ class InternalDevice(models.Model):
         ('1x32', '1x32'),
     ]
 
+    FBT_RATIO_CHOICES = [
+        ('', 'Not an FBT'),
+        ('70/30', '70/30'),
+        ('80/20', '80/20'),
+        ('90/10', '90/10'),
+    ]
+
     parent_node = models.ForeignKey(
         NetworkNode,
         on_delete=models.CASCADE,
@@ -101,6 +108,8 @@ class InternalDevice(models.Model):
     plc_input_count = models.PositiveIntegerField(default=0)
     plc_output_count = models.PositiveIntegerField(default=0)
     auto_generate_plc_outputs = models.BooleanField(default=False)
+    fbt_ratio = models.CharField(max_length=10, choices=FBT_RATIO_CHOICES, blank=True)
+    auto_generate_fbt_outputs = models.BooleanField(default=False)
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -113,6 +122,19 @@ class InternalDevice(models.Model):
         if self.device_type == 'plc':
             if not self.plc_model and self.plc_output_count <= 0:
                 raise ValidationError('PLC devices need a PLC model or an explicit output count.')
+            if self.fbt_ratio:
+                raise ValidationError('PLC devices cannot define an FBT ratio.')
+            if self.auto_generate_fbt_outputs:
+                self.auto_generate_fbt_outputs = False
+        elif self.device_type == 'fbt':
+            if not self.fbt_ratio:
+                raise ValidationError('FBT devices need a ratio such as 70/30, 80/20, or 90/10.')
+            if self.plc_model:
+                raise ValidationError('FBT devices cannot use a PLC model.')
+            if self.plc_input_count or self.plc_output_count:
+                raise ValidationError('FBT devices cannot define PLC input/output counts.')
+            if self.auto_generate_plc_outputs:
+                self.auto_generate_plc_outputs = False
         else:
             if self.plc_model:
                 raise ValidationError('Only PLC devices can use a PLC model.')
@@ -120,10 +142,18 @@ class InternalDevice(models.Model):
                 raise ValidationError('Only PLC devices can define PLC input/output counts.')
             if self.auto_generate_plc_outputs:
                 self.auto_generate_plc_outputs = False
+            if self.fbt_ratio:
+                raise ValidationError('Only FBT devices can use an FBT ratio.')
+            if self.auto_generate_fbt_outputs:
+                self.auto_generate_fbt_outputs = False
 
     @property
     def is_plc(self):
         return self.device_type == 'plc'
+
+    @property
+    def is_fbt(self):
+        return self.device_type == 'fbt'
 
     @property
     def effective_plc_input_count(self):
@@ -144,6 +174,28 @@ class InternalDevice(models.Model):
             except ValueError:
                 return 0
         return 0
+
+    @property
+    def effective_fbt_input_count(self):
+        if not self.is_fbt:
+            return 0
+        return 1
+
+    @property
+    def effective_fbt_output_count(self):
+        if not self.is_fbt:
+            return 0
+        return 2
+
+    @property
+    def fbt_ratio_parts(self):
+        if not self.is_fbt or not self.fbt_ratio or '/' not in self.fbt_ratio:
+            return (0, 0)
+        primary_ratio, secondary_ratio = self.fbt_ratio.split('/', 1)
+        try:
+            return (int(primary_ratio), int(secondary_ratio))
+        except ValueError:
+            return (0, 0)
 
     @property
     def display_name(self):
@@ -274,6 +326,103 @@ class TopologyLink(models.Model):
 
     def __str__(self):
         return self.display_name
+
+    @property
+    def used_core_count(self):
+        cable = getattr(self, 'cable', None)
+        if cable is None:
+            return 0
+        return cable.used_core_count
+
+    @property
+    def total_core_count(self):
+        cable = getattr(self, 'cable', None)
+        if cable is None:
+            return 0
+        return cable.total_cores
+
+
+class Cable(models.Model):
+    INSTALLATION_TYPE_CHOICES = [
+        ('aerial', 'Aerial'),
+        ('underground', 'Underground'),
+        ('indoor', 'Indoor'),
+        ('mixed', 'Mixed'),
+    ]
+
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('planned', 'Planned'),
+        ('inactive', 'Inactive'),
+        ('damaged', 'Damaged'),
+    ]
+
+    link = models.OneToOneField(
+        TopologyLink,
+        on_delete=models.CASCADE,
+        related_name='cable',
+    )
+    name = models.CharField(max_length=100)
+    code = models.CharField(max_length=100, blank=True)
+    total_cores = models.PositiveIntegerField(default=0)
+    length_meters = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    installation_type = models.CharField(max_length=20, choices=INSTALLATION_TYPE_CHOICES, default='aerial')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    installed_on = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name', 'id']
+
+    def clean(self):
+        if self.total_cores <= 0:
+            raise ValidationError('Cable total cores must be greater than zero.')
+
+    @property
+    def display_name(self):
+        return self.code or self.name
+
+    @property
+    def used_core_count(self):
+        return self.cores.filter(status__in=['used', 'reserved']).count()
+
+    @property
+    def available_core_count(self):
+        return max(self.total_cores - self.used_core_count, 0)
+
+    def __str__(self):
+        return f"{self.link.display_name} / {self.display_name}"
+
+
+class CableCore(models.Model):
+    STATUS_CHOICES = [
+        ('available', 'Available'),
+        ('reserved', 'Reserved'),
+        ('used', 'Used'),
+        ('damaged', 'Damaged'),
+    ]
+
+    cable = models.ForeignKey(
+        Cable,
+        on_delete=models.CASCADE,
+        related_name='cores',
+    )
+    sequence = models.PositiveIntegerField()
+    color_name = models.CharField(max_length=30)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='available')
+    assignment_label = models.CharField(max_length=120, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['sequence']
+        unique_together = [('cable', 'sequence')]
+
+    def __str__(self):
+        return f"{self.cable.display_name} core {self.sequence}"
 
 
 class TopologyLinkVertex(models.Model):

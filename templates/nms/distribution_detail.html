@@ -135,6 +135,9 @@
                   {% if device.is_plc and device.plc_model %}
                   <span class="px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700">{{ device.plc_model }}</span>
                   {% endif %}
+                  {% if device.is_fbt and device.fbt_ratio %}
+                  <span class="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700">{{ device.fbt_ratio }} FBT</span>
+                  {% endif %}
                   {% if not device.is_active %}
                   <span class="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-500">Inactive</span>
                   {% endif %}
@@ -142,6 +145,11 @@
                 {% if device.is_plc %}
                 <p class="text-xs text-gray-400 mt-2">
                   PLC ports: {{ device.effective_plc_input_count }} input · {{ device.effective_plc_output_count }} output
+                </p>
+                {% endif %}
+                {% if device.is_fbt %}
+                <p class="text-xs text-gray-400 mt-2">
+                  FBT ports: {{ device.effective_fbt_input_count }} input · {{ device.effective_fbt_output_count }} output · Ratio {{ device.fbt_ratio }}
                 </p>
                 {% endif %}
                 {% if device.notes %}
@@ -157,6 +165,16 @@
                   <input type="hidden" name="device_pk" value="{{ device.pk }}">
                   <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-medium px-3 py-2 transition">
                     Sync PLC Ports
+                  </button>
+                </form>
+                {% endif %}
+                {% if device.is_fbt %}
+                <form method="post">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="sync_fbt_outputs">
+                  <input type="hidden" name="device_pk" value="{{ device.pk }}">
+                  <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-medium px-3 py-2 transition">
+                    Sync FBT Ports
                   </button>
                 </form>
                 {% endif %}
@@ -303,6 +321,12 @@
             </div>
           </div>
           <div>
+            <label for="{{ device_form.fbt_ratio.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">FBT Ratio</label>
+            {{ device_form.fbt_ratio }}
+            <p class="text-xs text-gray-400 mt-1">Use this only for `FBT Splitter` devices. Primary output is modeled as pass-through, while the secondary output is modeled as the local split.</p>
+            {% if device_form.fbt_ratio.errors %}<p class="text-xs text-red-600 mt-1">{{ device_form.fbt_ratio.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div>
             <label for="{{ device_form.plc_output_count.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">PLC Output Count Override</label>
             {{ device_form.plc_output_count }}
             <p class="text-xs text-gray-400 mt-1">Leave at `0` to derive outputs from the selected PLC model.</p>
@@ -316,6 +340,10 @@
           <label class="flex items-center gap-2 text-sm text-gray-600">
             {{ device_form.auto_generate_plc_outputs }}
             Auto-generate PLC input/output ports
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-600">
+            {{ device_form.auto_generate_fbt_outputs }}
+            Auto-generate FBT input/pass-through/split ports
           </label>
           <label class="flex items-center gap-2 text-sm text-gray-600">
             {{ device_form.is_active }}
@@ -387,6 +415,7 @@
           <li>Premium subscriber mappings can point to an endpoint instead of only storing a manual text label.</li>
           <li>Active endpoint occupancy is synchronized automatically when a subscriber mapping is saved or removed.</li>
           <li>PLC devices can now declare a model and auto-generate input and split-output ports.</li>
+          <li>FBT devices can now declare a ratio and auto-generate one input, one primary pass-through output, and one secondary split output.</li>
         </ul>
       </div>
     </aside>

@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Network Nodes{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <p class="text-sm font-medium text-blue-600">Premium NMS</p>
+      <h2 class="text-2xl font-bold text-gray-800 mt-1">Network Nodes</h2>
+      <p class="text-sm text-gray-500 mt-1">Create and maintain the shared `NetworkNode` inventory used by subscriber assignment and the NMS workspace.</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href="{% url 'nms-map' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Back to Map
+      </a>
+      <a href="{% url 'nms-nodes' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Add New Node
+      </a>
+    </div>
+  </div>
+
+  {% include "partials/messages.html" %}
+
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.6fr)_420px]">
+    <section class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-100">
+        <h3 class="text-lg font-semibold text-gray-800">Node Inventory</h3>
+        <p class="text-sm text-gray-500 mt-1">These records are shared by the subscriber module and Premium NMS.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[920px] text-sm">
+          <thead class="bg-gray-50 border-b border-gray-100">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Name</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Type</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Router</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Coordinates</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Ports</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-50">
+            {% for node in nodes %}
+            <tr class="hover:bg-gray-50 {% if selected_node and selected_node.pk == node.pk %}bg-blue-50/40{% endif %}">
+              <td class="px-4 py-3">
+                <p class="font-medium text-gray-800">{{ node.name }}</p>
+                {% if node.notes %}
+                <p class="text-xs text-gray-400 mt-1">{{ node.notes|truncatechars:80 }}</p>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-600">{{ node.get_node_type_display }}</td>
+              <td class="px-4 py-3 text-xs text-gray-600">{{ node.router.name|default:"-" }}</td>
+              <td class="px-4 py-3 text-xs text-gray-600">
+                {% if node.latitude is not None and node.longitude is not None %}
+                {{ node.latitude|floatformat:5 }}, {{ node.longitude|floatformat:5 }}
+                {% else %}
+                <span class="text-amber-600">No map coordinates</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-600">{{ node.port_count }}</td>
+              <td class="px-4 py-3 text-xs">
+                <span class="px-2 py-0.5 rounded-full {% if node.is_active %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-500{% endif %}">
+                  {% if node.is_active %}Active{% else %}Inactive{% endif %}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-xs">
+                <div class="flex flex-wrap gap-2">
+                  <a href="{% url 'nms-nodes' %}?node={{ node.pk }}" class="font-medium text-blue-600 hover:underline">Edit</a>
+                  <a href="{% url 'nms-map' %}" class="font-medium text-gray-600 hover:underline">Map</a>
+                  <a href="{% url 'nms-distribution-detail' node.pk %}" class="font-medium text-blue-600 hover:underline">Distribution</a>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="7" class="px-4 py-12 text-center text-sm text-gray-400">
+                No network nodes yet. Create the first node from the form beside this table.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+      <h3 class="text-lg font-semibold text-gray-800">{% if selected_node %}Edit Node{% else %}Add Node{% endif %}</h3>
+      <p class="text-sm text-gray-500 mt-1">This writes directly to the existing `NetworkNode` inventory. No billing or subscriber data is rewritten.</p>
+
+      {% if form.non_field_errors %}
+      <div class="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+        {% for error in form.non_field_errors %}
+        <p>{{ error }}</p>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <form method="post" class="space-y-4 mt-4">
+        {% csrf_token %}
+        <div>
+          <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+          {{ form.name }}
+          {% if form.name.errors %}<p class="text-xs text-red-600 mt-1">{{ form.name.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label for="{{ form.node_type.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Node Type</label>
+            {{ form.node_type }}
+            {% if form.node_type.errors %}<p class="text-xs text-red-600 mt-1">{{ form.node_type.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.router.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Linked Router</label>
+            {{ form.router }}
+            {% if form.router.errors %}<p class="text-xs text-red-600 mt-1">{{ form.router.errors|join:", " }}</p>{% endif %}
+          </div>
+        </div>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label for="{{ form.latitude.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Latitude</label>
+            {{ form.latitude }}
+            {% if form.latitude.errors %}<p class="text-xs text-red-600 mt-1">{{ form.latitude.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.longitude.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Longitude</label>
+            {{ form.longitude }}
+            {% if form.longitude.errors %}<p class="text-xs text-red-600 mt-1">{{ form.longitude.errors|join:", " }}</p>{% endif %}
+          </div>
+        </div>
+        <div>
+          <label for="{{ form.port_count.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Port Count</label>
+          {{ form.port_count }}
+          {% if form.port_count.errors %}<p class="text-xs text-red-600 mt-1">{{ form.port_count.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div>
+          <label for="{{ form.notes.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+          {{ form.notes }}
+          {% if form.notes.errors %}<p class="text-xs text-red-600 mt-1">{{ form.notes.errors|join:", " }}</p>{% endif %}
+        </div>
+        <label class="flex items-center gap-2 text-sm text-gray-600">
+          {{ form.is_active }}
+          Active node
+        </label>
+        <div class="flex flex-wrap gap-2 pt-2">
+          <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 transition">
+            {% if selected_node %}Save Node{% else %}Create Node{% endif %}
+          </button>
+          {% if selected_node %}
+          <a href="{% url 'nms-nodes' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+            Cancel Edit
+          </a>
+          {% endif %}
+        </div>
+      </form>
+    </aside>
+  </div>
+</div>
+{% endblock %}

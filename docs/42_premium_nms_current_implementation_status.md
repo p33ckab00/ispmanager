@@ -20,7 +20,7 @@ This is a status guide, not a replacement for the phased roadmap.
 - `Phase 1`: implemented in code
 - `Phase 2`: implemented in code
 - `Phase 3`: partially started
-- `Phase 4`: not started
+- `Phase 4`: partially started
 - `Phase 5`: not started
 - `Phase 6`: not started
 
@@ -32,6 +32,8 @@ The codebase now includes the current Premium NMS migration set:
 - `apps/nms/migrations/0002_topologylink_topologylinkvertex.py`
 - `apps/nms/migrations/0003_internaldevice_endpoint_serviceattachment_endpoint_and_more.py`
 - `apps/nms/migrations/0004_internaldevice_auto_generate_plc_outputs_and_more.py`
+- `apps/nms/migrations/0005_cable_cablecore.py`
+- `apps/nms/migrations/0006_internaldevice_auto_generate_fbt_outputs_and_more.py`
 
 For production rollout, the database migrations must be applied and the running web service must be reloaded so the live process picks up the current NMS model layer.
 
@@ -175,6 +177,8 @@ Implemented Phase 2 pieces:
 - router markers
 - subscriber markers
 - network node markers
+- dedicated node management page over the existing `NetworkNode` table
+- map-based `Add Node` workflow with click-to-place coordinates
 - premium attachment path lines
 - first-class topology link records
 - topology link inventory page
@@ -192,8 +196,20 @@ Implemented files:
 - `apps/nms/views.py`
 - `apps/nms/urls.py`
 - `templates/nms/map.html`
+- `templates/nms/nodes.html`
 - `templates/nms/links.html`
 - `apps/nms/migrations/0002_topologylink_topologylinkvertex.py`
+
+### Phase 2C Clarification
+
+`Add Node` is now treated as a Phase 2 gap-closure slice rather than a late-stage feature.
+
+Important implementation detail:
+
+- it writes to the existing `subscribers.NetworkNode` table
+- it does not replace or migrate the node table
+- it does not rewrite billing, invoice, accounting, or subscriber records
+- it is additive to the live system
 
 ### What Still Needs To Happen Before Phase 2 Is Fully Operational
 
@@ -244,15 +260,48 @@ So the correct status is:
 - `Phase 3B PLC modeling`: implemented in code
 - `Phase 3C eligibility and review rules`: implemented in code
 
-## Phase 4 Status: Not Started
+## Phase 4 Status: Partially Started
 
-Not yet implemented:
+### What Has Started
 
-- FBT modeling
-- cable inventory
-- core inventory
-- per-core allocation
+Phase 4A cable and core foundation is now implemented in code, and Phase 4B FBT modeling is now implemented in code.
+
+This includes:
+
+- `Cable` model bound to a topology link
+- `CableCore` model for per-core inventory
+- auto-generated standard core colors
+- fiber-link cable form fields on the topology links page
+- per-link cable/core visibility in the map and links UI
+- FBT ratio-aware internal device settings
+- auto-generated FBT input, primary pass-through, and secondary split outputs
+- subscriber-assignment guardrails that keep FBT pass-through outputs out of normal endpoint eligibility
+
+Implemented files:
+
+- `apps/nms/models.py`
+- `apps/nms/forms.py`
+- `apps/nms/services.py`
+- `apps/nms/views.py`
+- `templates/nms/links.html`
+- `templates/nms/map.html`
+- `templates/nms/distribution_detail.html`
+- `apps/nms/migrations/0005_cable_cablecore.py`
+- `apps/nms/migrations/0006_internaldevice_auto_generate_fbt_outputs_and_more.py`
+
+### What Is Still Missing In Phase 4
+
+The following Phase 4 items are still pending:
+
+- per-core allocation workflows
 - richer optical route structure
+- deeper optical behavior beyond the initial FBT pass-through/split modeling
+
+So the correct status is:
+
+- `Phase 4A cable and core foundation`: implemented in code
+- `Phase 4B FBT modeling`: implemented in code
+- `Phase 4C core assignment rules`: not started
 
 ## Phase 5 Status: Not Started
 
@@ -278,11 +327,10 @@ Not yet implemented:
 
 The cleanest next sequence is:
 
-1. Apply the `nms` migrations.
-2. Validate Phase 1, Phase 2, and Phase 3A flows in the browser.
-3. Commit and push the current Premium NMS code changes.
-4. Continue with `Phase 3B: PLC Modeling`.
-5. Then follow with `Phase 3C: Eligibility and Review Rules`.
+1. Validate the new Phase 4A and 4B flows in the browser using real fiber links and distribution nodes.
+2. Commit and push the current Premium NMS code changes.
+3. Continue with `Phase 4C: core assignment rules`.
+4. Then follow with `Phase 5: validation and operations layer`.
 
 ## Practical Interpretation
 
@@ -290,8 +338,9 @@ If someone asks, “What is already finished?” the best short answer is:
 
 - Premium NMS Phase 1 is implemented in code.
 - Premium NMS Phase 2 map workspace is implemented in code.
-- Premium NMS Phase 3A endpoint foundation is implemented in code.
-- The deeper topology engine phases are still pending.
+- Premium NMS Phase 3 endpoint foundation, PLC modeling, and review rules are implemented in code.
+- Premium NMS Phase 4A cable/core foundation and Phase 4B FBT modeling are implemented in code.
+- The deeper core-allocation and operations phases are still pending.
 
 If someone asks, “What is already live-ready?” the safer answer is:
 

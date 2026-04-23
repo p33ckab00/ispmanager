@@ -3,6 +3,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
 from django.urls import reverse
 from apps.nms.models import (
+    Cable,
+    CableCore,
     Endpoint,
     InternalDevice,
     ServiceAttachment,
@@ -18,6 +20,21 @@ BADGE_CLASSES = {
     'mapped': 'bg-green-100 text-green-700',
     'needs_review': 'bg-amber-100 text-amber-700',
 }
+
+STANDARD_CORE_COLORS = [
+    'Blue',
+    'Orange',
+    'Green',
+    'Brown',
+    'Slate',
+    'White',
+    'Red',
+    'Black',
+    'Yellow',
+    'Violet',
+    'Rose',
+    'Aqua',
+]
 
 
 def has_model_table(model):
@@ -65,6 +82,10 @@ def has_topology_link_tables():
 
 def has_distribution_tables():
     return has_model_table(InternalDevice) and has_model_table(Endpoint)
+
+
+def has_cable_tables():
+    return has_model_table(Cable) and has_model_table(CableCore)
 
 
 def get_service_attachment(subscriber, table_ready=None):
@@ -183,6 +204,140 @@ def ensure_plc_endpoints(internal_device):
     }
 
 
+def ensure_fbt_endpoints(internal_device):
+    if (
+        internal_device is None
+        or not has_distribution_tables()
+        or not internal_device.is_fbt
+        or not internal_device.auto_generate_fbt_outputs
+    ):
+        return {'created_inputs': 0, 'created_outputs': 0}
+
+    primary_ratio, secondary_ratio = internal_device.fbt_ratio_parts
+    created_inputs = 0
+    created_outputs = 0
+
+    input_endpoint = internal_device.endpoints.filter(
+        endpoint_type='uplink',
+        sequence=1,
+    ).order_by('id').first()
+    if input_endpoint is None:
+        Endpoint.objects.create(
+            internal_device=internal_device,
+            label='IN 1',
+            endpoint_type='uplink',
+            sequence=1,
+            status='available',
+            notes='Auto-generated FBT input port.',
+        )
+        created_inputs += 1
+    else:
+        update_fields = []
+        if input_endpoint.label != 'IN 1':
+            input_endpoint.label = 'IN 1'
+            update_fields.append('label')
+        if input_endpoint.notes != 'Auto-generated FBT input port.':
+            input_endpoint.notes = 'Auto-generated FBT input port.'
+            update_fields.append('notes')
+        if update_fields:
+            input_endpoint.save(update_fields=update_fields + ['updated_at'])
+
+    output_specs = [
+        {
+            'sequence': 1,
+            'label': f"PRIMARY {primary_ratio}%",
+            'endpoint_type': 'distribution',
+            'notes': 'Auto-generated FBT primary pass-through output.',
+        },
+        {
+            'sequence': 2,
+            'label': f"SECONDARY {secondary_ratio}%",
+            'endpoint_type': 'split_output',
+            'notes': 'Auto-generated FBT secondary split output.',
+        },
+    ]
+
+    for output_spec in output_specs:
+        endpoint = internal_device.endpoints.filter(
+            endpoint_type=output_spec['endpoint_type'],
+            sequence=output_spec['sequence'],
+        ).order_by('id').first()
+        if endpoint is None:
+            Endpoint.objects.create(
+                internal_device=internal_device,
+                label=output_spec['label'],
+                endpoint_type=output_spec['endpoint_type'],
+                sequence=output_spec['sequence'],
+                status='available',
+                notes=output_spec['notes'],
+            )
+            created_outputs += 1
+            continue
+
+        update_fields = []
+        if endpoint.label != output_spec['label']:
+            endpoint.label = output_spec['label']
+            update_fields.append('label')
+        if endpoint.notes != output_spec['notes']:
+            endpoint.notes = output_spec['notes']
+            update_fields.append('notes')
+        if update_fields:
+            endpoint.save(update_fields=update_fields + ['updated_at'])
+
+    return {
+        'created_inputs': created_inputs,
+        'created_outputs': created_outputs,
+    }
+
+
+def get_standard_core_color(sequence):
+    if sequence <= 0:
+        return STANDARD_CORE_COLORS[0]
+    return STANDARD_CORE_COLORS[(sequence - 1) % len(STANDARD_CORE_COLORS)]
+
+
+def sync_cable_cores(cable):
+    if cable is None or not has_cable_tables():
+        return {'created': 0, 'removed': 0}
+
+    existing_cores = list(cable.cores.order_by('sequence'))
+    existing_by_sequence = {core.sequence: core for core in existing_cores}
+    created = 0
+    removed = 0
+
+    for sequence in range(1, cable.total_cores + 1):
+        if sequence in existing_by_sequence:
+            core = existing_by_sequence[sequence]
+            expected_color = get_standard_core_color(sequence)
+            if core.color_name != expected_color:
+                core.color_name = expected_color
+                core.save(update_fields=['color_name', 'updated_at'])
+            continue
+
+        CableCore.objects.create(
+            cable=cable,
+            sequence=sequence,
+            color_name=get_standard_core_color(sequence),
+            status='available',
+        )
+        created += 1
+
+    removable_cores = [
+        core for core in existing_cores
+        if core.sequence > cable.total_cores
+    ]
+    for core in removable_cores:
+        if core.status in ('used', 'reserved'):
+            continue
+        core.delete()
+        removed += 1
+
+    return {
+        'created': created,
+        'removed': removed,
+    }
+
+
 def get_eligible_endpoints(*, selected_node=None, current_attachment=None):
     if not has_distribution_tables():
         return Endpoint.objects.none()
@@ -195,6 +350,9 @@ def get_eligible_endpoints(*, selected_node=None, current_attachment=None):
         Q(parent_node__is_active=True) | Q(internal_device__parent_node__is_active=True)
     ).exclude(
         status__in=['inactive', 'damaged']
+    ).exclude(
+        internal_device__device_type='fbt',
+        endpoint_type='distribution',
     ).filter(
         Q(internal_device__isnull=True) | Q(internal_device__is_active=True)
     )
@@ -268,6 +426,12 @@ def get_attachment_review_flags(attachment):
         if endpoint.internal_device_id and not endpoint.internal_device.is_active:
             add_flag('inactive_internal_device', 'The internal device for this endpoint is inactive.')
 
+        if endpoint.internal_device_id and endpoint.internal_device.device_type == 'fbt' and endpoint.endpoint_type == 'distribution':
+            add_flag(
+                'fbt_pass_through_endpoint',
+                'The selected endpoint is an FBT primary pass-through output and should not be used as a subscriber access endpoint.',
+            )
+
         if endpoint.status == 'inactive':
             add_flag('inactive_endpoint', 'The selected endpoint is inactive.')
         elif endpoint.status == 'damaged':
@@ -294,6 +458,34 @@ def refresh_attachment_review_state(attachment, *, preserve_manual_review=True):
     elif not preserve_manual_review and attachment.status == 'needs_review':
         attachment.status = 'active'
     return review_flags
+
+
+def get_cable_review_flags(cable):
+    if cable is None:
+        return []
+
+    flags = []
+
+    def add_flag(code, message):
+        flags.append({
+            'code': code,
+            'message': message,
+        })
+
+    if cable.link.link_type != 'fiber':
+        add_flag('non_fiber_link', 'Cable inventory is attached to a link that is not marked as fiber.')
+
+    if cable.total_cores <= 0:
+        add_flag('invalid_core_count', 'Cable total core count must be greater than zero.')
+
+    actual_core_count = cable.cores.count()
+    if actual_core_count != cable.total_cores:
+        add_flag('core_inventory_mismatch', 'Cable core records do not match the configured total core count.')
+
+    if cable.status == 'damaged':
+        add_flag('damaged_cable', 'Cable is marked as damaged.')
+
+    return flags
 
 
 def get_subscriber_topology_summary(subscriber, table_ready=None):
@@ -386,6 +578,8 @@ def build_topology_link_geometry_text(link):
 def serialize_topology_link(link, *, highlighted_node_id=None):
     vertices = list(link.vertices.all())
     points = build_topology_link_points(link)
+    cable = getattr(link, 'cable', None) if has_cable_tables() else None
+    cable_review_flags = get_cable_review_flags(cable) if cable else []
 
     return {
         'id': link.id,
@@ -405,10 +599,35 @@ def serialize_topology_link(link, *, highlighted_node_id=None):
             f"{vertex.latitude},{vertex.longitude}" for vertex in vertices
         ),
         'notes': link.notes or '',
+        'cable_name': cable.name if cable else '',
+        'cable_code': cable.code if cable else '',
+        'cable_total_cores': cable.total_cores if cable else 0,
+        'cable_used_cores': cable.used_core_count if cable else 0,
+        'cable_available_cores': cable.available_core_count if cable else 0,
+        'cable_status': cable.status if cable else '',
+        'cable_review_flags': cable_review_flags,
         'points': points,
         'is_focus_related': bool(
             highlighted_node_id
             and highlighted_node_id in (link.source_node_id, link.target_node_id)
         ),
         'edit_url': f"{reverse('nms-links')}?link={link.id}",
+    }
+
+
+def serialize_network_node(node):
+    return {
+        'id': node.id,
+        'name': node.name,
+        'node_type': node.node_type,
+        'node_type_label': node.get_node_type_display(),
+        'lat': node.latitude,
+        'lng': node.longitude,
+        'port_count': node.port_count,
+        'notes': node.notes or '',
+        'is_active': node.is_active,
+        'router_id': node.router_id,
+        'router_name': node.router.name if node.router_id else '',
+        'distribution_url': reverse('nms-distribution-detail', args=[node.id]) if has_distribution_tables() else '',
+        'edit_url': f"{reverse('nms-nodes')}?node={node.id}",
     }

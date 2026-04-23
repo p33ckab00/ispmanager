@@ -11,25 +11,36 @@ from apps.core.models import AuditLog
 from apps.nms.forms import (
     EndpointForm,
     InternalDeviceForm,
+    NetworkNodeForm,
     ServiceAttachmentForm,
     TopologyLinkForm,
     TopologyLinkGeometryForm,
 )
 from apps.nms.models import Endpoint, InternalDevice, ServiceAttachment, TopologyLink
 from apps.nms.services import (
+    ensure_fbt_endpoints,
     ensure_plc_endpoints,
     get_attachment_review_flags,
     get_basic_node_assignment,
+    has_cable_tables,
     get_service_attachment,
     get_subscriber_topology_summary,
     has_distribution_tables,
     has_service_attachment_table,
     has_topology_link_tables,
     refresh_attachment_review_state,
+    serialize_network_node,
     serialize_topology_link,
     sync_basic_node_summary,
     sync_endpoint_status,
 )
+
+
+def _merge_generated_port_counts(*results):
+    return {
+        'created_inputs': sum(result.get('created_inputs', 0) for result in results),
+        'created_outputs': sum(result.get('created_outputs', 0) for result in results),
+    }
 
 
 @login_required
@@ -40,8 +51,13 @@ def nms_map(request):
         focus_subscriber = Subscriber.objects.filter(pk=subscriber_id).first()
     return render(request, 'nms/map.html', {
         'focus_subscriber': focus_subscriber,
+        'cable_ready': has_cable_tables(),
         'service_attachment_ready': has_service_attachment_table(),
         'topology_links_ready': has_topology_link_tables(),
+        'node_type_options': [{'value': value, 'label': label} for value, label in NetworkNode.TYPE_CHOICES],
+        'router_options': list(
+            Router.objects.filter(is_active=True).order_by('name').values('id', 'name')
+        ),
     })
 
 
@@ -51,6 +67,7 @@ def nms_map_data(request):
     service_attachment_ready = has_service_attachment_table()
     topology_links_ready = has_topology_link_tables()
     distribution_ready = has_distribution_tables()
+    cable_ready = has_cable_tables()
     routers = Router.objects.filter(
         is_active=True,
         latitude__isnull=False,
@@ -64,11 +81,11 @@ def nms_map_data(request):
         'id', 'username', 'full_name', 'status', 'mt_status',
         'latitude', 'longitude', 'ip_address', 'plan__name',
     )
-    nodes = NetworkNode.objects.filter(
+    nodes = NetworkNode.objects.select_related('router').filter(
         is_active=True,
         latitude__isnull=False,
         longitude__isnull=False,
-    ).values('id', 'name', 'node_type', 'latitude', 'longitude')
+    )
     attachments = []
     if service_attachment_ready:
         attachments = ServiceAttachment.objects.select_related(
@@ -96,7 +113,10 @@ def nms_map_data(request):
         topology_links = TopologyLink.objects.select_related(
             'source_node',
             'target_node',
-        ).prefetch_related('vertices').filter(
+        )
+        if cable_ready:
+            topology_links = topology_links.select_related('cable')
+        topology_links = topology_links.prefetch_related('vertices').filter(
             source_node__latitude__isnull=False,
             source_node__longitude__isnull=False,
             target_node__latitude__isnull=False,
@@ -166,16 +186,10 @@ def nms_map_data(request):
         })
 
     node_list = []
-    for n in nodes:
-        node_list.append({
-            'type': 'network_node',
-            'id': n['id'],
-            'name': n['name'],
-            'node_type': n['node_type'],
-            'lat': n['latitude'],
-            'lng': n['longitude'],
-            'distribution_url': reverse('nms-distribution-detail', args=[n['id']]) if distribution_ready else '',
-        })
+    for node in nodes:
+        serialized_node = serialize_network_node(node)
+        serialized_node['type'] = 'network_node'
+        node_list.append(serialized_node)
 
     attachment_list = []
     for attachment in attachments:
@@ -217,9 +231,35 @@ def nms_map_data(request):
         'service_attachment_ready': service_attachment_ready,
         'topology_links_ready': topology_links_ready,
         'distribution_ready': distribution_ready,
+        'cable_ready': cable_ready,
         'focus_node_id': focus_node_id,
         'focus_subscriber_id': int(focus_subscriber_id) if focus_subscriber_id and focus_subscriber_id.isdigit() else None,
     })
+
+
+@login_required
+@require_POST
+def nms_create_node_api(request):
+    form = NetworkNodeForm(request.POST)
+    if form.is_valid():
+        node = form.save()
+        node = NetworkNode.objects.select_related('router').get(pk=node.pk)
+        AuditLog.log(
+            'create',
+            'nms',
+            f"Network node created from map: {node.name}",
+            user=request.user,
+        )
+        return JsonResponse({
+            'ok': True,
+            'message': f"Network node created: {node.name}.",
+            'node': serialize_network_node(node),
+        })
+
+    return JsonResponse({
+        'ok': False,
+        'errors': form.errors.get_json_data(),
+    }, status=400)
 
 
 @login_required
@@ -237,7 +277,10 @@ def nms_create_link_api(request):
         topology_link = TopologyLink.objects.select_related(
             'source_node',
             'target_node',
-        ).prefetch_related('vertices').get(pk=topology_link.pk)
+        )
+        if has_cable_tables():
+            topology_link = topology_link.select_related('cable')
+        topology_link = topology_link.prefetch_related('vertices').get(pk=topology_link.pk)
         AuditLog.log(
             'create',
             'nms',
@@ -276,7 +319,10 @@ def nms_update_link_geometry_api(request, link_pk):
         topology_link = TopologyLink.objects.select_related(
             'source_node',
             'target_node',
-        ).prefetch_related('vertices').get(pk=topology_link.pk)
+        )
+        if has_cable_tables():
+            topology_link = topology_link.select_related('cable')
+        topology_link = topology_link.prefetch_related('vertices').get(pk=topology_link.pk)
         AuditLog.log(
             'update',
             'nms',
@@ -301,11 +347,15 @@ def nms_links(request):
         messages.error(request, 'Topology link database migration is not applied yet.')
         return redirect('nms-map')
 
+    cable_ready = has_cable_tables()
     selected_link = None
     selected_link_id = request.GET.get('link')
     if selected_link_id and selected_link_id.isdigit():
+        selected_link_queryset = TopologyLink.objects.select_related('source_node', 'target_node')
+        if cable_ready:
+            selected_link_queryset = selected_link_queryset.select_related('cable').prefetch_related('cable__cores')
         selected_link = get_object_or_404(
-            TopologyLink.objects.select_related('source_node', 'target_node').prefetch_related('vertices'),
+            selected_link_queryset.prefetch_related('vertices'),
             pk=selected_link_id,
         )
 
@@ -325,11 +375,49 @@ def nms_links(request):
     else:
         form = TopologyLinkForm(instance=selected_link)
 
-    links = TopologyLink.objects.select_related('source_node', 'target_node').prefetch_related('vertices')
+    links = TopologyLink.objects.select_related('source_node', 'target_node')
+    if cable_ready:
+        links = links.select_related('cable').prefetch_related('cable__cores')
+    links = links.prefetch_related('vertices')
     return render(request, 'nms/links.html', {
         'form': form,
         'selected_link': selected_link,
         'links': links,
+        'cable_ready': cable_ready,
+    })
+
+
+@login_required
+def nms_nodes(request):
+    selected_node = None
+    selected_node_id = request.GET.get('node')
+    if selected_node_id and selected_node_id.isdigit():
+        selected_node = get_object_or_404(
+            NetworkNode.objects.select_related('router'),
+            pk=selected_node_id,
+        )
+
+    if request.method == 'POST':
+        is_create = selected_node is None
+        form = NetworkNodeForm(request.POST, instance=selected_node)
+        if form.is_valid():
+            node = form.save()
+            AuditLog.log(
+                'create' if is_create else 'update',
+                'nms',
+                f"Network node saved: {node.name}",
+                user=request.user,
+            )
+            messages.success(request, f"Network node saved: {node.name}.")
+            return redirect(f"{reverse('nms-nodes')}?node={node.pk}")
+    else:
+        form = NetworkNodeForm(instance=selected_node)
+
+    nodes = NetworkNode.objects.select_related('router').order_by('name')
+    return render(request, 'nms/nodes.html', {
+        'form': form,
+        'selected_node': selected_node,
+        'nodes': nodes,
     })
 
 
@@ -472,7 +560,10 @@ def nms_distribution_detail(request, node_pk):
                 internal_device = device_form.save(commit=False)
                 internal_device.parent_node = node
                 internal_device.save()
-                generated_ports = ensure_plc_endpoints(internal_device)
+                generated_ports = _merge_generated_port_counts(
+                    ensure_plc_endpoints(internal_device),
+                    ensure_fbt_endpoints(internal_device),
+                )
                 AuditLog.log(
                     'create',
                     'nms',
@@ -520,6 +611,27 @@ def nms_distribution_detail(request, node_pk):
                 request,
                 (
                     f"PLC ports synced for {internal_device.display_name}. "
+                    f"Added {generated_ports['created_inputs']} input port(s) and "
+                    f"{generated_ports['created_outputs']} output port(s)."
+                ),
+            )
+            return redirect('nms-distribution-detail', node_pk=node.pk)
+        elif action == 'sync_fbt_outputs':
+            internal_device = get_object_or_404(
+                InternalDevice.objects.filter(parent_node=node),
+                pk=request.POST.get('device_pk'),
+            )
+            generated_ports = ensure_fbt_endpoints(internal_device)
+            AuditLog.log(
+                'update',
+                'nms',
+                f"FBT ports synced for {node.name}: {internal_device.display_name}",
+                user=request.user,
+            )
+            messages.success(
+                request,
+                (
+                    f"FBT ports synced for {internal_device.display_name}. "
                     f"Added {generated_ports['created_inputs']} input port(s) and "
                     f"{generated_ports['created_outputs']} output port(s)."
                 ),
