@@ -95,6 +95,7 @@ Project documentation starts here:
 - [Ubuntu Redeploy and Upgrade Script](docs/36_ubuntu_redeploy_upgrade_script.md)
 - [Diagnostics Operations Health Center](docs/37_diagnostics_operations_health_center.md)
 - [Diagnostics V2: Incidents and Linux Service Health](docs/38_diagnostics_v2_incidents_and_service_health.md)
+- [Subscribers Mobile Admin / Topology Workspace Discussion](docs/39_subscribers_mobile_admin_discussion.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 - [Ubuntu Fresh Install Script](deploy/install_ubuntu_fresh.sh)
 - [Ubuntu Redeploy Script](deploy/redeploy_ubuntu_update.sh)
