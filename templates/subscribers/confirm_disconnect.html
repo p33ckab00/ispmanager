@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 max-w-md">
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 sm:p-8 max-w-md">
   <div class="mb-4 flex items-center gap-3">
     <i class="fa fa-plug-circle-xmark text-3xl text-orange-500"></i>
     <div><h2 class="text-xl font-bold text-gray-800">Mark as Disconnected</h2>
@@ -17,9 +17,9 @@
         class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         placeholder="Client request, relocation, non-payment, etc."></textarea>
     </div>
-    <div class="flex gap-3">
-      <button type="submit" class="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-2 rounded-lg text-sm">Confirm Disconnect</button>
-      <a href="/subscribers/{{ subscriber.pk }}/" class="text-sm text-gray-500 px-3 py-2">Cancel</a>
+    <div class="flex flex-col-reverse gap-3 sm:flex-row">
+      <a href="/subscribers/{{ subscriber.pk }}/" class="inline-flex items-center justify-center text-sm text-gray-500 px-3 py-2">Cancel</a>
+      <button type="submit" class="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-2 rounded-lg text-sm">Confirm Disconnect</button>
     </div>
   </form>
 </div>

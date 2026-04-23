@@ -1,61 +1,71 @@
-<aside class="fixed left-0 top-0 h-full w-64 bg-gray-900 text-white flex flex-col z-40">
-  <div class="px-6 py-5 border-b border-gray-700">
+<div x-cloak x-show="mobileNavOpen" class="fixed inset-0 bg-gray-900/50 z-40 lg:hidden" @click="mobileNavOpen = false"></div>
+
+<aside x-cloak
+  class="fixed inset-y-0 left-0 z-50 h-full w-64 bg-gray-900 text-white flex flex-col transform transition duration-200 ease-out lg:translate-x-0"
+  :class="mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'">
+  <div class="px-6 py-5 border-b border-gray-700 flex items-start justify-between gap-3">
+    <div>
     {% if isp_logo %}
       <img src="{{ isp_logo.url }}" alt="{{ isp_name }}" class="h-8 mb-1">
     {% else %}
       <span class="text-xl font-bold text-white">{{ isp_name }}</span>
     {% endif %}
     <p class="text-xs text-gray-400 mt-1">ISP Manager</p>
+    </div>
+    <button type="button" class="lg:hidden text-gray-400 hover:text-white transition" @click="mobileNavOpen = false">
+      <i class="fa fa-xmark text-lg"></i>
+      <span class="sr-only">Close navigation</span>
+    </button>
   </div>
 
   <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-    <a href="/dashboard/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm {% if request.path == '/dashboard/' %}bg-gray-700{% endif %}">
+    <a href="/dashboard/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm {% if request.path == '/dashboard/' %}bg-gray-700{% endif %}">
       <i class="fa fa-gauge-high w-4"></i> Dashboard
     </a>
 
     <p class="text-xs text-gray-500 uppercase px-3 pt-4 pb-1">Network</p>
-    <a href="/routers/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/routers/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-router w-4"></i> Routers
     </a>
-    <a href="/subscribers/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/subscribers/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-users w-4"></i> Subscribers
     </a>
-    <a href="/diagnostics/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/diagnostics/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-stethoscope w-4"></i> Diagnostics
     </a>
-    <a href="/diagnostics/scheduler/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/diagnostics/scheduler/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-clock w-4"></i> Scheduler
     </a>
-    <a href="/nms/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/nms/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-map w-4"></i> Network Map
     </a>
 
     <p class="text-xs text-gray-500 uppercase px-3 pt-4 pb-1">Finance</p>
-    <a href="/billing/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/billing/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-file-invoice-dollar w-4"></i> Billing
     </a>
-    <a href="/accounting/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/accounting/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-book w-4"></i> Accounting
     </a>
-    <a href="/data-exchange/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/data-exchange/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-file-arrow-up w-4"></i> Data Exchange
     </a>
 
     <p class="text-xs text-gray-500 uppercase px-3 pt-4 pb-1">Communications</p>
-    <a href="/sms/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/sms/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-sms w-4"></i> SMS
     </a>
-    <a href="/notifications/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/notifications/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-bell w-4"></i> Notifications
     </a>
 
     <p class="text-xs text-gray-500 uppercase px-3 pt-4 pb-1">Content</p>
-    <a href="/landing/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/landing/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-globe w-4"></i> Landing Pages
     </a>
 
     <p class="text-xs text-gray-500 uppercase px-3 pt-4 pb-1">System</p>
-    <a href="/settings/" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+    <a href="/settings/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-gear w-4"></i> Settings
     </a>
   </nav>

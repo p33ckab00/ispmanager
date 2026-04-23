@@ -8,16 +8,19 @@
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
   {% block extra_css %}{% endblock %}
 </head>
-<body class="bg-gray-100 text-gray-800 font-sans">
+<body class="bg-gray-100 text-gray-800 font-sans" x-data="{ mobileNavOpen: false }" @keydown.escape.window="mobileNavOpen = false">
 
   {% if user.is_authenticated %}
     {% include "partials/sidebar.html" %}
     {% include "partials/topbar.html" %}
 
-    <div class="ml-64 pt-16 min-h-screen">
-      <main class="p-6">
+    <div class="pt-16 min-h-screen lg:ml-64">
+      <main class="p-4 sm:p-6">
         {% include "partials/messages.html" %}
         {% block content %}{% endblock %}
       </main>

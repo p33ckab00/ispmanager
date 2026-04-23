@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 max-w-md text-center">
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 sm:p-8 max-w-md text-center">
   <i class="fa fa-box-archive text-4xl text-gray-400 mb-4"></i>
   <h2 class="text-xl font-bold text-gray-800 mb-2">Archive Account?</h2>
   <p class="text-sm text-gray-500 mb-6"><strong>{{ subscriber.display_name }}</strong> will be hidden from all active views. Data is preserved.</p>
-  <form method="post" class="flex gap-3 justify-center">
+  <form method="post" class="flex flex-col-reverse gap-3 justify-center sm:flex-row">
     {% csrf_token %}
-    <button type="submit" class="bg-gray-700 hover:bg-gray-800 text-white font-semibold px-6 py-2 rounded-lg text-sm">Archive</button>
-    <a href="/subscribers/{{ subscriber.pk }}/" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2 rounded-lg text-sm">Cancel</a>
+    <a href="/subscribers/{{ subscriber.pk }}/" class="inline-flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-6 py-2 rounded-lg text-sm">Cancel</a>
+    <button type="submit" class="w-full sm:w-auto bg-gray-700 hover:bg-gray-800 text-white font-semibold px-6 py-2 rounded-lg text-sm">Archive</button>
   </form>
 </div>
 {% endblock %}

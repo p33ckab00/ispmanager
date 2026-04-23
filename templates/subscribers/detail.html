@@ -6,159 +6,201 @@
 {% endblock %}
 
 {% block content %}
-<div class="mb-4">
-  <a href="/subscribers/" class="text-sm text-blue-600 hover:underline">
-    <i class="fa fa-arrow-left mr-1"></i> Back to Subscribers
-  </a>
-</div>
-
-<!-- Header -->
-<div class="flex items-start justify-between mb-6">
+<div x-data="{ tab: 'info' }" class="space-y-4 sm:space-y-6">
   <div>
-    <div class="flex items-center gap-3 flex-wrap">
-      <h2 class="text-2xl font-bold text-gray-800">{{ subscriber.display_name }}</h2>
-      <span class="px-2.5 py-1 rounded-full text-xs font-semibold
-        {% if subscriber.status == 'active' %}bg-green-100 text-green-700
-        {% elif subscriber.status == 'suspended' %}bg-yellow-100 text-yellow-700
-        {% elif subscriber.status == 'disconnected' %}bg-gray-200 text-gray-600
-        {% elif subscriber.status == 'deceased' %}bg-red-100 text-red-600
-        {% elif subscriber.status == 'archived' %}bg-gray-100 text-gray-400
-        {% else %}bg-blue-100 text-blue-700{% endif %}">
-        {{ subscriber.get_status_display|upper }}
-      </span>
-      {% if overdue_invoice_count %}
-      <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-600">
-        OVERDUE {{ overdue_invoice_count }}
-      </span>
-      {% endif %}
-      {% if has_active_palugit %}
-      <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
-        PALUGIT UNTIL {{ palugit_until|date:"M d, Y g:i A" }}
-      </span>
-      {% endif %}
-      <span class="flex items-center gap-1 text-xs {% if subscriber.mt_status == 'online' %}text-green-600{% else %}text-gray-400{% endif %}">
-        <span class="w-2 h-2 rounded-full {% if subscriber.mt_status == 'online' %}bg-green-400{% else %}bg-gray-300{% endif %}"></span>
-        MikroTik {{ subscriber.mt_status }}
-      </span>
-    </div>
-    <p class="text-gray-400 text-sm font-mono mt-1">{{ subscriber.username }}</p>
-  </div>
-
-  <!-- Quick action buttons -->
-  <div class="flex gap-2 flex-wrap">
-    {% if subscriber.status == 'active' %}
-    <form method="post" action="/subscribers/{{ subscriber.pk }}/suspend/" class="inline"
-          onsubmit="return confirm('Suspend {{ subscriber.display_name }}? This will disable PPP on MikroTik.')">
-      {% csrf_token %}
-      <button type="submit" class="bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">
-        <i class="fa fa-pause mr-1"></i> Suspend
-      </button>
-    </form>
-    {% elif subscriber.status == 'suspended' %}
-    <form method="post" action="/subscribers/{{ subscriber.pk }}/reconnect/" class="inline"
-          onsubmit="return confirm('Reconnect {{ subscriber.display_name }}?')">
-      {% csrf_token %}
-      <button type="submit" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">
-        <i class="fa fa-play mr-1"></i> Reconnect
-      </button>
-    </form>
-    {% endif %}
-
-    <a href="/billing/pay/{{ subscriber.pk }}/"
-      class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition">
-      <i class="fa fa-money-bill mr-1"></i> Record Payment
-    </a>
-
-    <form method="post" action="/billing/generate-snapshot/{{ subscriber.pk }}/" class="inline">
-      {% csrf_token %}
-      <button type="submit" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
-        <i class="fa fa-file-invoice mr-1"></i> Generate Snapshot
-      </button>
-    </form>
-
-    {% if subscriber.status == 'active' or subscriber.status == 'suspended' %}
-    <a href="/subscribers/{{ subscriber.pk }}/palugit/"
-      class="bg-amber-50 hover:bg-amber-100 text-amber-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
-      <i class="fa fa-hourglass-half mr-1"></i>
-      {% if has_active_palugit %}Extend Palugit{% else %}Grant Palugit{% endif %}
-    </a>
-
-    {% if has_active_palugit %}
-    <form method="post" action="/subscribers/{{ subscriber.pk }}/palugit/remove/" class="inline"
-          onsubmit="return confirm('Remove palugit for {{ subscriber.display_name }}?')">
-      {% csrf_token %}
-      <button type="submit" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
-        <i class="fa fa-xmark mr-1"></i> Remove Palugit
-      </button>
-    </form>
-    {% endif %}
-    {% endif %}
-
-    <form method="post" action="/subscribers/{{ subscriber.pk }}/send-billing-sms/" class="inline">
-      {% csrf_token %}
-      <button type="submit" class="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
-        <i class="fa fa-sms mr-1"></i> Send Billing SMS
-      </button>
-    </form>
-
-    <a href="/sms/send/?subscriber={{ subscriber.pk }}"
-      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
-      <i class="fa fa-sms mr-1"></i> Send SMS
+    <a href="/subscribers/" class="text-sm text-blue-600 hover:underline">
+      <i class="fa fa-arrow-left mr-1"></i> Back to Subscribers
     </a>
   </div>
-</div>
 
-{% include "partials/messages.html" %}
-
-<div class="flex gap-6">
-  <!-- Left: Tabbed content -->
-  <div class="flex-1 min-w-0">
-
-    <!-- Tab nav -->
-    <div class="flex gap-1 mb-4 bg-gray-100 rounded-xl p-1 w-fit" x-data="{tab:'info'}">
-      {% for t, label in tab_list %}
-      <button @click="tab='{{ t }}'"
-        :class="tab=='{{ t }}' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'"
-        class="px-4 py-2 rounded-lg text-sm transition">{{ label }}</button>
-      {% endfor %}
-
-      <!-- Tab panels -->
-      <div class="hidden" style="display:none"></div>
-    </div>
-
-    <!-- Alpine.js tabs -->
-    <div x-data="{tab:'info'}">
-      <div class="flex gap-1 mb-4 bg-gray-100 rounded-xl p-1 w-fit">
-        <button @click="tab='info'" :class="tab=='info' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'" class="px-4 py-2 rounded-lg text-sm transition">Info</button>
-        <button @click="tab='billing'" :class="tab=='billing' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'" class="px-4 py-2 rounded-lg text-sm transition">Billing</button>
-        <button @click="tab='payments'" :class="tab=='payments' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'" class="px-4 py-2 rounded-lg text-sm transition">Payments</button>
-        <button @click="tab='usage'" :class="tab=='usage' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'" class="px-4 py-2 rounded-lg text-sm transition">Usage</button>
-        <button @click="tab='history'" :class="tab=='history' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'" class="px-4 py-2 rounded-lg text-sm transition">History</button>
+  <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-6">
+    <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+          <h2 class="text-2xl font-bold text-gray-800 break-words">{{ subscriber.display_name }}</h2>
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold
+            {% if subscriber.status == 'active' %}bg-green-100 text-green-700
+            {% elif subscriber.status == 'suspended' %}bg-yellow-100 text-yellow-700
+            {% elif subscriber.status == 'disconnected' %}bg-gray-200 text-gray-600
+            {% elif subscriber.status == 'deceased' %}bg-red-100 text-red-600
+            {% elif subscriber.status == 'archived' %}bg-gray-100 text-gray-400
+            {% else %}bg-blue-100 text-blue-700{% endif %}">
+            {{ subscriber.get_status_display|upper }}
+          </span>
+          {% if overdue_invoice_count %}
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-600">
+            OVERDUE {{ overdue_invoice_count }}
+          </span>
+          {% endif %}
+          {% if has_active_palugit %}
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+            PALUGIT UNTIL {{ palugit_until|date:"M d, Y g:i A" }}
+          </span>
+          {% endif %}
+          <span class="inline-flex items-center gap-2 text-xs {% if subscriber.mt_status == 'online' %}text-green-600{% elif subscriber.mt_status == 'offline' %}text-red-500{% else %}text-gray-400{% endif %}">
+            <span class="w-2 h-2 rounded-full {% if subscriber.mt_status == 'online' %}bg-green-400{% elif subscriber.mt_status == 'offline' %}bg-red-300{% else %}bg-gray-300{% endif %}"></span>
+            MikroTik {{ subscriber.mt_status|title }}
+          </span>
+        </div>
+        <p class="text-gray-400 text-sm font-mono mt-2 break-all">@{{ subscriber.username }}</p>
       </div>
 
-      <!-- Tab: Info -->
+      <div class="w-full lg:w-auto space-y-3">
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          <a href="/billing/pay/{{ subscriber.pk }}/"
+            class="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition">
+            <i class="fa fa-money-bill"></i> Record Payment
+          </a>
+
+          {% if subscriber.status == 'active' %}
+          <form method="post" action="/subscribers/{{ subscriber.pk }}/suspend/"
+                onsubmit="return confirm('Suspend {{ subscriber.display_name }}? This will disable PPP on MikroTik.')">
+            {% csrf_token %}
+            <button type="submit" class="w-full inline-flex items-center justify-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition">
+              <i class="fa fa-pause"></i> Suspend
+            </button>
+          </form>
+          {% elif subscriber.status == 'suspended' %}
+          <form method="post" action="/subscribers/{{ subscriber.pk }}/reconnect/"
+                onsubmit="return confirm('Reconnect {{ subscriber.display_name }}?')">
+            {% csrf_token %}
+            <button type="submit" class="w-full inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition">
+              <i class="fa fa-play"></i> Reconnect
+            </button>
+          </form>
+          {% endif %}
+
+          <form method="post" action="/billing/generate-snapshot/{{ subscriber.pk }}/">
+            {% csrf_token %}
+            <button type="submit" class="w-full inline-flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2.5 rounded-lg transition">
+              <i class="fa fa-file-invoice"></i> Generate Snapshot
+            </button>
+          </form>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          {% if subscriber.status == 'active' or subscriber.status == 'suspended' %}
+          <a href="/subscribers/{{ subscriber.pk }}/palugit/"
+            class="inline-flex items-center justify-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
+            <i class="fa fa-hourglass-half"></i>
+            {% if has_active_palugit %}Extend Palugit{% else %}Grant Palugit{% endif %}
+          </a>
+
+          {% if has_active_palugit %}
+          <form method="post" action="/subscribers/{{ subscriber.pk }}/palugit/remove/"
+                onsubmit="return confirm('Remove palugit for {{ subscriber.display_name }}?')">
+            {% csrf_token %}
+            <button type="submit" class="inline-flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
+              <i class="fa fa-xmark"></i> Remove Palugit
+            </button>
+          </form>
+          {% endif %}
+          {% endif %}
+
+          <form method="post" action="/subscribers/{{ subscriber.pk }}/send-billing-sms/">
+            {% csrf_token %}
+            <button type="submit" class="inline-flex items-center justify-center gap-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
+              <i class="fa fa-sms"></i> Send Billing SMS
+            </button>
+          </form>
+
+          <a href="/sms/send/?subscriber={{ subscriber.pk }}"
+            class="inline-flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
+            <i class="fa fa-comment"></i> Send SMS
+          </a>
+
+          <a href="/subscribers/{{ subscriber.pk }}/edit/"
+            class="inline-flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition">
+            <i class="fa fa-pen"></i> Edit
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-2 gap-3 lg:grid-cols-5">
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+      <p class="text-xs uppercase tracking-wide text-gray-400">Open Balance</p>
+      <p class="mt-2 text-lg font-bold {% if open_balance > 0 %}text-red-600{% else %}text-green-600{% endif %}">
+        PHP {{ open_balance }}
+      </p>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+      <p class="text-xs uppercase tracking-wide text-gray-400">Overdue</p>
+      <p class="mt-2 text-lg font-bold {% if overdue_invoice_count %}text-red-600{% else %}text-gray-700{% endif %}">
+        {{ overdue_invoice_count }}
+      </p>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+      <p class="text-xs uppercase tracking-wide text-gray-400">Plan</p>
+      <p class="mt-2 text-sm font-semibold text-gray-800">{{ subscriber.plan.name|default:'No Plan' }}</p>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+      <p class="text-xs uppercase tracking-wide text-gray-400">Rate</p>
+      <p class="mt-2 text-sm font-semibold text-blue-700">{% if subscriber.effective_rate %}PHP {{ subscriber.effective_rate }}{% else %}-{% endif %}</p>
+    </div>
+    <div class="col-span-2 lg:col-span-1 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+      <p class="text-xs uppercase tracking-wide text-gray-400">Current Due</p>
+      <p class="mt-2 text-sm font-semibold text-gray-800">
+        {% if latest_snapshot %}{{ latest_snapshot.due_date }}{% else %}-{% endif %}
+      </p>
+    </div>
+  </div>
+
+  <div class="flex flex-col gap-6 lg:flex-row">
+    <div class="flex-1 min-w-0 space-y-4">
+      <div class="overflow-x-auto">
+        <div class="inline-flex min-w-full gap-1 rounded-xl bg-gray-100 p-1 lg:min-w-0">
+          <button @click="tab='info'"
+            :class="tab=='info' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'"
+            class="whitespace-nowrap px-4 py-2 rounded-lg text-sm transition">
+            Info
+          </button>
+          <button @click="tab='billing'"
+            :class="tab=='billing' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'"
+            class="whitespace-nowrap px-4 py-2 rounded-lg text-sm transition">
+            Billing
+          </button>
+          <button @click="tab='payments'"
+            :class="tab=='payments' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'"
+            class="whitespace-nowrap px-4 py-2 rounded-lg text-sm transition">
+            Payments
+          </button>
+          <button @click="tab='usage'"
+            :class="tab=='usage' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'"
+            class="whitespace-nowrap px-4 py-2 rounded-lg text-sm transition">
+            Usage
+          </button>
+          <button @click="tab='history'"
+            :class="tab=='history' ? 'bg-white shadow text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700'"
+            class="whitespace-nowrap px-4 py-2 rounded-lg text-sm transition">
+            History
+          </button>
+        </div>
+      </div>
+
       <div x-show="tab=='info'" class="space-y-4">
         <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <div class="flex items-center justify-between mb-4">
             <h3 class="font-semibold text-gray-700">Contact Information</h3>
             <a href="/subscribers/{{ subscriber.pk }}/edit/" class="text-xs text-blue-600 hover:underline">Edit</a>
           </div>
-          <dl class="grid grid-cols-2 gap-3 text-sm">
+          <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div><dt class="text-xs text-gray-400">Full Name</dt><dd class="font-medium mt-0.5">{{ subscriber.full_name|default:'-' }}</dd></div>
             <div><dt class="text-xs text-gray-400">Phone</dt><dd class="font-medium mt-0.5">{{ subscriber.phone|default:'-' }}{% if subscriber.sms_opt_out %} <span class="text-xs text-red-400">(SMS opt-out)</span>{% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Email</dt><dd class="font-medium mt-0.5">{{ subscriber.email|default:'-' }}</dd></div>
             <div><dt class="text-xs text-gray-400">Start Date</dt><dd class="font-medium mt-0.5">{{ subscriber.start_date|default:'-' }}</dd></div>
-            <div class="col-span-2"><dt class="text-xs text-gray-400">Address</dt><dd class="font-medium mt-0.5">{{ subscriber.address|default:'-' }}</dd></div>
+            <div class="sm:col-span-2"><dt class="text-xs text-gray-400">Address</dt><dd class="font-medium mt-0.5">{{ subscriber.address|default:'-' }}</dd></div>
             {% if subscriber.latitude and subscriber.longitude %}
-            <div class="col-span-2"><dt class="text-xs text-gray-400">Coordinates</dt><dd class="font-mono text-xs mt-0.5">{{ subscriber.latitude }}, {{ subscriber.longitude }}</dd></div>
+            <div class="sm:col-span-2"><dt class="text-xs text-gray-400">Coordinates</dt><dd class="font-mono text-xs mt-0.5">{{ subscriber.latitude }}, {{ subscriber.longitude }}</dd></div>
             {% endif %}
-            {% if subscriber.notes %}<div class="col-span-2"><dt class="text-xs text-gray-400">Notes</dt><dd class="mt-0.5 text-gray-600">{{ subscriber.notes }}</dd></div>{% endif %}
+            {% if subscriber.notes %}<div class="sm:col-span-2"><dt class="text-xs text-gray-400">Notes</dt><dd class="mt-0.5 text-gray-600">{{ subscriber.notes }}</dd></div>{% endif %}
           </dl>
         </div>
 
         <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <h3 class="font-semibold text-gray-700 mb-4">MikroTik Connection</h3>
-          <dl class="grid grid-cols-2 gap-3 text-sm">
+          <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div><dt class="text-xs text-gray-400">Service</dt><dd class="font-medium mt-0.5">{{ subscriber.get_service_type_display }}</dd></div>
             <div><dt class="text-xs text-gray-400">Profile</dt><dd class="font-mono text-xs mt-0.5">{{ subscriber.mt_profile|default:'-' }}</dd></div>
             <div><dt class="text-xs text-gray-400">IP Address</dt><dd class="font-mono text-xs mt-0.5">{{ subscriber.ip_address|default:'-' }}</dd></div>
@@ -168,23 +210,81 @@
           </dl>
         </div>
 
+        <div class="lg:hidden bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+          <h3 class="font-semibold text-gray-700 mb-4">Account State</h3>
+          <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <div><dt class="text-xs text-gray-400">Start Date</dt><dd class="font-medium mt-0.5">{{ subscriber.start_date|default:'-' }}</dd></div>
+            <div><dt class="text-xs text-gray-400">Cutoff Day</dt><dd class="font-medium mt-0.5">{{ subscriber.cutoff_day }}</dd></div>
+            <div><dt class="text-xs text-gray-400">Due Offset</dt><dd class="font-medium mt-0.5">{% if subscriber.billing_due_days is not None %}{{ subscriber.billing_due_days }} day(s){% else %}Default{% endif %}</dd></div>
+            <div><dt class="text-xs text-gray-400">Billable</dt><dd class="font-medium mt-0.5">{% if subscriber.is_billable %}Yes{% else %}No{% endif %}</dd></div>
+            <div><dt class="text-xs text-gray-400">Plan</dt><dd class="font-medium mt-0.5">{{ subscriber.plan.name|default:'-' }}</dd></div>
+            <div><dt class="text-xs text-gray-400">Rate Effective</dt><dd class="font-medium mt-0.5">{{ subscriber.billing_effective_from|default:'-' }}</dd></div>
+            {% if latest_snapshot %}
+            <div><dt class="text-xs text-gray-400">Current Due</dt><dd class="font-medium mt-0.5">{{ latest_snapshot.due_date }}</dd></div>
+            <div><dt class="text-xs text-gray-400">Bill Amount</dt><dd class="font-medium mt-0.5">PHP {{ latest_snapshot.total_due_amount }}</dd></div>
+            {% endif %}
+            <div class="sm:col-span-2">
+              <dt class="text-xs text-gray-400">Palugit</dt>
+              {% if has_active_palugit %}
+              <dd class="font-medium mt-0.5 text-amber-700">Until {{ palugit_until|date:"M d, Y g:i A" }}</dd>
+              {% if subscriber.suspension_hold_reason %}<dd class="text-gray-500 mt-1">{{ subscriber.suspension_hold_reason }}</dd>{% endif %}
+              {% if subscriber.suspension_hold_by %}<dd class="text-gray-400 mt-1 text-xs">By {{ subscriber.suspension_hold_by }}</dd>{% endif %}
+              {% else %}
+              <dd class="text-gray-500 mt-0.5">No active palugit</dd>
+              {% endif %}
+            </div>
+          </dl>
+        </div>
+
+        <div class="lg:hidden bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
+          {% if node_assignment %}
+          <div>
+            <h3 class="font-semibold text-gray-700 mb-2">Network Node</h3>
+            <p class="text-sm font-medium text-gray-800">{{ node_assignment.node.name }}</p>
+            <p class="text-xs text-gray-400">{{ node_assignment.node.get_node_type_display }}</p>
+            {% if node_assignment.port_label %}<p class="text-xs text-gray-400 mt-1">Port: {{ node_assignment.port_label }}</p>{% endif %}
+          </div>
+          {% endif %}
+
+          <div>
+            <h3 class="font-semibold text-gray-700 mb-3">Assign Node</h3>
+            <form method="post" action="/subscribers/{{ subscriber.pk }}/assign-node/" class="space-y-3">
+              {% csrf_token %}
+              <select name="node_id" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                <option value="">-- No node --</option>
+                {% for node in nodes %}
+                <option value="{{ node.pk }}" {% if node_assignment and node_assignment.node_id == node.pk %}selected{% endif %}>
+                  {{ node.name }}
+                </option>
+                {% endfor %}
+              </select>
+              <input type="text" name="port_label" placeholder="Port label (optional)"
+                value="{% if node_assignment %}{{ node_assignment.port_label }}{% endif %}"
+                class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+              <button type="submit" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 rounded-lg transition">
+                Save Node Assignment
+              </button>
+            </form>
+          </div>
+        </div>
+
         {% if subscriber.status == 'active' or subscriber.status == 'suspended' %}
         <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <h3 class="font-semibold text-gray-700 mb-3">Danger Zone</h3>
-          <div class="flex gap-3 flex-wrap">
+          <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <a href="/subscribers/{{ subscriber.pk }}/disconnect/"
-              class="text-sm bg-orange-50 hover:bg-orange-100 text-orange-700 font-medium px-4 py-2 rounded-lg transition">
+              class="inline-flex items-center justify-center text-sm bg-orange-50 hover:bg-orange-100 text-orange-700 font-medium px-4 py-2 rounded-lg transition">
               <i class="fa fa-plug-circle-xmark mr-1"></i> Mark Disconnected
             </a>
             <a href="/subscribers/{{ subscriber.pk }}/deceased/"
-              class="text-sm bg-red-50 hover:bg-red-100 text-red-600 font-medium px-4 py-2 rounded-lg transition">
+              class="inline-flex items-center justify-center text-sm bg-red-50 hover:bg-red-100 text-red-600 font-medium px-4 py-2 rounded-lg transition">
               <i class="fa fa-triangle-exclamation mr-1"></i> Mark Deceased
             </a>
           </div>
         </div>
         {% endif %}
 
-        {% if subscriber.status in 'disconnected,deceased' %}
+        {% if subscriber.status == 'disconnected' or subscriber.status == 'deceased' %}
         <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <h3 class="font-semibold text-gray-700 mb-3">Account Status Details</h3>
           {% if subscriber.status == 'deceased' %}
@@ -204,51 +304,47 @@
         {% endif %}
       </div>
 
-      <!-- Tab: Billing -->
       <div x-show="tab=='billing'" class="space-y-4">
         {% if latest_snapshot %}
         <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-          <div class="flex items-center justify-between mb-4">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
             <h3 class="font-semibold text-gray-700">Latest Statement</h3>
-            <span class="text-xs px-2 py-0.5 rounded-full
+            <span class="w-fit text-xs px-2 py-0.5 rounded-full
               {% if latest_snapshot.status == 'frozen' %}bg-blue-50 text-blue-700
               {% elif latest_snapshot.status == 'draft' %}bg-yellow-50 text-yellow-700
               {% else %}bg-gray-50 text-gray-500{% endif %}">
               {{ latest_snapshot.get_status_display }}
             </span>
           </div>
-          <div class="grid grid-cols-2 gap-4 text-sm">
-            <div class="col-span-2 bg-gray-50 rounded-xl p-4 space-y-2">
-              {% for item in latest_snapshot.items.all %}
-              <div class="flex justify-between {% if item.item_type == 'previous_balance' %}text-orange-600{% elif item.item_type == 'credit' %}text-green-600{% else %}text-gray-700{% endif %}">
-                <span>{{ item.label }}</span>
-                <span class="font-medium">PHP {{ item.amount }}</span>
-              </div>
-              {% endfor %}
-              <div class="border-t border-gray-200 pt-2 flex justify-between font-bold text-gray-900">
-                <span>Total Due</span>
-                <span>PHP {{ latest_snapshot.total_due_amount }}</span>
-              </div>
+          <div class="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+            {% for item in latest_snapshot.items.all %}
+            <div class="flex justify-between gap-4 {% if item.item_type == 'previous_balance' %}text-orange-600{% elif item.item_type == 'credit' %}text-green-600{% else %}text-gray-700{% endif %}">
+              <span>{{ item.label }}</span>
+              <span class="font-medium whitespace-nowrap">PHP {{ item.amount }}</span>
+            </div>
+            {% endfor %}
+            <div class="border-t border-gray-200 pt-2 flex justify-between gap-4 font-bold text-gray-900">
+              <span>Total Due</span>
+              <span class="whitespace-nowrap">PHP {{ latest_snapshot.total_due_amount }}</span>
             </div>
           </div>
-          <p class="text-xs text-gray-400 mt-2">Due: {{ latest_snapshot.due_date }} | Period: {{ latest_snapshot.period_start }} to {{ latest_snapshot.period_end }}</p>
-          <div class="flex gap-2 mt-3">
-            <a href="/billing/snapshots/{{ latest_snapshot.pk }}/" class="text-xs text-blue-600 hover:underline">View snapshot</a>
+          <p class="text-xs text-gray-400 mt-3">Due: {{ latest_snapshot.due_date }} | Period: {{ latest_snapshot.period_start }} to {{ latest_snapshot.period_end }}</p>
+          <div class="flex flex-wrap gap-3 mt-3 text-xs">
+            <a href="/billing/snapshots/{{ latest_snapshot.pk }}/" class="text-blue-600 hover:underline">View snapshot</a>
             {% if latest_snapshot.status == 'frozen' %}
-            <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/view/" target="_blank" class="text-xs text-blue-600 hover:underline">View PDF</a>
-            <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/download/" class="text-xs text-blue-600 hover:underline">Download PDF</a>
+            <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/view/" target="_blank" class="text-blue-600 hover:underline">View PDF</a>
+            <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/download/" class="text-blue-600 hover:underline">Download PDF</a>
             {% endif %}
           </div>
         </div>
         {% endif %}
 
-        <!-- Rate Change -->
         <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-          <div class="flex items-center justify-between mb-4">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
             <h3 class="font-semibold text-gray-700">Plan and Rate</h3>
-            <a href="/subscribers/{{ subscriber.pk }}/rate/" class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1 rounded-lg">Change Rate</a>
+            <a href="/subscribers/{{ subscriber.pk }}/rate/" class="w-fit text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1 rounded-lg">Change Rate</a>
           </div>
-          <dl class="grid grid-cols-2 gap-3 text-sm">
+          <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div><dt class="text-xs text-gray-400">Plan</dt><dd class="font-medium mt-0.5">{{ subscriber.plan.name|default:'No Plan' }}</dd></div>
             <div><dt class="text-xs text-gray-400">Monthly Rate</dt><dd class="font-bold text-lg mt-0.5 text-blue-700">{% if subscriber.effective_rate %}PHP {{ subscriber.effective_rate }}{% else %}-{% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Effective From</dt><dd class="font-medium mt-0.5">{{ subscriber.billing_effective_from|default:'-' }}</dd></div>
@@ -259,139 +355,238 @@
           </dl>
         </div>
 
-        <!-- Invoice Ledger -->
-        <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="space-y-3 lg:hidden">
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-gray-700">Invoice Ledger</h3>
+            <a href="/billing/invoices/generate/" class="text-xs text-blue-600 hover:underline">Generate Invoice</a>
+          </div>
+          {% for inv in invoices %}
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <a href="/billing/invoices/{{ inv.pk }}/" class="text-sm font-semibold text-blue-600 hover:underline">{{ inv.invoice_number }}</a>
+                <p class="text-xs text-gray-500 mt-1">{{ inv.period_start|date:"M d" }} - {{ inv.period_end|date:"M d, Y" }}</p>
+              </div>
+              <span class="px-2 py-0.5 rounded-full text-xs
+                {% if inv.status == 'paid' %}bg-green-100 text-green-700
+                {% elif inv.status == 'overdue' %}bg-red-100 text-red-600
+                {% elif inv.status == 'partial' %}bg-blue-100 text-blue-700
+                {% elif inv.status == 'voided' %}bg-gray-100 text-gray-400
+                {% else %}bg-yellow-100 text-yellow-700{% endif %}">
+                {{ inv.get_status_display }}
+              </span>
+            </div>
+            <dl class="grid grid-cols-3 gap-3 text-xs">
+              <div><dt class="text-gray-400">Amount</dt><dd class="mt-1 font-medium">PHP {{ inv.amount }}</dd></div>
+              <div><dt class="text-gray-400">Paid</dt><dd class="mt-1 font-medium text-green-600">PHP {{ inv.amount_paid }}</dd></div>
+              <div><dt class="text-gray-400">Balance</dt><dd class="mt-1 font-semibold {% if inv.remaining_balance > 0 %}text-red-500{% else %}text-gray-400{% endif %}">PHP {{ inv.remaining_balance }}</dd></div>
+            </dl>
+          </div>
+          {% empty %}
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-8 text-center text-gray-400 text-sm">
+            No invoices yet.
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="hidden lg:block bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
             <h3 class="font-semibold text-gray-700">Invoice Ledger</h3>
             <a href="/billing/invoices/generate/" class="text-xs text-blue-600 hover:underline">Generate Invoice</a>
           </div>
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50"><tr>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Invoice</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Period</th>
-              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Amount</th>
-              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Paid</th>
-              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Balance</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Status</th>
-            </tr></thead>
-            <tbody class="divide-y divide-gray-50">
-              {% for inv in invoices %}
-              <tr class="hover:bg-gray-50">
-                <td class="px-4 py-2 font-mono text-xs"><a href="/billing/invoices/{{ inv.pk }}/" class="text-blue-600 hover:underline">{{ inv.invoice_number }}</a></td>
-                <td class="px-4 py-2 text-xs text-gray-500">{{ inv.period_start|date:"M d" }} - {{ inv.period_end|date:"M d, Y" }}</td>
-                <td class="px-4 py-2 text-right text-xs">PHP {{ inv.amount }}</td>
-                <td class="px-4 py-2 text-right text-xs text-green-600">PHP {{ inv.amount_paid }}</td>
-                <td class="px-4 py-2 text-right text-xs font-semibold {% if inv.remaining_balance > 0 %}text-red-500{% else %}text-gray-400{% endif %}">PHP {{ inv.remaining_balance }}</td>
-                <td class="px-4 py-2">
-                  <span class="px-2 py-0.5 rounded-full text-xs
-                    {% if inv.status == 'paid' %}bg-green-100 text-green-700
-                    {% elif inv.status == 'overdue' %}bg-red-100 text-red-600
-                    {% elif inv.status == 'partial' %}bg-blue-100 text-blue-700
-                    {% elif inv.status == 'voided' %}bg-gray-100 text-gray-400
-                    {% else %}bg-yellow-100 text-yellow-700{% endif %}">
-                    {{ inv.get_status_display }}
-                  </span>
-                </td>
-              </tr>
-              {% empty %}
-              <tr><td colspan="6" class="px-4 py-6 text-center text-gray-400 text-xs">No invoices yet.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[720px] text-sm">
+              <thead class="bg-gray-50"><tr>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Invoice</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Period</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Amount</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Paid</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Balance</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Status</th>
+              </tr></thead>
+              <tbody class="divide-y divide-gray-50">
+                {% for inv in invoices %}
+                <tr class="hover:bg-gray-50">
+                  <td class="px-4 py-2 font-mono text-xs"><a href="/billing/invoices/{{ inv.pk }}/" class="text-blue-600 hover:underline">{{ inv.invoice_number }}</a></td>
+                  <td class="px-4 py-2 text-xs text-gray-500">{{ inv.period_start|date:"M d" }} - {{ inv.period_end|date:"M d, Y" }}</td>
+                  <td class="px-4 py-2 text-right text-xs">PHP {{ inv.amount }}</td>
+                  <td class="px-4 py-2 text-right text-xs text-green-600">PHP {{ inv.amount_paid }}</td>
+                  <td class="px-4 py-2 text-right text-xs font-semibold {% if inv.remaining_balance > 0 %}text-red-500{% else %}text-gray-400{% endif %}">PHP {{ inv.remaining_balance }}</td>
+                  <td class="px-4 py-2">
+                    <span class="px-2 py-0.5 rounded-full text-xs
+                      {% if inv.status == 'paid' %}bg-green-100 text-green-700
+                      {% elif inv.status == 'overdue' %}bg-red-100 text-red-600
+                      {% elif inv.status == 'partial' %}bg-blue-100 text-blue-700
+                      {% elif inv.status == 'voided' %}bg-gray-100 text-gray-400
+                      {% else %}bg-yellow-100 text-yellow-700{% endif %}">
+                      {{ inv.get_status_display }}
+                    </span>
+                  </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="px-4 py-6 text-center text-gray-400 text-xs">No invoices yet.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        <!-- Snapshot History -->
-        <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="space-y-3 lg:hidden">
+          <h3 class="font-semibold text-gray-700">Statement History</h3>
+          {% for snap in snapshots %}
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <a href="/billing/snapshots/{{ snap.pk }}/" class="text-sm font-semibold text-blue-600 hover:underline">{{ snap.snapshot_number }}</a>
+                <p class="text-xs text-gray-500 mt-1">{{ snap.period_start|date:"M d" }} - {{ snap.period_end|date:"M d, Y" }}</p>
+              </div>
+              <span class="px-2 py-0.5 rounded-full text-xs
+                {% if snap.status == 'frozen' %}bg-blue-50 text-blue-700
+                {% elif snap.status == 'draft' %}bg-yellow-50 text-yellow-700
+                {% else %}bg-gray-50 text-gray-500{% endif %}">
+                {{ snap.get_status_display }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between text-sm">
+              <span class="text-gray-400">Total Due</span>
+              <span class="font-semibold">PHP {{ snap.total_due_amount }}</span>
+            </div>
+            <div class="flex flex-wrap gap-3 text-xs">
+              {% if snap.status == 'frozen' %}
+              <a href="/billing/snapshots/{{ snap.pk }}/pdf/view/" target="_blank" class="text-blue-500 hover:underline">View PDF</a>
+              <a href="/billing/snapshots/{{ snap.pk }}/pdf/download/" class="text-blue-500 hover:underline">Download PDF</a>
+              {% else %}
+              <span class="text-gray-300">Draft</span>
+              {% endif %}
+            </div>
+          </div>
+          {% empty %}
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-8 text-center text-gray-400 text-sm">
+            No snapshots yet.
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="hidden lg:block bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div class="px-5 py-4 border-b border-gray-100">
             <h3 class="font-semibold text-gray-700">Statement History</h3>
           </div>
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50"><tr>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Snapshot</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Period</th>
-              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Total Due</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Status</th>
-              <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">PDF</th>
-            </tr></thead>
-            <tbody class="divide-y divide-gray-50">
-              {% for snap in snapshots %}
-              <tr class="hover:bg-gray-50">
-                <td class="px-4 py-2 font-mono text-xs text-blue-600">
-                  <a href="/billing/snapshots/{{ snap.pk }}/">{{ snap.snapshot_number }}</a>
-                </td>
-                <td class="px-4 py-2 text-xs text-gray-500">{{ snap.period_start|date:"M d" }} - {{ snap.period_end|date:"M d, Y" }}</td>
-                <td class="px-4 py-2 text-right text-xs font-semibold">PHP {{ snap.total_due_amount }}</td>
-                <td class="px-4 py-2">
-                  <span class="px-2 py-0.5 rounded-full text-xs
-                    {% if snap.status == 'frozen' %}bg-blue-50 text-blue-700
-                    {% elif snap.status == 'draft' %}bg-yellow-50 text-yellow-700
-                    {% else %}bg-gray-50 text-gray-500{% endif %}">
-                    {{ snap.get_status_display }}
-                  </span>
-                </td>
-                <td class="px-4 py-2 text-center">
-                  {% if snap.status == 'frozen' %}
-                  <a href="/billing/snapshots/{{ snap.pk }}/pdf/view/" target="_blank" class="text-xs text-blue-500 hover:underline mr-2">View</a>
-                  <a href="/billing/snapshots/{{ snap.pk }}/pdf/download/" class="text-xs text-blue-500 hover:underline">DL</a>
-                  {% else %}
-                  <span class="text-xs text-gray-300">Draft</span>
-                  {% endif %}
-                </td>
-              </tr>
-              {% empty %}
-              <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400 text-xs">No snapshots yet.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[680px] text-sm">
+              <thead class="bg-gray-50"><tr>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Snapshot</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Period</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Total Due</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Status</th>
+                <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">PDF</th>
+              </tr></thead>
+              <tbody class="divide-y divide-gray-50">
+                {% for snap in snapshots %}
+                <tr class="hover:bg-gray-50">
+                  <td class="px-4 py-2 font-mono text-xs text-blue-600">
+                    <a href="/billing/snapshots/{{ snap.pk }}/">{{ snap.snapshot_number }}</a>
+                  </td>
+                  <td class="px-4 py-2 text-xs text-gray-500">{{ snap.period_start|date:"M d" }} - {{ snap.period_end|date:"M d, Y" }}</td>
+                  <td class="px-4 py-2 text-right text-xs font-semibold">PHP {{ snap.total_due_amount }}</td>
+                  <td class="px-4 py-2">
+                    <span class="px-2 py-0.5 rounded-full text-xs
+                      {% if snap.status == 'frozen' %}bg-blue-50 text-blue-700
+                      {% elif snap.status == 'draft' %}bg-yellow-50 text-yellow-700
+                      {% else %}bg-gray-50 text-gray-500{% endif %}">
+                      {{ snap.get_status_display }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-2 text-center">
+                    {% if snap.status == 'frozen' %}
+                    <a href="/billing/snapshots/{{ snap.pk }}/pdf/view/" target="_blank" class="text-xs text-blue-500 hover:underline mr-2">View</a>
+                    <a href="/billing/snapshots/{{ snap.pk }}/pdf/download/" class="text-xs text-blue-500 hover:underline">DL</a>
+                    {% else %}
+                    <span class="text-xs text-gray-300">Draft</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400 text-xs">No snapshots yet.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <!-- Tab: Payments -->
       <div x-show="tab=='payments'" class="space-y-4">
-        <div class="flex justify-between items-center mb-2">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 class="font-semibold text-gray-700">Payment History</h3>
           <a href="/billing/pay/{{ subscriber.pk }}/"
-            class="text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg transition">
+            class="inline-flex items-center justify-center text-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg transition">
             Record Payment
           </a>
         </div>
-        <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50"><tr>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
-              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Amount</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Method</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Reference</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Applied To</th>
-            </tr></thead>
-            <tbody class="divide-y divide-gray-50">
-              {% for payment in payments %}
-              <tr class="hover:bg-gray-50">
-                <td class="px-4 py-2 text-xs text-gray-500">{{ payment.paid_at|date:"M d, Y H:i" }}</td>
-                <td class="px-4 py-2 text-right font-semibold text-green-600">PHP {{ payment.amount }}</td>
-                <td class="px-4 py-2 text-xs">{{ payment.get_method_display }}</td>
-                <td class="px-4 py-2 text-xs text-gray-400 font-mono">{{ payment.reference|default:'-' }}</td>
-                <td class="px-4 py-2 text-xs text-gray-500">
-                  {% for alloc in payment.allocations.all %}
-                  <span>{{ alloc.invoice.invoice_number }} (PHP {{ alloc.amount_allocated }})</span>{% if not forloop.last %}, {% endif %}
-                  {% empty %}-{% endfor %}
-                </td>
-              </tr>
-              {% empty %}
-              <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400 text-xs">No payments recorded yet.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
+
+        <div class="space-y-3 lg:hidden">
+          {% for payment in payments %}
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-sm font-semibold text-gray-800">PHP {{ payment.amount }}</p>
+                <p class="text-xs text-gray-500 mt-1">{{ payment.paid_at|date:"M d, Y H:i" }}</p>
+              </div>
+              <span class="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700">{{ payment.get_method_display }}</span>
+            </div>
+            <div class="text-xs text-gray-500">
+              <p><span class="text-gray-400">Reference:</span> <span class="font-mono">{{ payment.reference|default:'-' }}</span></p>
+              <p class="mt-2 text-gray-400">Applied To</p>
+              <p class="mt-1">
+                {% for alloc in payment.allocations.all %}
+                <span>{{ alloc.invoice.invoice_number }} (PHP {{ alloc.amount_allocated }})</span>{% if not forloop.last %}, {% endif %}
+                {% empty %}-{% endfor %}
+              </p>
+            </div>
+          </div>
+          {% empty %}
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-8 text-center text-gray-400 text-sm">
+            No payments recorded yet.
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="hidden lg:block bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[760px] text-sm">
+              <thead class="bg-gray-50"><tr>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Amount</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Method</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Reference</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Applied To</th>
+              </tr></thead>
+              <tbody class="divide-y divide-gray-50">
+                {% for payment in payments %}
+                <tr class="hover:bg-gray-50">
+                  <td class="px-4 py-2 text-xs text-gray-500">{{ payment.paid_at|date:"M d, Y H:i" }}</td>
+                  <td class="px-4 py-2 text-right font-semibold text-green-600">PHP {{ payment.amount }}</td>
+                  <td class="px-4 py-2 text-xs">{{ payment.get_method_display }}</td>
+                  <td class="px-4 py-2 text-xs text-gray-400 font-mono">{{ payment.reference|default:'-' }}</td>
+                  <td class="px-4 py-2 text-xs text-gray-500">
+                    {% for alloc in payment.allocations.all %}
+                    <span>{{ alloc.invoice.invoice_number }} (PHP {{ alloc.amount_allocated }})</span>{% if not forloop.last %}, {% endif %}
+                    {% empty %}-{% endfor %}
+                  </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="px-4 py-6 text-center text-gray-400 text-xs">No payments recorded yet.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-      <!-- Tab: Usage -->
       <div x-show="tab=='usage'" class="space-y-4">
-        <!-- Chart view tabs -->
         <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-          <div class="flex items-center justify-between mb-4">
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
             <h3 class="font-semibold text-gray-700">Data Usage</h3>
-            <div class="flex gap-1" id="usage-tab-btns">
+            <div class="flex flex-wrap gap-1" id="usage-tab-btns">
               {% for view_key, view_label in usage_views %}
               <button onclick="loadUsage('{{ view_key }}')"
                 id="btn-{{ view_key }}"
@@ -410,8 +605,7 @@
           <p class="text-xs text-gray-400 mt-2 text-center">Values in GB. Bars = daily usage. Line = cumulative.</p>
         </div>
 
-        <!-- Usage summary cards -->
-        <div class="grid grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 text-center">
             <p class="text-xs text-gray-400 mb-1">This Month Download</p>
             <p class="text-xl font-bold text-blue-600" id="usage-rx">--</p>
@@ -430,135 +624,159 @@
         </div>
       </div>
 
-      <!-- Tab: History -->
       <div x-show="tab=='history'" class="space-y-4">
-        <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="space-y-3 lg:hidden">
+          <h3 class="font-semibold text-gray-700">Rate/Plan Change History</h3>
+          {% for h in rate_history %}
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="text-sm font-semibold text-gray-800">{% if h.new_plan %}{{ h.new_plan.name }}{% else %}No plan change{% endif %}</p>
+                <p class="text-xs text-gray-500 mt-1">{{ h.effective_date }}</p>
+              </div>
+              <span class="text-xs text-gray-400">{{ h.get_apply_mode_display }}</span>
+            </div>
+            <dl class="grid grid-cols-2 gap-3 text-xs">
+              <div><dt class="text-gray-400">Old Rate</dt><dd class="mt-1">{% if h.old_rate %}PHP {{ h.old_rate }}{% else %}-{% endif %}</dd></div>
+              <div><dt class="text-gray-400">New Rate</dt><dd class="mt-1 font-semibold text-blue-700">{% if h.new_rate %}PHP {{ h.new_rate }}{% else %}-{% endif %}</dd></div>
+              <div class="col-span-2"><dt class="text-gray-400">Changed By</dt><dd class="mt-1">{{ h.changed_by|default:'-' }}</dd></div>
+            </dl>
+          </div>
+          {% empty %}
+          <div class="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-8 text-center text-gray-400 text-sm">
+            No rate changes recorded.
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="hidden lg:block bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div class="px-5 py-4 border-b border-gray-100">
             <h3 class="font-semibold text-gray-700">Rate/Plan Change History</h3>
           </div>
-          <table class="w-full text-sm">
-            <thead class="bg-gray-50"><tr>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Plan</th>
-              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Old Rate</th>
-              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">New Rate</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Apply Mode</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">By</th>
-            </tr></thead>
-            <tbody class="divide-y divide-gray-50">
-              {% for h in rate_history %}
-              <tr class="hover:bg-gray-50">
-                <td class="px-4 py-2 text-xs">{{ h.effective_date }}</td>
-                <td class="px-4 py-2 text-xs">{% if h.new_plan %}{{ h.new_plan.name }}{% else %}-{% endif %}</td>
-                <td class="px-4 py-2 text-right text-xs text-gray-400">{% if h.old_rate %}PHP {{ h.old_rate }}{% else %}-{% endif %}</td>
-                <td class="px-4 py-2 text-right text-xs font-semibold text-blue-700">{% if h.new_rate %}PHP {{ h.new_rate }}{% else %}-{% endif %}</td>
-                <td class="px-4 py-2 text-xs text-gray-500">{{ h.get_apply_mode_display }}</td>
-                <td class="px-4 py-2 text-xs text-gray-400">{{ h.changed_by }}</td>
-              </tr>
-              {% empty %}
-              <tr><td colspan="6" class="px-4 py-6 text-center text-gray-400 text-xs">No rate changes recorded.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[720px] text-sm">
+              <thead class="bg-gray-50"><tr>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Plan</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Old Rate</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">New Rate</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Apply Mode</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">By</th>
+              </tr></thead>
+              <tbody class="divide-y divide-gray-50">
+                {% for h in rate_history %}
+                <tr class="hover:bg-gray-50">
+                  <td class="px-4 py-2 text-xs">{{ h.effective_date }}</td>
+                  <td class="px-4 py-2 text-xs">{% if h.new_plan %}{{ h.new_plan.name }}{% else %}-{% endif %}</td>
+                  <td class="px-4 py-2 text-right text-xs text-gray-400">{% if h.old_rate %}PHP {{ h.old_rate }}{% else %}-{% endif %}</td>
+                  <td class="px-4 py-2 text-right text-xs font-semibold text-blue-700">{% if h.new_rate %}PHP {{ h.new_rate }}{% else %}-{% endif %}</td>
+                  <td class="px-4 py-2 text-xs text-gray-500">{{ h.get_apply_mode_display }}</td>
+                  <td class="px-4 py-2 text-xs text-gray-400">{{ h.changed_by }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" class="px-4 py-6 text-center text-gray-400 text-xs">No rate changes recorded.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
+
+    <aside class="hidden lg:block w-64 shrink-0 space-y-4">
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Account State</p>
+        <dl class="space-y-2 text-xs">
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Start Date</dt>
+            <dd class="font-medium text-right">{{ subscriber.start_date|default:'-' }}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Cutoff Day</dt>
+            <dd class="font-medium text-right">{{ subscriber.cutoff_day }}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Due Offset</dt>
+            <dd class="font-medium text-right">{% if subscriber.billing_due_days is not None %}{{ subscriber.billing_due_days }} day(s){% else %}Default{% endif %}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Billable</dt>
+            <dd class="font-medium text-right">{% if subscriber.is_billable %}Yes{% else %}No{% endif %}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Plan</dt>
+            <dd class="font-medium text-right">{{ subscriber.plan.name|default:'-' }}</dd>
+          </div>
+          {% if latest_snapshot %}
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Current Due</dt>
+            <dd class="font-semibold text-blue-700 text-right">{{ latest_snapshot.due_date }}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Bill Amount</dt>
+            <dd class="font-bold text-gray-800 text-right">PHP {{ latest_snapshot.total_due_amount }}</dd>
+          </div>
+          {% endif %}
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Rate Effective</dt>
+            <dd class="font-medium text-right">{{ subscriber.billing_effective_from|default:'-' }}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Open Balance</dt>
+            <dd class="font-bold text-right {% if open_balance > 0 %}text-red-500{% else %}text-green-600{% endif %}">PHP {{ open_balance }}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Overdue Invoices</dt>
+            <dd class="font-medium text-right {% if overdue_invoice_count %}text-red-600{% else %}text-gray-500{% endif %}">{{ overdue_invoice_count }}</dd>
+          </div>
+          <div class="pt-2 border-t border-gray-100">
+            <dt class="text-gray-400 mb-1">Palugit</dt>
+            {% if has_active_palugit %}
+            <dd class="font-medium text-amber-700">Until {{ palugit_until|date:"M d, Y g:i A" }}</dd>
+            {% if subscriber.suspension_hold_reason %}
+            <dd class="text-gray-500 mt-1">{{ subscriber.suspension_hold_reason }}</dd>
+            {% endif %}
+            {% if subscriber.suspension_hold_by %}
+            <dd class="text-gray-400 mt-1">By {{ subscriber.suspension_hold_by }}</dd>
+            {% endif %}
+            {% else %}
+            <dd class="text-gray-500">No active palugit</dd>
+            {% endif %}
+          </div>
+        </dl>
+      </div>
+
+      {% if node_assignment %}
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Network Node</p>
+        <p class="text-sm font-medium text-gray-800">{{ node_assignment.node.name }}</p>
+        <p class="text-xs text-gray-400">{{ node_assignment.node.get_node_type_display }}</p>
+        {% if node_assignment.port_label %}<p class="text-xs text-gray-400 mt-1">Port: {{ node_assignment.port_label }}</p>{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Assign Node</p>
+        <form method="post" action="/subscribers/{{ subscriber.pk }}/assign-node/" class="space-y-2">
+          {% csrf_token %}
+          <select name="node_id" class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs">
+            <option value="">-- No node --</option>
+            {% for node in nodes %}
+            <option value="{{ node.pk }}" {% if node_assignment and node_assignment.node_id == node.pk %}selected{% endif %}>
+              {{ node.name }}
+            </option>
+            {% endfor %}
+          </select>
+          <input type="text" name="port_label" placeholder="Port label (optional)"
+            value="{% if node_assignment %}{{ node_assignment.port_label }}{% endif %}"
+            class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs">
+          <button type="submit" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium py-1.5 rounded-lg transition">
+            Save
+          </button>
+        </form>
+      </div>
+    </aside>
   </div>
-
-  <!-- Right: Compact billing state card (always visible) -->
-  <aside class="w-64 shrink-0 space-y-4">
-    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-      <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Account State</p>
-      <dl class="space-y-2 text-xs">
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Start Date</dt>
-          <dd class="font-medium">{{ subscriber.start_date|default:'-' }}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Cutoff Day</dt>
-          <dd class="font-medium">{{ subscriber.cutoff_day }}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Due Offset</dt>
-          <dd class="font-medium">{% if subscriber.billing_due_days is not None %}{{ subscriber.billing_due_days }} day(s){% else %}Default{% endif %}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Billable</dt>
-          <dd class="font-medium">{% if subscriber.is_billable %}Yes{% else %}No{% endif %}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Plan</dt>
-          <dd class="font-medium">{{ subscriber.plan.name|default:'-' }}</dd>
-        </div>
-        {% if latest_snapshot %}
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Current Due</dt>
-          <dd class="font-semibold text-blue-700">{{ latest_snapshot.due_date }}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Bill Amount</dt>
-          <dd class="font-bold text-gray-800">PHP {{ latest_snapshot.total_due_amount }}</dd>
-        </div>
-        {% endif %}
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Rate Effective</dt>
-          <dd class="font-medium">{{ subscriber.billing_effective_from|default:'-' }}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Open Balance</dt>
-          <dd class="font-bold {% if open_balance > 0 %}text-red-500{% else %}text-green-600{% endif %}">PHP {{ open_balance }}</dd>
-        </div>
-        <div class="flex justify-between">
-          <dt class="text-gray-400">Overdue Invoices</dt>
-          <dd class="font-medium {% if overdue_invoice_count %}text-red-600{% else %}text-gray-500{% endif %}">{{ overdue_invoice_count }}</dd>
-        </div>
-        <div class="pt-2 border-t border-gray-100">
-          <dt class="text-gray-400 mb-1">Palugit</dt>
-          {% if has_active_palugit %}
-          <dd class="font-medium text-amber-700">Until {{ palugit_until|date:"M d, Y g:i A" }}</dd>
-          {% if subscriber.suspension_hold_reason %}
-          <dd class="text-gray-500 mt-1">{{ subscriber.suspension_hold_reason }}</dd>
-          {% endif %}
-          {% if subscriber.suspension_hold_by %}
-          <dd class="text-gray-400 mt-1">By {{ subscriber.suspension_hold_by }}</dd>
-          {% endif %}
-          {% else %}
-          <dd class="text-gray-500">No active palugit</dd>
-          {% endif %}
-        </div>
-      </dl>
-    </div>
-
-    {% if node_assignment %}
-    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-      <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Network Node</p>
-      <p class="text-sm font-medium text-gray-800">{{ node_assignment.node.name }}</p>
-      <p class="text-xs text-gray-400">{{ node_assignment.node.get_node_type_display }}</p>
-      {% if node_assignment.port_label %}<p class="text-xs text-gray-400 mt-1">Port: {{ node_assignment.port_label }}</p>{% endif %}
-    </div>
-    {% endif %}
-
-    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-      <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Assign Node</p>
-      <form method="post" action="/subscribers/{{ subscriber.pk }}/assign-node/" class="space-y-2">
-        {% csrf_token %}
-        <select name="node_id" class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs">
-          <option value="">-- No node --</option>
-          {% for node in nodes %}
-          <option value="{{ node.pk }}" {% if node_assignment and node_assignment.node_id == node.pk %}selected{% endif %}>
-            {{ node.name }}
-          </option>
-          {% endfor %}
-        </select>
-        <input type="text" name="port_label" placeholder="Port label (optional)"
-          value="{% if node_assignment %}{{ node_assignment.port_label }}{% endif %}"
-          class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs">
-        <button type="submit" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium py-1.5 rounded-lg transition">
-          Save
-        </button>
-      </form>
-    </div>
-  </aside>
 </div>
 
 <script>

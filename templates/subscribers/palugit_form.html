@@ -15,9 +15,9 @@
     </p>
   </div>
 
-  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6">
     <h3 class="font-semibold text-gray-700 mb-4">Current State</h3>
-    <dl class="grid grid-cols-2 gap-3 text-sm">
+    <dl class="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
       <div>
         <dt class="text-xs text-gray-400">Subscriber</dt>
         <dd class="font-medium mt-0.5">{{ subscriber.display_name }}</dd>
@@ -26,7 +26,7 @@
         <dt class="text-xs text-gray-400">Status</dt>
         <dd class="font-medium mt-0.5">{{ subscriber.get_status_display }}</dd>
       </div>
-      <div class="col-span-2">
+      <div class="sm:col-span-2">
         <dt class="text-xs text-gray-400">Active Palugit</dt>
         {% if has_active_palugit %}
         <dd class="font-medium mt-0.5 text-amber-700">Until {{ palugit_until|date:"M d, Y g:i A" }}</dd>
@@ -43,7 +43,7 @@
     </dl>
   </div>
 
-  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6">
     <h3 class="font-semibold text-gray-700 mb-4">
       {% if has_active_palugit %}Extend or Update Palugit{% else %}Grant Palugit{% endif %}
     </h3>
@@ -73,17 +73,17 @@
         <p class="text-xs text-red-600 mt-1">{{ form.suspension_hold_reason.errors.0 }}</p>
         {% endif %}
       </div>
-      <div class="flex gap-3">
+      <div class="flex flex-col-reverse gap-3 sm:flex-row">
+        <a href="/subscribers/{{ subscriber.pk }}/" class="inline-flex items-center justify-center text-sm text-gray-500 hover:text-gray-700 px-3 py-2">Cancel</a>
         <button type="submit" class="bg-amber-500 hover:bg-amber-600 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
           Save Palugit
         </button>
-        <a href="/subscribers/{{ subscriber.pk }}/" class="text-sm text-gray-500 hover:text-gray-700 px-3 py-2">Cancel</a>
       </div>
     </form>
   </div>
 
   {% if has_active_palugit %}
-  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-6">
     <h3 class="font-semibold text-gray-700 mb-3">Remove Active Palugit</h3>
     <p class="text-sm text-gray-500 mb-4">
       Removing palugit makes the subscriber eligible again for automatic overdue suspension based on billing rules.
