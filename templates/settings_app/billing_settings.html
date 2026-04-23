@@ -24,6 +24,7 @@
         <label class="block text-sm font-medium text-gray-700 mb-1">Default Due Days</label>
         <input type="number" name="due_days" min="0" value="{{ form.due_days.value|default:7 }}"
           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <p class="text-xs text-gray-400 mt-1">Set to 0 if the due date should follow the resolved cutoff day.</p>
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Grace Period (Days)</label>
@@ -34,7 +35,7 @@
         <label class="block text-sm font-medium text-gray-700 mb-1">Default Due Offset (Days)</label>
         <input type="number" name="billing_due_offset_days" min="0" value="{{ form.billing_due_offset_days.value|default:0 }}"
           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <p class="text-xs text-gray-400 mt-1">Fallback due offset after cutoff when subscriber has no override.</p>
+        <p class="text-xs text-gray-400 mt-1">Optional cutoff-based due offset when subscriber has no override.</p>
       </div>
     </div>
 

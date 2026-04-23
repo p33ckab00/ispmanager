@@ -3,7 +3,25 @@ from django import forms
 from apps.subscribers.models import Subscriber, Plan
 
 
-class SubscriberAdminForm(forms.ModelForm):
+class SubscriberBillingFieldsMixin:
+    def clean_cutoff_day(self):
+        day = self.cleaned_data.get('cutoff_day')
+        if day in (None, ''):
+            return None
+        if not 1 <= int(day) <= 28:
+            raise forms.ValidationError('Cutoff day must be between 1 and 28.')
+        return day
+
+    def clean_billing_due_days(self):
+        due_days = self.cleaned_data.get('billing_due_days')
+        if due_days in (None, ''):
+            return None
+        if int(due_days) < 0:
+            raise forms.ValidationError('Due offset must be 0 or higher.')
+        return due_days
+
+
+class SubscriberAdminForm(SubscriberBillingFieldsMixin, forms.ModelForm):
     class Meta:
         model = Subscriber
         fields = [
@@ -17,12 +35,6 @@ class SubscriberAdminForm(forms.ModelForm):
             'start_date': forms.DateInput(attrs={'type': 'date', 'format': '%Y-%m-%d'}),
             'billing_effective_from': forms.DateInput(attrs={'type': 'date', 'format': '%Y-%m-%d'}),
         }
-
-    def clean_cutoff_day(self):
-        day = self.cleaned_data.get('cutoff_day', 1)
-        if not 1 <= int(day) <= 28:
-            raise forms.ValidationError('Cutoff day must be between 1 and 28.')
-        return day
 
     def clean_status(self):
         status = self.cleaned_data.get('status', 'active')
@@ -69,7 +81,7 @@ class PlanForm(forms.ModelForm):
         widgets = {'description': forms.Textarea(attrs={'rows': 2})}
 
 
-class ManualSubscriberForm(forms.ModelForm):
+class ManualSubscriberForm(SubscriberBillingFieldsMixin, forms.ModelForm):
     class Meta:
         model = Subscriber
         fields = [

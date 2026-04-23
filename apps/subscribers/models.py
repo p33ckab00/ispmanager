@@ -69,7 +69,11 @@ class Subscriber(models.Model):
     plan = models.ForeignKey(Plan, on_delete=models.SET_NULL, null=True, blank=True)
     monthly_rate = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     billing_effective_from = models.DateField(null=True, blank=True)
-    cutoff_day = models.IntegerField(default=1, help_text='Day of month for billing cutoff (1-28)')
+    cutoff_day = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text='Optional day of month for billing cutoff (1-28). Leave blank to use billing settings.'
+    )
     billing_due_days = models.IntegerField(
         null=True,
         blank=True,

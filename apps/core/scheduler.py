@@ -37,7 +37,7 @@ def job_generate_invoices():
 
 
 def job_generate_snapshots():
-    from apps.billing.services import generate_snapshot_for_subscriber
+    from apps.billing.services import generate_snapshot_for_subscriber, get_cutoff_day_queryset_filter
     from apps.subscribers.models import Subscriber
     from apps.settings_app.models import BillingSettings
     from datetime import date
@@ -48,8 +48,7 @@ def job_generate_snapshots():
         today = date.today()
         subs = Subscriber.objects.filter(
             status__in=['active', 'suspended'],
-            cutoff_day=today.day,
-        )
+        ).filter(get_cutoff_day_queryset_filter(today.day, settings))
         created = 0
         for sub in subs:
             existing = sub.billing_snapshots.filter(cutoff_date=today).first()

@@ -349,8 +349,8 @@ def _update_daily_rollup(subscriber, rx_delta, tx_delta, is_reset):
 
 
 def create_cutoff_usage_snapshots(reference_date=None):
-    from apps.settings_app.models import UsageSettings
-    from apps.billing.services import get_next_cutoff_period
+    from apps.settings_app.models import UsageSettings, BillingSettings
+    from apps.billing.services import get_next_cutoff_period, get_cutoff_day_queryset_filter, resolve_cutoff_day
     from datetime import timedelta
 
     settings = UsageSettings.get_settings()
@@ -359,12 +359,12 @@ def create_cutoff_usage_snapshots(reference_date=None):
 
     today = reference_date or date.today()
     created = 0
+    billing_settings = BillingSettings.get_settings()
 
     subscribers = Subscriber.objects.filter(
         status__in=['active', 'suspended'],
         is_billable=True,
-        cutoff_day=today.day,
-    )
+    ).filter(get_cutoff_day_queryset_filter(today.day, billing_settings))
 
     for subscriber in subscribers:
         if SubscriberUsageCutoffSnapshot.objects.filter(
@@ -373,8 +373,9 @@ def create_cutoff_usage_snapshots(reference_date=None):
         ).exists():
             continue
 
+        cutoff_day = resolve_cutoff_day(subscriber, billing_settings)
         usage_period_start, usage_period_end = get_next_cutoff_period(
-            subscriber.cutoff_day or 1,
+            cutoff_day,
             today - timedelta(days=1),
         )
 

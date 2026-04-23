@@ -117,9 +117,9 @@ def subscriber_export_rows(queryset):
             subscriber.mt_profile,
             subscriber.plan.name if subscriber.plan else '',
             subscriber.monthly_rate or '',
-            subscriber.cutoff_day,
+            subscriber.cutoff_day if subscriber.cutoff_day is not None else '',
             subscriber.billing_effective_from or '',
-            subscriber.billing_due_days or '',
+            subscriber.billing_due_days if subscriber.billing_due_days is not None else '',
             'yes' if subscriber.is_billable else 'no',
             subscriber.start_date or '',
             subscriber.status,
@@ -329,7 +329,10 @@ def preview_subscriber_import(rows, update_existing=True):
         if error:
             line_errors.append(f"Line {line_number}: {error}")
         elif due_days is not None:
-            attrs['billing_due_days'] = due_days
+            if due_days < 0:
+                line_errors.append(f"Line {line_number}: billing_due_days must be 0 or higher.")
+            else:
+                attrs['billing_due_days'] = due_days
 
         billing_effective_from, error = parse_date(row.get('billing_effective_from'), 'billing_effective_from')
         if error:

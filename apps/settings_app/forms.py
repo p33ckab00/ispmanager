@@ -26,6 +26,18 @@ class BillingSettingsForm(forms.ModelForm):
             raise forms.ValidationError('Billing day must be between 1 and 28.')
         return day
 
+    def clean_due_days(self):
+        due_days = self.cleaned_data['due_days']
+        if due_days < 0:
+            raise forms.ValidationError('Default due days must be 0 or higher.')
+        return due_days
+
+    def clean_billing_due_offset_days(self):
+        due_offset = self.cleaned_data['billing_due_offset_days']
+        if due_offset < 0:
+            raise forms.ValidationError('Default due offset must be 0 or higher.')
+        return due_offset
+
 
 class SMSSettingsForm(forms.ModelForm):
     class Meta:

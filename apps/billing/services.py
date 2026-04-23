@@ -2,6 +2,7 @@ from decimal import Decimal
 from datetime import date, timedelta
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Q
 from apps.billing.models import Invoice, Payment, PaymentAllocation, BillingSnapshot, BillingSnapshotItem
 from apps.settings_app.models import BillingSettings
 
@@ -41,20 +42,40 @@ def get_effective_rate_at(subscriber, as_of_date=None):
     return RateHistory.get_effective_rate(subscriber, as_of_date)
 
 
+def resolve_cutoff_day(subscriber, billing_settings=None):
+    if billing_settings is None:
+        billing_settings = BillingSettings.get_settings()
+    return subscriber.cutoff_day if subscriber.cutoff_day is not None else billing_settings.billing_day
+
+
+def resolve_due_offset_days(subscriber, billing_settings=None):
+    if billing_settings is None:
+        billing_settings = BillingSettings.get_settings()
+
+    if subscriber.billing_due_days is not None:
+        return subscriber.billing_due_days
+    return billing_settings.billing_due_offset_days or billing_settings.due_days or 0
+
+
+def get_cutoff_day_queryset_filter(target_day, billing_settings=None):
+    if billing_settings is None:
+        billing_settings = BillingSettings.get_settings()
+
+    query = Q(cutoff_day=target_day)
+    if billing_settings.billing_day == target_day:
+        query |= Q(cutoff_day__isnull=True)
+    return query
+
+
 def resolve_billing_profile(subscriber, billing_settings=None, reference_date=None):
     if billing_settings is None:
         billing_settings = BillingSettings.get_settings()
 
     today = reference_date or date.today()
-    cutoff_day = subscriber.cutoff_day or billing_settings.billing_day
+    cutoff_day = resolve_cutoff_day(subscriber, billing_settings)
     period_start, period_end = get_next_cutoff_period(cutoff_day, today)
     cutoff_date = period_start - timedelta(days=1)
-
-    due_offset = (
-        subscriber.billing_due_days
-        if subscriber.billing_due_days is not None
-        else (billing_settings.billing_due_offset_days or billing_settings.due_days)
-    )
+    due_offset = resolve_due_offset_days(subscriber, billing_settings)
     due_date = cutoff_date + timedelta(days=due_offset)
     effective_from = subscriber.billing_effective_from or subscriber.start_date
 

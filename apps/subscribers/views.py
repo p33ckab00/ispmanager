@@ -66,7 +66,7 @@ def subscriber_detail(request, pk):
     subscriber = get_object_or_404(Subscriber, pk=pk)
 
     from apps.billing.models import Invoice, BillingSnapshot, Payment
-    from apps.billing.services import mark_overdue_invoices
+    from apps.billing.services import mark_overdue_invoices, resolve_billing_profile
     mark_overdue_invoices()
 
     invoices = Invoice.objects.filter(subscriber=subscriber).order_by('-period_start')
@@ -88,6 +88,7 @@ def subscriber_detail(request, pk):
         pass
 
     usage_views = [('this_cycle','This Cycle'),('last_7','Last 7 Days'),('last_30','Last 30 Days'),('by_cycle','By Cycle')]
+    billing_profile = resolve_billing_profile(subscriber)
     return render(request, 'subscribers/detail.html', {
         'subscriber': subscriber,
         'invoices': invoices[:10],
@@ -102,6 +103,7 @@ def subscriber_detail(request, pk):
         'node_assignment': node_assignment,
         'nodes': NetworkNode.objects.filter(is_active=True).order_by('name'),
         'usage_views': usage_views,
+        'billing_profile': billing_profile,
     })
 
 
