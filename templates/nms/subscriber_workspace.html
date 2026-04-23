@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block title %}Premium NMS - {{ subscriber.display_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <p class="text-sm font-medium text-blue-600">Premium NMS Workspace</p>
+      <h2 class="text-2xl font-bold text-gray-800 mt-1">{{ subscriber.display_name }}</h2>
+      <p class="text-sm text-gray-500 mt-1">
+        @{{ subscriber.username }} · {{ subscriber.get_status_display }} · {{ subscriber.get_service_type_display }}
+      </p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href="/subscribers/{{ subscriber.pk }}/" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Back to Subscriber
+      </a>
+      {% if topology_summary.distribution_url %}
+      <a href="{{ topology_summary.distribution_url }}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Open Distribution
+      </a>
+      {% endif %}
+      <a href="{{ topology_summary.map_url }}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        View Topology
+      </a>
+    </div>
+  </div>
+
+  {% include "partials/messages.html" %}
+
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.6fr)_380px]">
+    <section class="space-y-6">
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-lg font-semibold text-gray-800">Assignment Summary</h3>
+            <p class="text-sm text-gray-500 mt-1">This is the premium physical-access record for the subscriber.</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold {{ topology_summary.badge_classes }}">
+            {{ topology_summary.label }}
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 mt-5">
+          <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Current Node</p>
+            {% if topology_summary.node_name %}
+            <p class="text-base font-semibold text-gray-900 mt-2">{{ topology_summary.node_name }}</p>
+            {% if topology_summary.node_type %}<p class="text-sm text-gray-500 mt-1">{{ topology_summary.node_type }}</p>{% endif %}
+            {% else %}
+            <p class="text-sm text-gray-500 mt-2">No mapped node yet.</p>
+            {% endif %}
+          </div>
+          <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Endpoint</p>
+            <p class="text-base font-semibold text-gray-900 mt-2">{{ topology_summary.endpoint_display_name|default:"Not set" }}</p>
+            {% if topology_summary.notes %}
+            <p class="text-sm text-gray-500 mt-1">{{ topology_summary.notes }}</p>
+            {% else %}
+            <p class="text-sm text-gray-500 mt-1">Use notes for install context, warnings, or handoff remarks.</p>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if basic_assignment and not attachment %}
+        <div class="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+          <p class="text-sm font-medium text-blue-900">Basic node summary detected</p>
+          <p class="text-sm text-blue-700 mt-1">
+            {{ basic_assignment.node.name }}
+            {% if basic_assignment.port_label %}· {{ basic_assignment.port_label }}{% endif %}
+          </p>
+          <p class="text-xs text-blue-600 mt-2">
+            Saving this form will promote the subscriber from legacy node-only assignment into Premium NMS.
+          </p>
+        </div>
+        {% endif %}
+
+        {% if subscriber.latitude == None or subscriber.longitude == None %}
+        <div class="mt-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Subscriber coordinates are missing. The map can still store an assignment, but topology visualization will stay limited until coordinates are added on the subscriber record.
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <div class="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 class="text-lg font-semibold text-gray-800">{% if attachment %}Update Premium Mapping{% else %}Create Premium Mapping{% endif %}</h3>
+            <p class="text-sm text-gray-500 mt-1">Saving here also syncs the legacy node summary shown on the subscriber page.</p>
+          </div>
+          {% if attachment %}
+          <form method="post" action="{% url 'nms-remove-service-attachment' subscriber.pk %}" onsubmit="return confirm('Remove this Premium NMS mapping?');">
+            {% csrf_token %}
+            <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-sm font-medium px-3 py-2 transition">
+              Remove Mapping
+            </button>
+          </form>
+          {% endif %}
+        </div>
+
+        {% if form.non_field_errors %}
+        <div class="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {% for error in form.non_field_errors %}
+          <p>{{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <form method="post" class="space-y-4">
+          {% csrf_token %}
+          <div>
+            <label for="{{ form.node.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Serving Node</label>
+            {{ form.node }}
+            {% if form.node.errors %}
+            <p class="text-xs text-red-600 mt-1">{{ form.node.errors|join:", " }}</p>
+            {% endif %}
+          </div>
+          <div>
+            <div class="flex items-center justify-between gap-3">
+              <label for="{{ form.endpoint.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Endpoint</label>
+              {% if topology_summary.distribution_url %}
+              <a href="{{ topology_summary.distribution_url }}" class="text-xs font-medium text-blue-600 hover:underline">Manage endpoints on node</a>
+              {% endif %}
+            </div>
+            {{ form.endpoint }}
+            {% if form.endpoint.errors %}
+            <p class="text-xs text-red-600 mt-1">{{ form.endpoint.errors|join:", " }}</p>
+            {% endif %}
+            {% if distribution_ready %}
+            <p class="text-xs text-gray-400 mt-1">Choose a direct node endpoint or an internal-device endpoint when distribution data is available.</p>
+            {% else %}
+            <p class="text-xs text-amber-600 mt-1">Endpoint tables are not applied yet, so this field stays unavailable for now.</p>
+            {% endif %}
+          </div>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label for="{{ form.endpoint_label.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Manual Endpoint Label</label>
+              {{ form.endpoint_label }}
+              {% if form.endpoint_label.errors %}
+              <p class="text-xs text-red-600 mt-1">{{ form.endpoint_label.errors|join:", " }}</p>
+              {% endif %}
+            </div>
+            <div>
+              <label for="{{ form.status.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Topology Status</label>
+              {{ form.status }}
+              {% if form.status.errors %}
+              <p class="text-xs text-red-600 mt-1">{{ form.status.errors|join:", " }}</p>
+              {% endif %}
+            </div>
+          </div>
+          <div>
+            <label for="{{ form.notes.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            {{ form.notes }}
+            {% if form.notes.errors %}
+            <p class="text-xs text-red-600 mt-1">{{ form.notes.errors|join:", " }}</p>
+            {% endif %}
+          </div>
+          <div class="flex flex-wrap gap-3 pt-2">
+            <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 transition">
+              Save Premium Mapping
+            </button>
+            <a href="/subscribers/{{ subscriber.pk }}/" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+              Cancel
+            </a>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <aside class="space-y-6">
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Phase 1 Rules</h3>
+        <ul class="mt-3 space-y-2 text-sm text-gray-600">
+          <li>One subscriber can have only one active Premium NMS mapping at a time.</li>
+          <li>The subscriber module stays the billing and account source of truth.</li>
+          <li>Saving in Premium NMS mirrors the node summary back to the subscriber page.</li>
+          <li>Basic node reassignment is locked once a Premium NMS mapping exists.</li>
+        </ul>
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Subscriber Snapshot</h3>
+        <dl class="mt-3 space-y-3 text-sm">
+          <div class="flex items-start justify-between gap-3">
+            <dt class="text-gray-400">Plan</dt>
+            <dd class="font-medium text-right text-gray-800">{{ subscriber.plan.name|default:"-" }}</dd>
+          </div>
+          <div class="flex items-start justify-between gap-3">
+            <dt class="text-gray-400">Rate</dt>
+            <dd class="font-medium text-right text-gray-800">{% if subscriber.effective_rate %}PHP {{ subscriber.effective_rate }}{% else %}-{% endif %}</dd>
+          </div>
+          <div class="flex items-start justify-between gap-3">
+            <dt class="text-gray-400">MikroTik</dt>
+            <dd class="font-medium text-right text-gray-800">{{ subscriber.mt_status|title }}</dd>
+          </div>
+          <div class="flex items-start justify-between gap-3">
+            <dt class="text-gray-400">Coordinates</dt>
+            <dd class="font-medium text-right text-gray-800">
+              {% if subscriber.latitude != None and subscriber.longitude != None %}
+              {{ subscriber.latitude|floatformat:5 }}, {{ subscriber.longitude|floatformat:5 }}
+              {% else %}
+              Missing
+              {% endif %}
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </aside>
+  </div>
+</div>
+{% endblock %}

@@ -17,6 +17,11 @@ from apps.subscribers.services import (
     disconnect_subscriber, mark_deceased, archive_subscriber,
     get_usage_chart_data,
 )
+from apps.nms.services import (
+    get_service_attachment,
+    get_subscriber_topology_summary,
+    has_service_attachment_table,
+)
 from apps.billing.services import apply_rate_change
 from apps.subscribers.otp import create_otp, verify_otp
 from apps.routers.models import Router
@@ -28,7 +33,7 @@ from apps.sms.services import send_subscriber_billing_sms
 
 @login_required
 def subscriber_list(request):
-    qs = Subscriber.objects.select_related('router', 'plan').all()
+    qs = Subscriber.objects.select_related('router', 'plan', 'node_assignment__node').all()
 
     q = request.GET.get('q', '').strip()
     if q:
@@ -52,6 +57,12 @@ def subscriber_list(request):
 
     paginator = Paginator(qs, 25)
     page = paginator.get_page(request.GET.get('page', 1))
+    service_attachment_ready = has_service_attachment_table()
+    for subscriber in page.object_list:
+        subscriber.topology_summary = get_subscriber_topology_summary(
+            subscriber,
+            table_ready=service_attachment_ready,
+        )
 
     return render(request, 'subscribers/list.html', {
         'page_obj': page, 'q': q, 'status': status,
@@ -86,6 +97,10 @@ def subscriber_detail(request, pk):
         node_assignment = subscriber.node_assignment
     except Exception:
         pass
+    topology_summary = get_subscriber_topology_summary(
+        subscriber,
+        table_ready=has_service_attachment_table(),
+    )
 
     usage_views = [('this_cycle','This Cycle'),('last_7','Last 7 Days'),('last_30','Last 30 Days'),('by_cycle','By Cycle')]
     billing_profile = resolve_billing_profile(subscriber)
@@ -101,6 +116,7 @@ def subscriber_detail(request, pk):
         'has_active_palugit': subscriber.has_active_suspension_hold,
         'palugit_until': timezone.localtime(subscriber.suspension_hold_until) if subscriber.has_active_suspension_hold else None,
         'node_assignment': node_assignment,
+        'topology_summary': topology_summary,
         'nodes': NetworkNode.objects.filter(is_active=True).order_by('name'),
         'usage_views': usage_views,
         'billing_profile': billing_profile,
@@ -380,6 +396,13 @@ def subscriber_usage_chart(request, pk):
 def subscriber_assign_node(request, pk):
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
+        if get_service_attachment(subscriber):
+            messages.warning(
+                request,
+                'This subscriber already has an active Premium NMS mapping. Reassign it inside the NMS workspace instead.',
+            )
+            return redirect('nms-subscriber-workspace', subscriber_pk=subscriber.pk)
+
         node_id = request.POST.get('node_id')
         port_label = request.POST.get('port_label', '')
         if node_id:

@@ -237,20 +237,61 @@
         </div>
 
         <div class="lg:hidden bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
-          {% if node_assignment %}
           <div>
-            <h3 class="font-semibold text-gray-700 mb-2">Network Node</h3>
-            <p class="text-sm font-medium text-gray-800">{{ node_assignment.node.name }}</p>
-            <p class="text-xs text-gray-400">{{ node_assignment.node.get_node_type_display }}</p>
-            {% if node_assignment.port_label %}<p class="text-xs text-gray-400 mt-1">Port: {{ node_assignment.port_label }}</p>{% endif %}
-          </div>
-          {% endif %}
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h3 class="font-semibold text-gray-700">Topology</h3>
+                <p class="text-xs text-gray-400 mt-1">Premium NMS status and current access summary.</p>
+              </div>
+              <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold {{ topology_summary.badge_classes }}">
+                {{ topology_summary.label }}
+              </span>
+            </div>
 
-          <div>
-            <h3 class="font-semibold text-gray-700 mb-3">Assign Node</h3>
+            {% if topology_summary.node_name %}
+            <div class="mt-3">
+              <p class="text-sm font-medium text-gray-800">{{ topology_summary.node_name }}</p>
+              {% if topology_summary.node_type %}<p class="text-xs text-gray-400 mt-1">{{ topology_summary.node_type }}</p>{% endif %}
+              {% if topology_summary.endpoint_label %}<p class="text-xs text-gray-400 mt-1">Endpoint: {{ topology_summary.endpoint_label }}</p>{% endif %}
+            </div>
+            {% else %}
+            <p class="text-sm text-gray-500 mt-3">No Premium NMS path is attached yet for this subscriber.</p>
+            {% endif %}
+
+            {% if topology_summary.notes %}
+            <p class="text-xs text-gray-500 mt-3">{{ topology_summary.notes }}</p>
+            {% endif %}
+
+            {% if topology_summary.show_basic_assignment_warning %}
+            <p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-3">
+              Legacy node summary is being mirrored from Premium NMS. Reassignment should happen in the NMS workspace.
+            </p>
+            {% endif %}
+
+            <div class="flex flex-wrap gap-2 mt-4">
+              <a href="{{ topology_summary.workspace_url }}" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 transition">
+                {% if topology_summary.can_reassign_in_nms %}Reassign in NMS{% elif topology_summary.can_assign_in_nms %}Assign in NMS{% else %}Open in NMS{% endif %}
+              </a>
+              {% if topology_summary.can_view_topology %}
+              <a href="{{ topology_summary.map_url }}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-3 py-2 transition">
+                View Topology
+              </a>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="border-t border-gray-100 pt-4">
+            <h3 class="font-semibold text-gray-700 mb-2">Basic Node Assignment</h3>
+            <p class="text-xs text-gray-400 mb-3">
+              {% if topology_summary.node_is_locked %}
+              Locked because this subscriber already has a Premium NMS mapping.
+              {% else %}
+              Use this lightweight assignment only when Premium NMS mapping is not active yet.
+              {% endif %}
+            </p>
             <form method="post" action="/subscribers/{{ subscriber.pk }}/assign-node/" class="space-y-3">
               {% csrf_token %}
-              <select name="node_id" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+              <select name="node_id" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm {% if topology_summary.node_is_locked %}bg-gray-50 text-gray-400 cursor-not-allowed{% endif %}" {% if topology_summary.node_is_locked %}disabled{% endif %}>
                 <option value="">-- No node --</option>
                 {% for node in nodes %}
                 <option value="{{ node.pk }}" {% if node_assignment and node_assignment.node_id == node.pk %}selected{% endif %}>
@@ -260,10 +301,17 @@
               </select>
               <input type="text" name="port_label" placeholder="Port label (optional)"
                 value="{% if node_assignment %}{{ node_assignment.port_label }}{% endif %}"
-                class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm {% if topology_summary.node_is_locked %}bg-gray-50 text-gray-400 cursor-not-allowed{% endif %}"
+                {% if topology_summary.node_is_locked %}disabled{% endif %}>
+              {% if topology_summary.node_is_locked %}
+              <a href="{{ topology_summary.workspace_url }}" class="w-full inline-flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 rounded-lg transition">
+                Manage in NMS
+              </a>
+              {% else %}
               <button type="submit" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 rounded-lg transition">
                 Save Node Assignment
               </button>
+              {% endif %}
             </form>
           </div>
         </div>
@@ -746,20 +794,55 @@
         </dl>
       </div>
 
-      {% if node_assignment %}
       <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Network Node</p>
-        <p class="text-sm font-medium text-gray-800">{{ node_assignment.node.name }}</p>
-        <p class="text-xs text-gray-400">{{ node_assignment.node.get_node_type_display }}</p>
-        {% if node_assignment.port_label %}<p class="text-xs text-gray-400 mt-1">Port: {{ node_assignment.port_label }}</p>{% endif %}
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Topology</p>
+            <p class="text-xs text-gray-400 mt-1">Premium NMS path summary</p>
+          </div>
+          <span class="px-2 py-0.5 rounded-full text-xs font-semibold {{ topology_summary.badge_classes }}">
+            {{ topology_summary.label }}
+          </span>
+        </div>
+        {% if topology_summary.node_name %}
+        <div class="mt-4">
+          <p class="text-sm font-medium text-gray-800">{{ topology_summary.node_name }}</p>
+          {% if topology_summary.node_type %}<p class="text-xs text-gray-400 mt-1">{{ topology_summary.node_type }}</p>{% endif %}
+          {% if topology_summary.endpoint_label %}<p class="text-xs text-gray-400 mt-1">Endpoint: {{ topology_summary.endpoint_label }}</p>{% endif %}
+        </div>
+        {% else %}
+        <p class="text-sm text-gray-500 mt-4">No Premium NMS path is attached yet.</p>
+        {% endif %}
+        {% if topology_summary.notes %}<p class="text-xs text-gray-500 mt-3">{{ topology_summary.notes }}</p>{% endif %}
+        {% if topology_summary.show_basic_assignment_warning %}
+        <p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-3">
+          Legacy node summary is being mirrored from Premium NMS. Use the NMS workspace for reassignment.
+        </p>
+        {% endif %}
+        <div class="flex flex-col gap-2 mt-4">
+          <a href="{{ topology_summary.workspace_url }}" class="inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold py-2 rounded-lg transition">
+            {% if topology_summary.can_reassign_in_nms %}Reassign in NMS{% elif topology_summary.can_assign_in_nms %}Assign in NMS{% else %}Open in NMS{% endif %}
+          </a>
+          {% if topology_summary.can_view_topology %}
+          <a href="{{ topology_summary.map_url }}" class="inline-flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium py-2 rounded-lg transition">
+            View Topology
+          </a>
+          {% endif %}
+        </div>
       </div>
-      {% endif %}
 
       <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Assign Node</p>
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Basic Node Assignment</p>
+        <p class="text-xs text-gray-400 mb-3">
+          {% if topology_summary.node_is_locked %}
+          Locked because a Premium NMS mapping already exists.
+          {% else %}
+          Lightweight node reference only. Advanced physical assignment should happen in NMS.
+          {% endif %}
+        </p>
         <form method="post" action="/subscribers/{{ subscriber.pk }}/assign-node/" class="space-y-2">
           {% csrf_token %}
-          <select name="node_id" class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs">
+          <select name="node_id" class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs {% if topology_summary.node_is_locked %}bg-gray-50 text-gray-400 cursor-not-allowed{% endif %}" {% if topology_summary.node_is_locked %}disabled{% endif %}>
             <option value="">-- No node --</option>
             {% for node in nodes %}
             <option value="{{ node.pk }}" {% if node_assignment and node_assignment.node_id == node.pk %}selected{% endif %}>
@@ -769,10 +852,17 @@
           </select>
           <input type="text" name="port_label" placeholder="Port label (optional)"
             value="{% if node_assignment %}{{ node_assignment.port_label }}{% endif %}"
-            class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs">
+            class="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs {% if topology_summary.node_is_locked %}bg-gray-50 text-gray-400 cursor-not-allowed{% endif %}"
+            {% if topology_summary.node_is_locked %}disabled{% endif %}>
+          {% if topology_summary.node_is_locked %}
+          <a href="{{ topology_summary.workspace_url }}" class="w-full inline-flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium py-1.5 rounded-lg transition">
+            Manage in NMS
+          </a>
+          {% else %}
           <button type="submit" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium py-1.5 rounded-lg transition">
             Save
           </button>
+          {% endif %}
         </form>
       </div>
     </aside>

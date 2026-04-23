@@ -4,170 +4,1304 @@
 {% block extra_css %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-  #nms-map { height: calc(100vh - 220px); min-height: 500px; border-radius: 12px; }
-  .marker-router { background: #2563eb; border: 3px solid #fff; border-radius: 50%; width: 18px; height: 18px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); }
+  #nms-map { height: calc(100vh - 320px); min-height: 620px; border-radius: 12px; }
+  .marker-router,
+  .marker-sub,
+  .marker-node,
+  .geometry-vertex {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  }
+  .marker-router {
+    background: #2563eb;
+    border: 3px solid #fff;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+  }
   .marker-router.offline { background: #ef4444; }
-  .marker-sub { border-radius: 50%; width: 12px; height: 12px; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.25); }
+  .marker-router.selected { box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18); }
+  .marker-sub {
+    border-radius: 50%;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #fff;
+  }
+  .marker-sub.focused,
+  .marker-sub.selected {
+    width: 16px;
+    height: 16px;
+    border-width: 3px;
+  }
+  .marker-sub.selected { box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.18); }
   .marker-sub.online { background: #22c55e; }
   .marker-sub.offline { background: #9ca3af; }
   .marker-sub.suspended { background: #f59e0b; }
   .marker-sub.disconnected { background: #ef4444; }
-  .leaflet-popup-content { font-size: 13px; min-width: 180px; }
+  .marker-node {
+    width: 15px;
+    height: 15px;
+    border: 2px solid #fff;
+    transform: rotate(45deg);
+    background: #fb923c;
+  }
+  .marker-node.olt { background: #f97316; }
+  .marker-node.cabinet { background: #0ea5e9; }
+  .marker-node.access_point { background: #8b5cf6; }
+  .marker-node.splice_box { background: #14b8a6; }
+  .marker-node.pisowifi { background: #ec4899; }
+  .marker-node.selected { box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.18); }
+  .marker-node.connect-source { background: #16a34a; }
+  .marker-node.connect-target { background: #2563eb; }
+  .leaflet-popup-content { font-size: 13px; min-width: 190px; }
+  .legend-dot { width: 12px; height: 12px; display: inline-block; border-radius: 9999px; }
+  .legend-node { width: 12px; height: 12px; display: inline-block; transform: rotate(45deg); }
+  .legend-line { width: 18px; height: 0; display: inline-block; border-top: 3px solid currentColor; }
+  .mode-btn-active { background: #2563eb; color: white; border-color: #2563eb; }
+  .mode-btn-disabled { opacity: 0.5; cursor: not-allowed; }
+  .geometry-vertex {
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    background: #0f172a;
+    border: 2px solid #fff;
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="flex items-center justify-between mb-4">
-  <div>
-    <h2 class="text-2xl font-bold text-gray-800">Network Map</h2>
-    <p class="text-gray-500 text-sm mt-0.5">Live view of routers and subscribers.</p>
+<div class="space-y-4">
+  <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <div>
+      <h2 class="text-2xl font-bold text-gray-800">Premium NMS Map Workspace</h2>
+      <p class="text-gray-500 text-sm mt-1">Interactive topology workspace for subscriber visibility, node-to-node links, and geometry editing.</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href="{% url 'nms-links' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Manage Links
+      </a>
+      <button id="refresh-map-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 transition">
+        <i class="fa fa-rotate mr-2"></i> Refresh
+      </button>
+    </div>
   </div>
-  <div class="flex gap-3 items-center text-sm">
-    <label class="flex items-center gap-2 cursor-pointer">
-      <input type="checkbox" id="toggle-routers" checked class="rounded"> Routers
-    </label>
-    <label class="flex items-center gap-2 cursor-pointer">
-      <input type="checkbox" id="toggle-subs" checked class="rounded"> Subscribers
-    </label>
-    <button onclick="refreshMap()"
-      class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition">
-      <i class="fa fa-rotate mr-1"></i> Refresh
-    </button>
+
+  {% if focus_subscriber %}
+  <div class="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+    <div>
+      <p class="text-sm font-semibold text-blue-900">Subscriber focus: {{ focus_subscriber.display_name }}</p>
+      <p class="text-xs text-blue-700 mt-1">The workspace will highlight the subscriber, the attached node, and related topology links when data is available.</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href="/subscribers/{{ focus_subscriber.pk }}/" class="inline-flex items-center justify-center rounded-lg bg-white hover:bg-blue-100 text-blue-700 text-sm font-medium px-3 py-2 transition">
+        Open Subscriber
+      </a>
+      <a href="{% url 'nms-subscriber-workspace' focus_subscriber.pk %}" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-2 transition">
+        Open NMS Workspace
+      </a>
+      <a href="{% url 'nms-map' %}" class="inline-flex items-center justify-center rounded-lg bg-white hover:bg-blue-100 text-blue-700 text-sm font-medium px-3 py-2 transition">
+        Clear Focus
+      </a>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="flex gap-4 text-xs text-gray-500 flex-wrap">
+    <span class="flex items-center gap-1.5">
+      <span class="legend-dot bg-blue-600"></span> Router Online
+    </span>
+    <span class="flex items-center gap-1.5">
+      <span class="legend-dot bg-red-500"></span> Router Offline
+    </span>
+    <span class="flex items-center gap-1.5">
+      <span class="legend-node bg-orange-400"></span> Network Node
+    </span>
+    <span class="flex items-center gap-1.5 text-blue-600">
+      <span class="legend-line"></span> Fiber Link
+    </span>
+    <span class="flex items-center gap-1.5 text-teal-600">
+      <span class="legend-line"></span> Ethernet Link
+    </span>
+    <span class="flex items-center gap-1.5 text-violet-600">
+      <span class="legend-line"></span> Wireless Link
+    </span>
+    <span class="flex items-center gap-1.5">
+      <span class="legend-dot bg-green-500"></span> Subscriber Online
+    </span>
+    <span class="flex items-center gap-1.5">
+      <span class="legend-dot bg-gray-400"></span> Subscriber Offline
+    </span>
+  </div>
+
+  <div class="flex gap-4 flex-wrap text-xs">
+    <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5">Routers: <strong id="count-routers">0</strong></span>
+    <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5">Topology links: <strong id="count-links">0</strong></span>
+    <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5">Nodes: <strong id="count-nodes">0</strong></span>
+    <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5">Subscribers on map: <strong id="count-subs">0</strong></span>
+    <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5 text-green-600">Online: <strong id="count-online">0</strong></span>
+    <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5 text-blue-600">Premium paths: <strong id="count-mappings">0</strong></span>
+  </div>
+
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.8fr)_380px]">
+    <section class="space-y-4">
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-4">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p class="text-sm font-semibold text-gray-800">Workspace Modes</p>
+            <p class="text-xs text-gray-400 mt-1">Use dedicated modes to avoid accidental edits.</p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button id="mode-view-btn" type="button" class="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg transition">
+              View
+            </button>
+            <button id="mode-connect-btn" type="button" class="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg transition {% if not topology_links_ready %}mode-btn-disabled{% endif %}" {% if not topology_links_ready %}disabled{% endif %}>
+              Connect Nodes
+            </button>
+            <button id="mode-edit-path-btn" type="button" class="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg transition {% if not topology_links_ready %}mode-btn-disabled{% endif %}" {% if not topology_links_ready %}disabled{% endif %}>
+              Edit Path
+            </button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <label class="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" id="toggle-routers" checked class="rounded"> Routers
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" id="toggle-links" checked class="rounded"> Topology Links
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" id="toggle-nodes" checked class="rounded"> Nodes
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" id="toggle-subs" checked class="rounded"> Subscribers
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" id="toggle-mappings" checked class="rounded"> Premium Paths
+          </label>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <label for="filter-link-type" class="block text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Link Type Filter</label>
+            <select id="filter-link-type" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              <option value="all">All Link Types</option>
+              <option value="fiber">Fiber</option>
+              <option value="ethernet">Ethernet</option>
+              <option value="wireless">Wireless Backhaul</option>
+              <option value="power">Power</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label for="filter-link-status" class="block text-xs font-semibold uppercase tracking-wide text-gray-400 mb-1">Link Status Filter</label>
+            <select id="filter-link-status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              <option value="all">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="planned">Planned</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        {% if not topology_links_ready %}
+        <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Topology link tables are not applied yet. View mode still works, but `Connect Nodes` and `Edit Path` stay disabled until the `nms` migrations are applied.
+        </div>
+        {% endif %}
+      </div>
+
+      <div id="nms-map" class="shadow-sm border border-gray-100"></div>
+
+      <p class="text-xs text-gray-400">
+        Router coordinates come from <a href="/routers/" class="text-blue-500 hover:underline">Routers</a>. Subscriber coordinates come from
+        <a href="/subscribers/" class="text-blue-500 hover:underline">Subscribers</a>. Premium attachment paths are drawn from the subscriber NMS workspace, while topology links represent node-to-node infrastructure paths.
+      </p>
+    </section>
+
+    <aside class="space-y-4">
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h3 class="text-lg font-semibold text-gray-800">Inspector</h3>
+            <p class="text-sm text-gray-500 mt-1">Click a node, link, subscriber, or router to inspect it.</p>
+          </div>
+          <span id="inspector-mode-badge" class="px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">View Mode</span>
+        </div>
+        <div id="inspector-notice" class="hidden mt-4 rounded-xl px-4 py-3 text-sm"></div>
+        <div id="inspector-body" class="mt-4 space-y-4 text-sm text-gray-600"></div>
+      </div>
+    </aside>
   </div>
 </div>
-
-<!-- Legend -->
-<div class="flex gap-4 mb-3 text-xs text-gray-500 flex-wrap">
-  <span class="flex items-center gap-1.5">
-    <span class="w-3 h-3 rounded-full bg-blue-600 inline-block"></span> Router Online
-  </span>
-  <span class="flex items-center gap-1.5">
-    <span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span> Router Offline
-  </span>
-  <span class="flex items-center gap-1.5">
-    <span class="w-3 h-3 rounded-full bg-green-500 inline-block"></span> Subscriber Online
-  </span>
-  <span class="flex items-center gap-1.5">
-    <span class="w-3 h-3 rounded-full bg-gray-400 inline-block"></span> Subscriber Offline
-  </span>
-  <span class="flex items-center gap-1.5">
-    <span class="w-3 h-3 rounded-full bg-yellow-400 inline-block"></span> Suspended
-  </span>
-</div>
-
-<!-- Stats bar -->
-<div class="flex gap-4 mb-3 text-xs">
-  <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5">
-    Routers: <strong id="count-routers">0</strong>
-  </span>
-  <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5">
-    Subscribers on map: <strong id="count-subs">0</strong>
-  </span>
-  <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5 text-green-600">
-    Online: <strong id="count-online">0</strong>
-  </span>
-</div>
-
-<div id="nms-map" class="shadow-sm border border-gray-100"></div>
-
-<p class="text-xs text-gray-400 mt-2">
-  To appear on this map, set coordinates on each router (<a href="/routers/" class="text-blue-500 hover:underline">Routers</a>)
-  and each subscriber (<a href="/subscribers/" class="text-blue-500 hover:underline">Subscribers &gt; Edit</a>).
-</p>
 {% endblock %}
 
 {% block extra_js %}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-const map = L.map('nms-map').setView([12.8797, 121.7740], 6)
+const focusSubscriberId = {% if focus_subscriber %}{{ focus_subscriber.pk }}{% else %}null{% endif %}
+const topologyLinksReady = {{ topology_links_ready|yesno:"true,false" }}
+const serviceAttachmentReady = {{ service_attachment_ready|yesno:"true,false" }}
+const urls = {
+  mapData: '{% url "nms-map-data" %}',
+  createLink: '{% url "nms-create-link-api" %}',
+  links: '{% url "nms-links" %}',
+  map: '{% url "nms-map" %}',
+  updateLinkGeometryTemplate: '{% url "nms-update-link-geometry-api" 0 %}',
+}
 
+const map = L.map('nms-map').setView([12.8797, 121.7740], 6)
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
   maxZoom: 19,
 }).addTo(map)
 
-let routerLayer = L.layerGroup().addTo(map)
-let subLayer = L.layerGroup().addTo(map)
+const routerLayer = L.layerGroup().addTo(map)
+const linkLayer = L.layerGroup().addTo(map)
+const nodeLayer = L.layerGroup().addTo(map)
+const subLayer = L.layerGroup().addTo(map)
+const mappingLayer = L.layerGroup().addTo(map)
+const geometryLayer = L.layerGroup().addTo(map)
 
-function makeRouterIcon(status) {
+const state = {
+  data: null,
+  index: null,
+  mode: 'view',
+  selectedObject: null,
+  hasInitialFit: false,
+  localNotice: null,
+  filters: {
+    linkType: 'all',
+    linkStatus: 'all',
+  },
+  visibility: {
+    routers: true,
+    links: true,
+    nodes: true,
+    subscribers: true,
+    mappings: true,
+  },
+  connectSourceNodeId: null,
+  connectTargetNodeId: null,
+  editingLinkId: null,
+  editingVertices: [],
+  geometryError: '',
+  highlightedNodeId: null,
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+function getCsrfToken() {
+  const cookie = document.cookie
+    .split(';')
+    .map(item => item.trim())
+    .find(item => item.startsWith('csrftoken='))
+  return cookie ? decodeURIComponent(cookie.split('=')[1]) : ''
+}
+
+function formatLabel(value) {
+  if (!value) return '-'
+  return value.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase())
+}
+
+function formatCoord(value) {
+  return typeof value === 'number' ? value.toFixed(5) : '-'
+}
+
+function getStatusBadgeClass(status) {
+  if (status === 'active' || status === 'online' || status === 'mapped') return 'bg-green-100 text-green-700'
+  if (status === 'planned' || status === 'needs_review' || status === 'suspended') return 'bg-amber-100 text-amber-700'
+  if (status === 'inactive' || status === 'offline') return 'bg-gray-100 text-gray-500'
+  return 'bg-gray-100 text-gray-500'
+}
+
+function makeRouterIcon(router) {
+  const classes = [
+    'marker-router',
+    router.status !== 'online' ? 'offline' : '',
+    state.selectedObject?.type === 'router' && state.selectedObject.id === router.id ? 'selected' : '',
+  ].filter(Boolean).join(' ')
   return L.divIcon({
     className: '',
-    html: `<div class="marker-router ${status !== 'online' ? 'offline' : ''}"></div>`,
+    html: `<div class="${classes}"></div>`,
     iconSize: [18, 18],
     iconAnchor: [9, 9],
     popupAnchor: [0, -12],
   })
 }
 
-function makeSubIcon(status, mtStatus) {
-  let cls = 'offline'
-  if (mtStatus === 'online') cls = 'online'
-  else if (status === 'suspended') cls = 'suspended'
-  else if (status === 'disconnected') cls = 'disconnected'
+function makeNodeIcon(node) {
+  const classes = [
+    'marker-node',
+    node.node_type || '',
+    state.selectedObject?.type === 'node' && state.selectedObject.id === node.id ? 'selected' : '',
+    state.connectSourceNodeId === node.id ? 'connect-source' : '',
+    state.connectTargetNodeId === node.id ? 'connect-target' : '',
+    state.highlightedNodeId === node.id ? 'selected' : '',
+  ].filter(Boolean).join(' ')
   return L.divIcon({
     className: '',
-    html: `<div class="marker-sub ${cls}"></div>`,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
-    popupAnchor: [0, -8],
+    html: `<div class="${classes}"></div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+    popupAnchor: [0, -12],
   })
 }
 
-function refreshMap() {
-  routerLayer.clearLayers()
-  subLayer.clearLayers()
-
-  fetch('/nms/data/')
-    .then(r => r.json())
-    .then(data => {
-      document.getElementById('count-routers').textContent = data.routers.length
-      document.getElementById('count-subs').textContent = data.subscribers.length
-      const online = data.subscribers.filter(s => s.mt_status === 'online').length
-      document.getElementById('count-online').textContent = online
-
-      data.routers.forEach(r => {
-        const marker = L.marker([r.lat, r.lng], { icon: makeRouterIcon(r.status) })
-        marker.bindPopup(`
-          <b><i class="fa fa-router"></i> ${r.name}</b><br>
-          <span class="text-gray-500">${r.host}</span><br>
-          Status: <span style="color:${r.status==='online'?'#16a34a':'#dc2626'}">${r.status}</span><br>
-          ${r.location ? '<i>'+r.location+'</i>' : ''}
-          <br><a href="/routers/${r.id}/" style="color:#2563eb">View Router</a>
-        `)
-        routerLayer.addLayer(marker)
-      })
-
-      data.subscribers.forEach(s => {
-        const marker = L.marker([s.lat, s.lng], { icon: makeSubIcon(s.status, s.mt_status) })
-        marker.bindPopup(`
-          <b>${s.name}</b><br>
-          <span class="text-gray-400 font-mono text-xs">${s.username}</span><br>
-          Plan: ${s.plan || '-'}<br>
-          IP: ${s.ip || '-'}<br>
-          MT: <span style="color:${s.mt_status==='online'?'#16a34a':'#6b7280'}">${s.mt_status}</span><br>
-          <a href="/subscribers/${s.id}/" style="color:#2563eb">View Subscriber</a>
-        `)
-        subLayer.addLayer(marker)
-      })
-
-      if (data.routers.length > 0 || data.subscribers.length > 0) {
-        const all = [...data.routers, ...data.subscribers].map(p => [p.lat, p.lng])
-        map.fitBounds(all, { padding: [30, 30] })
-      }
-    })
+function makeSubscriberIcon(subscriber) {
+  let cls = 'offline'
+  if (subscriber.mt_status === 'online') cls = 'online'
+  else if (subscriber.status === 'suspended') cls = 'suspended'
+  else if (subscriber.status === 'disconnected') cls = 'disconnected'
+  const classes = [
+    'marker-sub',
+    cls,
+    focusSubscriberId === subscriber.id ? 'focused' : '',
+    state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 'selected' : '',
+  ].filter(Boolean).join(' ')
+  return L.divIcon({
+    className: '',
+    html: `<div class="${classes}"></div>`,
+    iconSize: [state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 16 : 12, state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 16 : 12],
+    iconAnchor: [state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 8 : 6, state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 8 : 6],
+    popupAnchor: [0, state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? -12 : -8],
+  })
 }
 
-document.getElementById('toggle-routers').addEventListener('change', function() {
-  if (this.checked) map.addLayer(routerLayer)
-  else map.removeLayer(routerLayer)
+function makeGeometryVertexIcon(index) {
+  return L.divIcon({
+    className: '',
+    html: `<div class="geometry-vertex">${index + 1}</div>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  })
+}
+
+function getTopologyLinkStyle(link) {
+  const baseStyles = {
+    fiber: { color: '#2563eb', weight: 4, opacity: 0.85, dashArray: null },
+    ethernet: { color: '#0f766e', weight: 4, opacity: 0.85, dashArray: null },
+    wireless: { color: '#7c3aed', weight: 3, opacity: 0.8, dashArray: '10, 8' },
+    power: { color: '#ea580c', weight: 3, opacity: 0.8, dashArray: null },
+    other: { color: '#64748b', weight: 3, opacity: 0.8, dashArray: null },
+  }
+  const style = { ...(baseStyles[link.link_type] || baseStyles.other) }
+
+  if (link.status === 'planned') {
+    style.dashArray = style.dashArray || '8, 8'
+    style.opacity = 0.7
+  } else if (link.status === 'inactive') {
+    style.color = '#94a3b8'
+    style.dashArray = '5, 7'
+    style.opacity = 0.65
+  }
+
+  const isSelected = state.selectedObject?.type === 'link' && state.selectedObject.id === link.id
+  const isHighlighted = state.highlightedNodeId && [link.source_node_id, link.target_node_id].includes(state.highlightedNodeId)
+  if (link.is_focus_related || isSelected || isHighlighted) {
+    style.weight += 2
+    style.opacity = 0.95
+  }
+
+  return style
+}
+
+function getDataUrl() {
+  const baseUrl = new URL(urls.mapData, window.location.origin)
+  if (focusSubscriberId) {
+    baseUrl.searchParams.set('subscriber', focusSubscriberId)
+  }
+  return `${baseUrl.pathname}${baseUrl.search}`
+}
+
+function getLinkGeometryUpdateUrl(linkId) {
+  return urls.updateLinkGeometryTemplate.replace('/0/geometry/', `/${linkId}/geometry/`)
+}
+
+function indexData(data) {
+  return {
+    routers: new Map(data.routers.map(item => [item.id, item])),
+    nodes: new Map(data.nodes.map(item => [item.id, item])),
+    subscribers: new Map(data.subscribers.map(item => [item.id, item])),
+    links: new Map(data.links.map(item => [item.id, item])),
+    attachmentsBySubscriber: new Map(data.attachments.map(item => [item.subscriber_id, item])),
+  }
+}
+
+function getNode(id) {
+  return state.index?.nodes.get(id) || null
+}
+
+function getSubscriber(id) {
+  return state.index?.subscribers.get(id) || null
+}
+
+function getLink(id) {
+  return state.index?.links.get(id) || null
+}
+
+function getRouter(id) {
+  return state.index?.routers.get(id) || null
+}
+
+function countConnectedLinks(nodeId) {
+  return state.data ? state.data.links.filter(link => link.source_node_id === nodeId || link.target_node_id === nodeId).length : 0
+}
+
+function setLocalNotice(kind, message) {
+  state.localNotice = message ? { kind, message } : null
+  renderInspector()
+}
+
+function clearLocalNotice() {
+  state.localNotice = null
+}
+
+function extractFirstError(payload, fallbackMessage) {
+  if (payload?.message) return payload.message
+  if (payload?.errors) {
+    for (const fieldErrors of Object.values(payload.errors)) {
+      if (Array.isArray(fieldErrors) && fieldErrors[0]?.message) {
+        return fieldErrors[0].message
+      }
+    }
+  }
+  return fallbackMessage
+}
+
+function updateModeButtons() {
+  const buttonMap = {
+    view: document.getElementById('mode-view-btn'),
+    connect: document.getElementById('mode-connect-btn'),
+    'edit-path': document.getElementById('mode-edit-path-btn'),
+  }
+  Object.entries(buttonMap).forEach(([mode, button]) => {
+    if (!button) return
+    button.classList.remove('mode-btn-active')
+    if (state.mode === mode) {
+      button.classList.add('mode-btn-active')
+    }
+  })
+  const badge = document.getElementById('inspector-mode-badge')
+  const labels = {
+    view: 'View Mode',
+    connect: 'Connect Mode',
+    'edit-path': 'Edit Path Mode',
+  }
+  badge.textContent = labels[state.mode] || 'View Mode'
+  badge.className = 'px-2.5 py-1 rounded-full text-xs font-semibold ' + (
+    state.mode === 'view'
+      ? 'bg-gray-100 text-gray-600'
+      : state.mode === 'connect'
+        ? 'bg-blue-100 text-blue-700'
+        : 'bg-violet-100 text-violet-700'
+  )
+}
+
+function setMode(mode) {
+  if ((mode === 'connect' || mode === 'edit-path') && !topologyLinksReady) {
+    setLocalNotice('warning', 'Apply the NMS topology migrations first to unlock interactive link editing.')
+    return
+  }
+
+  state.mode = mode
+  clearLocalNotice()
+
+  if (mode !== 'connect') {
+    state.connectSourceNodeId = null
+    state.connectTargetNodeId = null
+  }
+
+  if (mode !== 'edit-path') {
+    state.editingLinkId = null
+    state.editingVertices = []
+    state.geometryError = ''
+    geometryLayer.clearLayers()
+  } else if (state.selectedObject?.type === 'link') {
+    const link = getLink(state.selectedObject.id)
+    if (link) {
+      startGeometryEdit(link)
+    }
+  }
+
+  updateModeButtons()
+  drawMap()
+  renderInspector()
+}
+
+function parseGeometryText(text) {
+  const points = []
+  const value = (text || '').trim()
+  if (!value) return { points, error: '' }
+
+  const lines = value.split('\n')
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim()
+    if (!line) continue
+
+    const parts = line.split(',').map(part => part.trim())
+    if (parts.length !== 2) {
+      return { points: [], error: `Line ${index + 1} must use lat,lng format.` }
+    }
+
+    const latitude = Number(parts[0])
+    const longitude = Number(parts[1])
+    if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+      return { points: [], error: `Line ${index + 1} contains invalid coordinates.` }
+    }
+
+    points.push([latitude, longitude])
+  }
+
+  return { points, error: '' }
+}
+
+function geometryVerticesToText() {
+  return state.editingVertices.map(point => `${point[0]},${point[1]}`).join('\n')
+}
+
+function startGeometryEdit(link) {
+  state.editingLinkId = link.id
+  state.editingVertices = parseGeometryText(link.geometry_text || '').points
+  state.geometryError = ''
+  renderGeometryHandles()
+  renderInspector()
+}
+
+function getEditingLink() {
+  return state.editingLinkId ? getLink(state.editingLinkId) : null
+}
+
+function getEditingFullPoints() {
+  const link = getEditingLink()
+  if (!link) return []
+  return [
+    [link.source_node_lat, link.source_node_lng],
+    ...state.editingVertices,
+    [link.target_node_lat, link.target_node_lng],
+  ]
+}
+
+function renderGeometryHandles() {
+  geometryLayer.clearLayers()
+  if (state.mode !== 'edit-path') return
+
+  const link = getEditingLink()
+  if (!link) return
+
+  const fullPoints = getEditingFullPoints()
+  if (fullPoints.length >= 2) {
+    L.polyline(fullPoints, {
+      color: '#0f172a',
+      weight: 5,
+      opacity: 0.7,
+      dashArray: '8, 8',
+    }).addTo(geometryLayer)
+  }
+
+  state.editingVertices.forEach((point, index) => {
+    const marker = L.marker(point, {
+      draggable: true,
+      icon: makeGeometryVertexIcon(index),
+    })
+    marker.on('dragend', event => {
+      const { lat, lng } = event.target.getLatLng()
+      state.editingVertices[index] = [Number(lat.toFixed(6)), Number(lng.toFixed(6))]
+      state.geometryError = ''
+      renderGeometryHandles()
+      renderInspector()
+    })
+    marker.on('click', () => {
+      state.editingVertices.splice(index, 1)
+      state.geometryError = ''
+      renderGeometryHandles()
+      renderInspector()
+    })
+    geometryLayer.addLayer(marker)
+  })
+}
+
+function selectObject(type, id) {
+  state.selectedObject = { type, id }
+  clearLocalNotice()
+
+  if (type === 'subscriber') {
+    const subscriber = getSubscriber(id)
+    state.highlightedNodeId = subscriber?.mapped_node_id || state.data?.focus_node_id || null
+  } else if (type === 'node') {
+    state.highlightedNodeId = id
+  } else {
+    state.highlightedNodeId = state.data?.focus_node_id || null
+  }
+
+  if (state.mode === 'edit-path' && type === 'link') {
+    const link = getLink(id)
+    if (link) startGeometryEdit(link)
+  }
+
+  drawMap()
+  renderInspector()
+}
+
+function handleNodeClick(node) {
+  if (state.mode === 'connect' && topologyLinksReady) {
+    if (!state.connectSourceNodeId || state.connectSourceNodeId === node.id) {
+      state.connectSourceNodeId = node.id
+      state.connectTargetNodeId = null
+      setLocalNotice('info', `Source node selected: ${node.name}. Click another node to choose the target.`)
+    } else if (state.connectSourceNodeId !== node.id) {
+      state.connectTargetNodeId = node.id
+      clearLocalNotice()
+    }
+  }
+
+  selectObject('node', node.id)
+}
+
+function renderInspector() {
+  const body = document.getElementById('inspector-body')
+  const notice = document.getElementById('inspector-notice')
+
+  if (state.localNotice) {
+    notice.className = `mt-4 rounded-xl px-4 py-3 text-sm ${
+      state.localNotice.kind === 'error'
+        ? 'bg-red-50 border border-red-100 text-red-700'
+        : state.localNotice.kind === 'warning'
+          ? 'bg-amber-50 border border-amber-100 text-amber-700'
+          : 'bg-blue-50 border border-blue-100 text-blue-700'
+    }`
+    notice.textContent = state.localNotice.message
+    notice.classList.remove('hidden')
+  } else {
+    notice.classList.add('hidden')
+    notice.textContent = ''
+  }
+
+  if (!state.data) {
+    body.innerHTML = '<p class="text-sm text-gray-500">Loading map data...</p>'
+    return
+  }
+
+  let html = ''
+  html += renderModePanel()
+  html += renderSelectedObjectPanel()
+  body.innerHTML = html
+  bindInspectorEvents()
+}
+
+function renderModePanel() {
+  if (state.mode === 'connect') {
+    const sourceNode = getNode(state.connectSourceNodeId)
+    const targetNode = getNode(state.connectTargetNodeId)
+    let html = `
+      <div class="rounded-xl border border-blue-100 bg-blue-50 px-4 py-4">
+        <p class="text-sm font-semibold text-blue-900">Connect Nodes Workflow</p>
+        <p class="text-xs text-blue-700 mt-1">Click the source node first, then the target node. Saving will create a topology link with a straight path.</p>
+    `
+    if (!sourceNode) {
+      html += `<p class="text-sm text-blue-700 mt-3">No source node selected yet.</p>`
+    } else {
+      html += `<div class="mt-3 text-sm text-blue-800"><strong>Source:</strong> ${escapeHtml(sourceNode.name)}</div>`
+    }
+    if (!targetNode) {
+      html += `<div class="mt-2 text-sm text-blue-700">Waiting for target node selection.</div>`
+    } else {
+      html += `<div class="mt-2 text-sm text-blue-800"><strong>Target:</strong> ${escapeHtml(targetNode.name)}</div>`
+      html += `
+        <div class="mt-4 space-y-3">
+          <div>
+            <label for="connect-link-name" class="block text-xs font-semibold uppercase tracking-wide text-blue-700 mb-1">Link Name</label>
+            <input id="connect-link-name" type="text" class="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm" placeholder="${escapeHtml(sourceNode.name)} -> ${escapeHtml(targetNode.name)}">
+          </div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label for="connect-link-type" class="block text-xs font-semibold uppercase tracking-wide text-blue-700 mb-1">Link Type</label>
+              <select id="connect-link-type" class="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm">
+                <option value="fiber">Fiber</option>
+                <option value="ethernet">Ethernet</option>
+                <option value="wireless">Wireless Backhaul</option>
+                <option value="power">Power</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label for="connect-link-status" class="block text-xs font-semibold uppercase tracking-wide text-blue-700 mb-1">Status</label>
+              <select id="connect-link-status" class="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm">
+                <option value="active">Active</option>
+                <option value="planned">Planned</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label for="connect-link-notes" class="block text-xs font-semibold uppercase tracking-wide text-blue-700 mb-1">Notes</label>
+            <textarea id="connect-link-notes" rows="3" class="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm" placeholder="Optional install or route notes"></textarea>
+          </div>
+          <div class="flex flex-wrap gap-2 pt-1">
+            <button id="create-link-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 transition">Create Link</button>
+            <button id="reset-connect-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-white hover:bg-blue-100 text-blue-700 text-sm font-medium px-4 py-2 transition">Reset</button>
+          </div>
+        </div>
+      `
+    }
+    html += '</div>'
+    return html
+  }
+
+  if (state.mode === 'edit-path') {
+    const link = state.selectedObject?.type === 'link' ? getLink(state.selectedObject.id) : null
+    let html = `
+      <div class="rounded-xl border border-violet-100 bg-violet-50 px-4 py-4">
+        <p class="text-sm font-semibold text-violet-900">Path Geometry Editor</p>
+        <p class="text-xs text-violet-700 mt-1">Select a topology link, then click the map to add middle vertices. Drag a handle to move it and click a handle to remove it.</p>
+    `
+    if (!link) {
+      html += `<p class="text-sm text-violet-700 mt-3">No link selected yet. Click a topology link on the map to edit its path.</p>`
+    } else {
+      html += `
+        <div class="mt-3 text-sm text-violet-900"><strong>Editing:</strong> ${escapeHtml(link.name)}</div>
+        <div class="mt-2 text-xs text-violet-700">${escapeHtml(link.source_node_name)} -> ${escapeHtml(link.target_node_name)}</div>
+        <div class="mt-4">
+          <label for="geometry-textarea" class="block text-xs font-semibold uppercase tracking-wide text-violet-700 mb-1">Middle Vertices</label>
+          <textarea id="geometry-textarea" rows="6" class="w-full border border-violet-200 rounded-lg px-3 py-2 text-sm font-mono">${escapeHtml(geometryVerticesToText())}</textarea>
+          <p class="text-xs text-violet-700 mt-2">One line per `lat,lng` pair. Start and end stay attached to the link endpoints.</p>
+          <p id="geometry-error" class="text-xs text-red-600 mt-2 ${state.geometryError ? '' : 'hidden'}">${escapeHtml(state.geometryError || '')}</p>
+        </div>
+        <div class="flex flex-wrap gap-2 mt-4">
+          <button id="save-geometry-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 transition">Save Geometry</button>
+          <button id="clear-geometry-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-white hover:bg-violet-100 text-violet-700 text-sm font-medium px-4 py-2 transition">Clear Vertices</button>
+          <button id="cancel-edit-path-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-white hover:bg-violet-100 text-violet-700 text-sm font-medium px-4 py-2 transition">Exit Edit Mode</button>
+        </div>
+      `
+    }
+    html += '</div>'
+    return html
+  }
+
+  return `
+    <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-4">
+      <p class="text-sm font-semibold text-gray-800">View Mode</p>
+      <p class="text-xs text-gray-500 mt-1">Inspect routers, nodes, links, and subscribers without making edits. Use `Connect Nodes` or `Edit Path` only when you are ready to change topology state.</p>
+    </div>
+  `
+}
+
+function renderSelectedObjectPanel() {
+  if (!state.selectedObject) {
+    return `
+      <div class="rounded-xl border border-gray-100 px-4 py-4">
+        <p class="text-sm font-semibold text-gray-800">No selection yet</p>
+        <p class="text-sm text-gray-500 mt-2">Try these next steps:</p>
+        <ul class="mt-3 space-y-2 text-sm text-gray-600">
+          <li>Click a subscriber to inspect the mapped node and open the premium assignment workspace.</li>
+          <li>Click a node to inspect its connected links and use it in connect mode.</li>
+          <li>Click a topology link to inspect its endpoints or enter path edit mode.</li>
+        </ul>
+      </div>
+    `
+  }
+
+  if (state.selectedObject.type === 'router') {
+    const router = getRouter(state.selectedObject.id)
+    if (!router) return ''
+    return `
+      <div class="rounded-xl border border-gray-100 px-4 py-4">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Router</p>
+            <p class="text-lg font-semibold text-gray-900 mt-1">${escapeHtml(router.name)}</p>
+            <p class="text-sm text-gray-500 mt-1">${escapeHtml(router.host)}</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(router.status)}">${escapeHtml(formatLabel(router.status))}</span>
+        </div>
+        <dl class="mt-4 space-y-3 text-sm">
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Latitude</dt><dd class="font-medium text-right text-gray-800">${formatCoord(router.lat)}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Longitude</dt><dd class="font-medium text-right text-gray-800">${formatCoord(router.lng)}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Location</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(router.location || '-')}</dd></div>
+        </dl>
+      </div>
+    `
+  }
+
+  if (state.selectedObject.type === 'node') {
+    const node = getNode(state.selectedObject.id)
+    if (!node) return ''
+    return `
+      <div class="rounded-xl border border-gray-100 px-4 py-4">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Node</p>
+            <p class="text-lg font-semibold text-gray-900 mt-1">${escapeHtml(node.name)}</p>
+            <p class="text-sm text-gray-500 mt-1">${escapeHtml(formatLabel(node.node_type))}</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">${countConnectedLinks(node.id)} links</span>
+        </div>
+        <dl class="mt-4 space-y-3 text-sm">
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Latitude</dt><dd class="font-medium text-right text-gray-800">${formatCoord(node.lat)}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Longitude</dt><dd class="font-medium text-right text-gray-800">${formatCoord(node.lng)}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Connected Links</dt><dd class="font-medium text-right text-gray-800">${countConnectedLinks(node.id)}</dd></div>
+        </dl>
+        ${node.distribution_url ? `
+          <div class="flex flex-wrap gap-2 mt-4">
+            <a href="${node.distribution_url}" class="inline-flex items-center justify-center rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium px-4 py-2 transition">Open Distribution</a>
+          </div>
+        ` : ''}
+        ${state.mode === 'connect' ? `<p class="text-xs text-blue-700 mt-4">Node clicks in Connect Mode select the source and target for a new topology link.</p>` : ''}
+      </div>
+    `
+  }
+
+  if (state.selectedObject.type === 'subscriber') {
+    const subscriber = getSubscriber(state.selectedObject.id)
+    if (!subscriber) return ''
+    return `
+      <div class="rounded-xl border border-gray-100 px-4 py-4">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Subscriber</p>
+            <p class="text-lg font-semibold text-gray-900 mt-1">${escapeHtml(subscriber.name)}</p>
+            <p class="text-sm text-gray-500 mt-1">@${escapeHtml(subscriber.username)}</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(subscriber.topology_status)}">${escapeHtml(formatLabel(subscriber.topology_status))}</span>
+        </div>
+        <dl class="mt-4 space-y-3 text-sm">
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Plan</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(subscriber.plan || '-')}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Service Status</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(formatLabel(subscriber.status))}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">MikroTik</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(formatLabel(subscriber.mt_status))}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Mapped Node</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(subscriber.mapped_node_name || '-')}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Endpoint</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(subscriber.mapped_endpoint_name || '-')}</dd></div>
+        </dl>
+        <div class="flex flex-wrap gap-2 mt-4">
+          <a href="${subscriber.detail_url}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">Open Subscriber</a>
+          <a href="${subscriber.workspace_url}" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 transition">Open in NMS</a>
+          ${subscriber.distribution_url ? `<a href="${subscriber.distribution_url}" class="inline-flex items-center justify-center rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-medium px-4 py-2 transition">Open Distribution</a>` : ''}
+        </div>
+      </div>
+    `
+  }
+
+  if (state.selectedObject.type === 'link') {
+    const link = getLink(state.selectedObject.id)
+    if (!link) return ''
+    return `
+      <div class="rounded-xl border border-gray-100 px-4 py-4">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Topology Link</p>
+            <p class="text-lg font-semibold text-gray-900 mt-1">${escapeHtml(link.name)}</p>
+            <p class="text-sm text-gray-500 mt-1">${escapeHtml(link.source_node_name)} -> ${escapeHtml(link.target_node_name)}</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(link.status)}">${escapeHtml(formatLabel(link.status))}</span>
+        </div>
+        <dl class="mt-4 space-y-3 text-sm">
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Type</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(formatLabel(link.link_type))}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Vertices</dt><dd class="font-medium text-right text-gray-800">${link.vertex_count}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Source Node</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(link.source_node_name)}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Target Node</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(link.target_node_name)}</dd></div>
+        </dl>
+        ${link.notes ? `<p class="text-sm text-gray-500 mt-4">${escapeHtml(link.notes)}</p>` : ''}
+        <div class="flex flex-wrap gap-2 mt-4">
+          <a href="${link.edit_url}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">Open Link Form</a>
+          <button id="inspect-edit-path-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 transition ${!topologyLinksReady ? 'opacity-50 cursor-not-allowed' : ''}" ${!topologyLinksReady ? 'disabled' : ''}>Edit Path</button>
+        </div>
+      </div>
+    `
+  }
+
+  return ''
+}
+
+function bindInspectorEvents() {
+  const createLinkButton = document.getElementById('create-link-btn')
+  if (createLinkButton) {
+    createLinkButton.addEventListener('click', createLinkFromInspector)
+  }
+
+  const resetConnectButton = document.getElementById('reset-connect-btn')
+  if (resetConnectButton) {
+    resetConnectButton.addEventListener('click', () => {
+      state.connectSourceNodeId = null
+      state.connectTargetNodeId = null
+      clearLocalNotice()
+      drawMap()
+      renderInspector()
+    })
+  }
+
+  const editPathButton = document.getElementById('inspect-edit-path-btn')
+  if (editPathButton) {
+    editPathButton.addEventListener('click', () => {
+      setMode('edit-path')
+    })
+  }
+
+  const geometryTextarea = document.getElementById('geometry-textarea')
+  if (geometryTextarea) {
+    geometryTextarea.addEventListener('input', event => {
+      const parsed = parseGeometryText(event.target.value)
+      state.geometryError = parsed.error
+      if (!parsed.error) {
+        state.editingVertices = parsed.points
+        renderGeometryHandles()
+      }
+      const geometryError = document.getElementById('geometry-error')
+      if (geometryError) {
+        geometryError.textContent = state.geometryError
+        geometryError.classList.toggle('hidden', !state.geometryError)
+      }
+    })
+  }
+
+  const clearGeometryButton = document.getElementById('clear-geometry-btn')
+  if (clearGeometryButton) {
+    clearGeometryButton.addEventListener('click', () => {
+      state.editingVertices = []
+      state.geometryError = ''
+      renderGeometryHandles()
+      renderInspector()
+    })
+  }
+
+  const cancelEditPathButton = document.getElementById('cancel-edit-path-btn')
+  if (cancelEditPathButton) {
+    cancelEditPathButton.addEventListener('click', () => {
+      setMode('view')
+    })
+  }
+
+  const saveGeometryButton = document.getElementById('save-geometry-btn')
+  if (saveGeometryButton) {
+    saveGeometryButton.addEventListener('click', saveGeometryFromInspector)
+  }
+}
+
+async function createLinkFromInspector() {
+  const sourceNode = getNode(state.connectSourceNodeId)
+  const targetNode = getNode(state.connectTargetNodeId)
+  if (!sourceNode || !targetNode) {
+    setLocalNotice('warning', 'Select both source and target nodes first.')
+    return
+  }
+
+  const formData = new FormData()
+  formData.set('name', document.getElementById('connect-link-name').value)
+  formData.set('source_node', String(sourceNode.id))
+  formData.set('target_node', String(targetNode.id))
+  formData.set('link_type', document.getElementById('connect-link-type').value)
+  formData.set('status', document.getElementById('connect-link-status').value)
+  formData.set('notes', document.getElementById('connect-link-notes').value)
+  formData.set('geometry_text', '')
+
+  const response = await fetch(urls.createLink, {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': getCsrfToken(),
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    body: formData,
+  })
+  const payload = await response.json()
+
+  if (!response.ok || !payload.ok) {
+    setLocalNotice('error', extractFirstError(payload, 'Unable to create the topology link.'))
+    return
+  }
+
+  state.data.links.push(payload.link)
+  state.index = indexData(state.data)
+  state.connectSourceNodeId = null
+  state.connectTargetNodeId = null
+  state.selectedObject = { type: 'link', id: payload.link.id }
+  state.mode = 'view'
+  state.highlightedNodeId = null
+  clearLocalNotice()
+  updateModeButtons()
+  drawMap()
+  renderInspector()
+  setLocalNotice('info', payload.message)
+}
+
+async function saveGeometryFromInspector() {
+  const link = getEditingLink()
+  if (!link) {
+    setLocalNotice('warning', 'Select a topology link first.')
+    return
+  }
+  if (state.geometryError) {
+    setLocalNotice('error', state.geometryError)
+    return
+  }
+
+  const formData = new FormData()
+  formData.set('geometry_text', geometryVerticesToText())
+  const response = await fetch(getLinkGeometryUpdateUrl(link.id), {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': getCsrfToken(),
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+    body: formData,
+  })
+  const payload = await response.json()
+
+  if (!response.ok || !payload.ok) {
+    setLocalNotice('error', extractFirstError(payload, 'Unable to save geometry.'))
+    return
+  }
+
+  state.data.links = state.data.links.map(item => item.id === payload.link.id ? payload.link : item)
+  state.index = indexData(state.data)
+  state.selectedObject = { type: 'link', id: payload.link.id }
+  state.editingLinkId = payload.link.id
+  state.editingVertices = parseGeometryText(payload.link.geometry_text || '').points
+  state.geometryError = ''
+  renderGeometryHandles()
+  drawMap()
+  renderInspector()
+  setLocalNotice('info', payload.message)
+}
+
+function drawMap() {
+  routerLayer.clearLayers()
+  linkLayer.clearLayers()
+  nodeLayer.clearLayers()
+  subLayer.clearLayers()
+  mappingLayer.clearLayers()
+
+  if (!state.data) return
+
+  const allPoints = []
+  const focusPoints = []
+
+  if (state.visibility.routers) {
+    state.data.routers.forEach(router => {
+      const marker = L.marker([router.lat, router.lng], { icon: makeRouterIcon(router) })
+      marker.bindPopup(`
+        <b><i class="fa fa-router"></i> ${escapeHtml(router.name)}</b><br>
+        <span class="text-gray-500">${escapeHtml(router.host)}</span><br>
+        Status: <span style="color:${router.status === 'online' ? '#16a34a' : '#dc2626'}">${escapeHtml(router.status)}</span><br>
+        ${router.location ? `<i>${escapeHtml(router.location)}</i><br>` : ''}
+        <a href="/routers/${router.id}/" style="color:#2563eb">View Router</a>
+      `)
+      marker.on('click', () => selectObject('router', router.id))
+      routerLayer.addLayer(marker)
+      allPoints.push([router.lat, router.lng])
+    })
+  }
+
+  if (state.visibility.links) {
+    state.data.links
+      .filter(link => state.filters.linkType === 'all' || link.link_type === state.filters.linkType)
+      .filter(link => state.filters.linkStatus === 'all' || link.status === state.filters.linkStatus)
+      .forEach(link => {
+        const polyline = L.polyline(link.points, getTopologyLinkStyle(link))
+        polyline.bindPopup(`
+          <b>${escapeHtml(link.name)}</b><br>
+          ${escapeHtml(link.source_node_name)} -> ${escapeHtml(link.target_node_name)}<br>
+          Type: ${escapeHtml(formatLabel(link.link_type))}<br>
+          Status: ${escapeHtml(formatLabel(link.status))}<br>
+          Vertices: ${link.vertex_count}<br>
+          ${link.notes ? `${escapeHtml(link.notes)}<br>` : ''}
+          <a href="${link.edit_url}" style="color:#2563eb">Edit Link</a>
+        `)
+        polyline.on('click', () => selectObject('link', link.id))
+        linkLayer.addLayer(polyline)
+        link.points.forEach(point => allPoints.push(point))
+        if (focusSubscriberId && (link.is_focus_related || state.highlightedNodeId && [link.source_node_id, link.target_node_id].includes(state.highlightedNodeId))) {
+          link.points.forEach(point => focusPoints.push(point))
+        }
+      })
+  }
+
+  if (state.visibility.nodes) {
+    state.data.nodes.forEach(node => {
+      const marker = L.marker([node.lat, node.lng], { icon: makeNodeIcon(node) })
+      marker.bindPopup(`
+        <b><i class="fa fa-diagram-project"></i> ${escapeHtml(node.name)}</b><br>
+        Type: ${escapeHtml(formatLabel(node.node_type))}<br>
+        ${node.distribution_url ? `<a href="${node.distribution_url}" style="color:#2563eb">Open Distribution</a>` : ''}
+      `)
+      marker.on('click', () => handleNodeClick(node))
+      nodeLayer.addLayer(marker)
+      allPoints.push([node.lat, node.lng])
+      if (state.highlightedNodeId === node.id || state.data.focus_node_id === node.id) {
+        focusPoints.push([node.lat, node.lng])
+      }
+    })
+  }
+
+  if (state.visibility.subscribers) {
+    state.data.subscribers.forEach(subscriber => {
+      const marker = L.marker([subscriber.lat, subscriber.lng], {
+        icon: makeSubscriberIcon(subscriber),
+      })
+      marker.bindPopup(`
+        <b>${escapeHtml(subscriber.name)}</b><br>
+        <span class="text-gray-400 font-mono text-xs">${escapeHtml(subscriber.username)}</span><br>
+        Plan: ${escapeHtml(subscriber.plan || '-')}<br>
+        IP: ${escapeHtml(subscriber.ip || '-')}<br>
+        Mapped Node: ${escapeHtml(subscriber.mapped_node_name || '-')}<br>
+        ${subscriber.mapped_endpoint_name ? `Endpoint: ${escapeHtml(subscriber.mapped_endpoint_name)}<br>` : ''}
+        <a href="${subscriber.detail_url}" style="color:#2563eb">View Subscriber</a>
+      `)
+      marker.on('click', () => selectObject('subscriber', subscriber.id))
+      subLayer.addLayer(marker)
+      allPoints.push([subscriber.lat, subscriber.lng])
+      if (focusSubscriberId === subscriber.id || state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id) {
+        focusPoints.push([subscriber.lat, subscriber.lng])
+      }
+    })
+  }
+
+  if (state.visibility.mappings) {
+    state.data.attachments.forEach(attachment => {
+      const highlightAttachment = (
+        (focusSubscriberId && attachment.subscriber_id === focusSubscriberId)
+        || (state.selectedObject?.type === 'subscriber' && attachment.subscriber_id === state.selectedObject.id)
+      )
+      const polyline = L.polyline(
+        [
+          [attachment.node_lat, attachment.node_lng],
+          [attachment.subscriber_lat, attachment.subscriber_lng],
+        ],
+        {
+          color: attachment.status === 'needs_review' ? '#f59e0b' : '#22c55e',
+          weight: highlightAttachment ? 5 : 3,
+          opacity: 0.85,
+          dashArray: attachment.status === 'needs_review' ? '8, 8' : null,
+        }
+      )
+      polyline.bindPopup(`
+        <b>${escapeHtml(attachment.subscriber_name)}</b><br>
+        Node: ${escapeHtml(attachment.node_name || '-')}<br>
+        Status: ${escapeHtml(formatLabel(attachment.status))}<br>
+        ${attachment.endpoint_label ? `Endpoint: ${escapeHtml(attachment.endpoint_label)}<br>` : ''}
+        <a href="${attachment.workspace_url}" style="color:#2563eb">Open NMS Workspace</a>
+      `)
+      polyline.on('click', () => selectObject('subscriber', attachment.subscriber_id))
+      mappingLayer.addLayer(polyline)
+      allPoints.push([attachment.node_lat, attachment.node_lng], [attachment.subscriber_lat, attachment.subscriber_lng])
+      if (highlightAttachment) {
+        focusPoints.push([attachment.node_lat, attachment.node_lng], [attachment.subscriber_lat, attachment.subscriber_lng])
+      }
+    })
+  }
+
+  renderGeometryHandles()
+
+  if (!state.hasInitialFit) {
+    const pointsToFit = focusPoints.length ? focusPoints : allPoints
+    if (pointsToFit.length) {
+      map.fitBounds(pointsToFit, { padding: [30, 30] })
+      state.hasInitialFit = true
+    }
+  }
+}
+
+async function refreshMap() {
+  const response = await fetch(getDataUrl())
+  const data = await response.json()
+  state.data = data
+  state.index = indexData(data)
+
+  if (!state.selectedObject && data.focus_node_id) {
+    state.highlightedNodeId = data.focus_node_id
+  }
+
+  if (state.selectedObject) {
+    const selectedExists = (
+      state.selectedObject.type === 'router' && state.index.routers.has(state.selectedObject.id)
+    ) || (
+      state.selectedObject.type === 'node' && state.index.nodes.has(state.selectedObject.id)
+    ) || (
+      state.selectedObject.type === 'subscriber' && state.index.subscribers.has(state.selectedObject.id)
+    ) || (
+      state.selectedObject.type === 'link' && state.index.links.has(state.selectedObject.id)
+    )
+    if (!selectedExists) {
+      state.selectedObject = null
+      state.highlightedNodeId = data.focus_node_id || null
+    }
+  }
+
+  document.getElementById('count-routers').textContent = data.routers.length
+  document.getElementById('count-links').textContent = data.links.length
+  document.getElementById('count-nodes').textContent = data.nodes.length
+  document.getElementById('count-subs').textContent = data.subscribers.length
+  document.getElementById('count-mappings').textContent = data.attachments.length
+  document.getElementById('count-online').textContent = data.subscribers.filter(item => item.mt_status === 'online').length
+
+  drawMap()
+  renderInspector()
+}
+
+map.on('click', event => {
+  if (state.mode !== 'edit-path' || !topologyLinksReady || !getEditingLink()) return
+  state.editingVertices.push([
+    Number(event.latlng.lat.toFixed(6)),
+    Number(event.latlng.lng.toFixed(6)),
+  ])
+  state.geometryError = ''
+  renderGeometryHandles()
+  renderInspector()
 })
 
-document.getElementById('toggle-subs').addEventListener('change', function() {
-  if (this.checked) map.addLayer(subLayer)
-  else map.removeLayer(subLayer)
+document.getElementById('refresh-map-btn').addEventListener('click', () => {
+  state.hasInitialFit = false
+  refreshMap()
+})
+document.getElementById('mode-view-btn').addEventListener('click', () => setMode('view'))
+document.getElementById('mode-connect-btn').addEventListener('click', () => setMode('connect'))
+document.getElementById('mode-edit-path-btn').addEventListener('click', () => setMode('edit-path'))
+
+document.getElementById('toggle-routers').addEventListener('change', event => {
+  state.visibility.routers = event.target.checked
+  drawMap()
+})
+document.getElementById('toggle-links').addEventListener('change', event => {
+  state.visibility.links = event.target.checked
+  drawMap()
+})
+document.getElementById('toggle-nodes').addEventListener('change', event => {
+  state.visibility.nodes = event.target.checked
+  drawMap()
+})
+document.getElementById('toggle-subs').addEventListener('change', event => {
+  state.visibility.subscribers = event.target.checked
+  drawMap()
+})
+document.getElementById('toggle-mappings').addEventListener('change', event => {
+  state.visibility.mappings = event.target.checked
+  drawMap()
+})
+document.getElementById('filter-link-type').addEventListener('change', event => {
+  state.filters.linkType = event.target.value
+  drawMap()
+})
+document.getElementById('filter-link-status').addEventListener('change', event => {
+  state.filters.linkStatus = event.target.value
+  drawMap()
 })
 
+updateModeButtons()
+renderInspector()
 refreshMap()
-setInterval(refreshMap, 60000)
+setInterval(() => {
+  if (state.mode === 'view') {
+    refreshMap()
+  }
+}, 60000)
 </script>
 {% endblock %}
