@@ -4,6 +4,14 @@
 
 ---
 
+## Current Workflow Guide
+
+For the current `Settings > Billing > Billing Mode` workflow, use
+[`docs/44_billing_mode_workflow_guide.md`](44_billing_mode_workflow_guide.md).
+This step document contains earlier scaffold notes and some historical model names.
+
+---
+
 ## What Was Built
 
 ### New Files
