@@ -1148,9 +1148,23 @@ Implemented status transition slice:
 - Audit logs record old status to new status transitions.
 - If the database status changes but MikroTik returns a warning, the UI reports the warning instead of hiding it.
 
+Implemented service-type-aware MikroTik access slice:
+
+- Auto-suspend/reconnect no longer assumes every subscriber is PPPoE.
+- PPPoE subscribers update `/ppp/secret` by `name=username`.
+- Hotspot subscribers update `/ip/hotspot/user` by `name=username`.
+- DHCP/IPoE subscribers update `/ip/dhcp-server/lease` using the best available lookup:
+  - `mac-address`,
+  - then `address`,
+  - then `comment=username`,
+  - then `host-name=username`.
+- Static subscribers now return an explicit warning instead of silently trying to disable a PPP secret.
+- Static service suspension needs a defined router policy first, such as a firewall address-list and matching drop/redirect rule.
+- The subscriber status still changes in the app when MikroTik returns a warning; the UI surfaces that warning to the operator.
+
 Recommended next subscriber slices:
 
-- Service-type-aware MikroTik suspend/reconnect for PPPoE, Hotspot, DHCP/IPoE, and Static subscribers.
+- Optional static-subscriber firewall/address-list policy for suspend/reconnect.
 - Auto-reconnect rule after full payment, with a setting to require manual approval or allow automatic reconnect.
 - Disconnected final-billing policy with options to final bill, waive open balance, preserve balance, or refund credit.
 - Phone normalization and duplicate-phone policy for subscriber portal OTP.

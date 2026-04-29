@@ -177,16 +177,7 @@ def suspend_on_mikrotik(subscriber):
     if not subscriber.router:
         return False, 'No router assigned to subscriber.'
 
-    try:
-        api, conn = mikrotik.get_connection(subscriber.router)
-        resource = api.get_resource('/ppp/secret')
-        secrets = resource.get(name=subscriber.username)
-        if secrets:
-            resource.set(id=secrets[0]['id'], disabled='yes')
-        conn.disconnect()
-        return True, None
-    except Exception as e:
-        return False, str(e)
+    return set_subscriber_mikrotik_access(subscriber, disabled=True)
 
 
 def reconnect_on_mikrotik(subscriber):
@@ -199,16 +190,40 @@ def reconnect_on_mikrotik(subscriber):
     if not subscriber.router:
         return False, 'No router assigned to subscriber.'
 
-    try:
-        api, conn = mikrotik.get_connection(subscriber.router)
-        resource = api.get_resource('/ppp/secret')
-        secrets = resource.get(name=subscriber.username)
-        if secrets:
-            resource.set(id=secrets[0]['id'], disabled='no')
-        conn.disconnect()
-        return True, None
-    except Exception as e:
-        return False, str(e)
+    return set_subscriber_mikrotik_access(subscriber, disabled=False)
+
+
+def set_subscriber_mikrotik_access(subscriber, disabled=True):
+    action = 'suspend' if disabled else 'reconnect'
+    service_type = subscriber.service_type or 'pppoe'
+
+    if service_type == 'pppoe':
+        return mikrotik.set_ppp_secret_disabled(
+            subscriber.router,
+            subscriber.username,
+            disabled=disabled,
+        )
+    if service_type == 'hotspot':
+        return mikrotik.set_hotspot_user_disabled(
+            subscriber.router,
+            subscriber.username,
+            disabled=disabled,
+        )
+    if service_type == 'dhcp':
+        return mikrotik.set_dhcp_lease_disabled(
+            subscriber.router,
+            username=subscriber.username,
+            mac_address=subscriber.mac_address,
+            ip_address=subscriber.ip_address,
+            disabled=disabled,
+        )
+    if service_type == 'static':
+        return False, (
+            f"Static subscriber auto-{action} is not configured. "
+            "Use a DHCP lease, PPPoE, Hotspot account, or add a firewall/address-list policy first."
+        )
+
+    return False, f"Unsupported MikroTik service type for auto-{action}: {service_type}."
 
 
 # ── Subscriber Status Lifecycle ────────────────────────────────────────────────

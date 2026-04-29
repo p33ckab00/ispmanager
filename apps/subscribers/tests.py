@@ -1,14 +1,73 @@
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from apps.settings_app.models import BillingSettings
 from apps.subscribers.forms import ManualSubscriberForm, SubscriberAdminForm
 from apps.subscribers.models import Subscriber
 from apps.subscribers.services import get_subscriber_billing_readiness
-from apps.subscribers.services import transition_subscriber_status
+from apps.subscribers.services import set_subscriber_mikrotik_access, transition_subscriber_status
+
+
+class MikroTikServiceAccessTests(SimpleTestCase):
+    def _subscriber(self, service_type, **overrides):
+        data = {
+            'router': object(),
+            'username': 'client-001',
+            'service_type': service_type,
+            'mac_address': 'AA:BB:CC:DD:EE:FF',
+            'ip_address': '192.0.2.10',
+        }
+        data.update(overrides)
+        return SimpleNamespace(**data)
+
+    @patch('apps.subscribers.services.mikrotik.set_ppp_secret_disabled', return_value=(True, None))
+    def test_pppoe_access_uses_ppp_secret(self, helper):
+        subscriber = self._subscriber('pppoe')
+
+        ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
+
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        helper.assert_called_once_with(subscriber.router, subscriber.username, disabled=True)
+
+    @patch('apps.subscribers.services.mikrotik.set_hotspot_user_disabled', return_value=(True, None))
+    def test_hotspot_access_uses_hotspot_user(self, helper):
+        subscriber = self._subscriber('hotspot')
+
+        ok, err = set_subscriber_mikrotik_access(subscriber, disabled=False)
+
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        helper.assert_called_once_with(subscriber.router, subscriber.username, disabled=False)
+
+    @patch('apps.subscribers.services.mikrotik.set_dhcp_lease_disabled', return_value=(True, None))
+    def test_dhcp_access_uses_lease_identifiers(self, helper):
+        subscriber = self._subscriber('dhcp')
+
+        ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
+
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        helper.assert_called_once_with(
+            subscriber.router,
+            username=subscriber.username,
+            mac_address=subscriber.mac_address,
+            ip_address=subscriber.ip_address,
+            disabled=True,
+        )
+
+    def test_static_access_returns_explicit_policy_warning(self):
+        subscriber = self._subscriber('static')
+
+        ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
+
+        self.assertFalse(ok)
+        self.assertIn('Static subscriber auto-suspend is not configured', err)
 
 
 class SubscriberBillingReadinessTests(TestCase):
