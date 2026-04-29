@@ -48,12 +48,11 @@ def job_generate_snapshots():
         today = date.today()
         subs = Subscriber.objects.filter(
             status__in=['active', 'suspended'],
-        ).filter(get_cutoff_day_queryset_filter(today.day, settings))
+        ).filter(get_cutoff_day_queryset_filter(today.day, settings, today))
         created = 0
         for sub in subs:
-            existing = sub.billing_snapshots.filter(cutoff_date=today).first()
-            if not existing:
-                generate_snapshot_for_subscriber(sub, settings)
+            snapshot, err = generate_snapshot_for_subscriber(sub, settings, reference_date=today)
+            if snapshot and err is None:
                 created += 1
         logger.info(f"Snapshots generated: {created}")
     except Exception as e:
@@ -91,9 +90,10 @@ def job_send_billing_sms():
             return
         results = send_bulk_billing_sms(sent_by='scheduler')
         sent = sum(1 for r in results if r['ok'])
-        failed = sum(1 for r in results if not r['ok'])
+        skipped = sum(1 for r in results if r.get('skipped'))
+        failed = sum(1 for r in results if not r['ok'] and not r.get('skipped'))
         notify_event('sms_sent', 'Billing SMS Sent',
-                     f"Scheduled billing SMS: {sent} sent, {failed} failed.")
+                     f"Scheduled billing SMS: {sent} sent, {skipped} skipped, {failed} failed.")
     except Exception as e:
         logger.error(f"job_send_billing_sms error: {e}")
 

@@ -376,7 +376,12 @@ def _build_job_metadata():
             'enabled': sms_settings.enable_billing_sms,
             'healthy_within': timedelta(hours=36),
             'note': (
-                f"Targets snapshots due in {sms_settings.billing_sms_days_before_due} day(s)."
+                f"Starts {sms_settings.billing_sms_days_before_due} day(s) before due, repeats every {sms_settings.billing_sms_repeat_interval_days} day(s)"
+                + (
+                    f", after due every {sms_settings.billing_sms_after_due_interval_days} day(s)."
+                    if sms_settings.billing_sms_send_after_due
+                    else "."
+                )
                 if sms_settings.enable_billing_sms
                 else 'Disabled in SMS Settings.'
             ),

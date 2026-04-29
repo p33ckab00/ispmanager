@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Billing Queue - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex flex-col gap-3 mb-6 lg:flex-row lg:items-center lg:justify-between">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Billing Queue</h2>
+    <p class="text-sm text-gray-500 mt-1">{{ selected_date|date:"F d, Y" }}</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    <a href="/billing/queue/?date={{ previous_date|date:'Y-m-d' }}&event={{ event_filter }}&billing_type={{ billing_type }}&q={{ q|urlencode }}"
+      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      <i class="fa fa-chevron-left mr-1"></i> Prev
+    </a>
+    <a href="/billing/queue/?date={{ today|date:'Y-m-d' }}&event={{ event_filter }}&billing_type={{ billing_type }}&q={{ q|urlencode }}"
+      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      Today
+    </a>
+    <a href="/billing/queue/?date={{ next_date|date:'Y-m-d' }}&event={{ event_filter }}&billing_type={{ billing_type }}&q={{ q|urlencode }}"
+      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      Next <i class="fa fa-chevron-right ml-1"></i>
+    </a>
+    <a href="/billing/calendar/?month={{ selected_date|date:'Y-m' }}&billing_type={{ billing_type }}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      Calendar
+    </a>
+    <a href="/billing/" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      Invoices
+    </a>
+    <a href="/billing/snapshots/" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      Statements
+    </a>
+  </div>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="grid grid-cols-2 gap-4 mb-6 lg:grid-cols-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-gray-800">{{ summary.day_events }}</p>
+    <p class="text-xs text-gray-400 mt-1">Day Events</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-blue-600">{{ summary.generation }}</p>
+    <p class="text-xs text-gray-400 mt-1">Generation</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-orange-600">{{ summary.due }}</p>
+    <p class="text-xs text-gray-400 mt-1">Due</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-green-600">{{ summary.sms }}</p>
+    <p class="text-xs text-gray-400 mt-1">SMS</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-red-600">{{ summary.attention }}</p>
+    <p class="text-xs text-gray-400 mt-1">Attention</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-gray-800">PHP {{ summary.total_due }}</p>
+    <p class="text-xs text-gray-400 mt-1">Day Total</p>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
+  <form method="get" class="grid gap-3 p-4 lg:grid-cols-[150px_170px_150px_1fr_auto]">
+    <input type="date" name="date" value="{{ selected_date|date:'Y-m-d' }}"
+      class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <select name="event" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      {% for value, label in event_options %}
+      <option value="{{ value }}" {% if event_filter == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <select name="billing_type" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option value="">All Types</option>
+      <option value="postpaid" {% if billing_type == 'postpaid' %}selected{% endif %}>Postpaid</option>
+      <option value="prepaid" {% if billing_type == 'prepaid' %}selected{% endif %}>Prepaid</option>
+    </select>
+    <input type="text" name="q" value="{{ q }}" placeholder="Search subscriber or phone..."
+      class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+      Filter
+    </button>
+  </form>
+</div>
+
+<form method="post" action="/billing/queue/?date={{ selected_date|date:'Y-m-d' }}&event={{ event_filter }}&billing_type={{ billing_type }}&q={{ q|urlencode }}">
+  {% csrf_token %}
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
+    <div class="flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <p class="text-sm font-semibold text-gray-700">Selected Queue Actions</p>
+        <p class="text-xs text-gray-400 mt-1">Generation-ready, SMS-ready, and failed-retry rows can be selected.</p>
+      </div>
+      <div class="flex flex-col gap-2 sm:flex-row">
+        <select name="bulk_action" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="generate_invoices">Generate selected invoices</option>
+          <option value="generate_snapshots">Generate selected statements</option>
+          <option value="send_sms">Send selected billing SMS</option>
+          <option value="retry_failed_sms">Retry selected failed SMS</option>
+        </select>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+          Run Selected
+        </button>
+      </div>
+    </div>
+  </div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm min-w-[1240px]">
+      <thead class="bg-gray-50 border-b border-gray-100">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Select</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Events</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Subscriber</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Billing</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Period</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Due</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Total</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Invoice</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Statement</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">SMS</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Action</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-50">
+        {% for row in page_obj %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-3">
+            {% if row.can_bulk_generate or row.can_send_sms or row.can_retry_sms %}
+            <input type="checkbox" name="subscriber_ids" value="{{ row.subscriber.pk }}"
+              class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            {% else %}
+            <span class="text-gray-300">-</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3">
+            <div class="flex flex-wrap gap-1">
+              {% for event in row.events %}
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ event.classes }}">{{ event.label }}</span>
+              {% endfor %}
+            </div>
+          </td>
+          <td class="px-4 py-3">
+            <a href="/subscribers/{{ row.subscriber.pk }}/" class="font-medium hover:text-blue-600">{{ row.subscriber.display_name }}</a>
+            <p class="text-xs text-gray-400 font-mono">{{ row.subscriber.username }}</p>
+            {% if row.subscriber.phone %}<p class="text-xs text-gray-400">{{ row.subscriber.phone }}</p>{% endif %}
+          </td>
+          <td class="px-4 py-3 text-xs text-gray-500">
+            <p class="font-medium text-gray-700">{{ row.billing_type|title }}</p>
+            <p>Cutoff day {{ row.cutoff_day }}</p>
+            <p>Run {{ row.generation_date|date:"M d, Y" }}</p>
+          </td>
+          <td class="px-4 py-3 text-xs text-gray-500">
+            {{ row.period_start|date:"M d" }} - {{ row.period_end|date:"M d, Y" }}
+          </td>
+          <td class="px-4 py-3 text-xs text-gray-500">
+            {{ row.due_date|date:"M d, Y" }}
+          </td>
+          <td class="px-4 py-3 text-right">
+            <p class="font-semibold {% if row.total_due > 0 %}text-gray-800{% else %}text-gray-400{% endif %}">PHP {{ row.total_due }}</p>
+            {% if row.previous_balance > 0 %}<p class="text-xs text-orange-500">Prev PHP {{ row.previous_balance }}</p>{% endif %}
+            {% if row.credit_applied > 0 %}<p class="text-xs text-green-600">Credit PHP {{ row.credit_applied }}</p>{% endif %}
+          </td>
+          <td class="px-4 py-3 text-xs">
+            {% if row.invoice %}
+            <a href="/billing/invoices/{{ row.invoice.pk }}/" class="font-mono text-blue-600 hover:underline">{{ row.invoice.invoice_number }}</a>
+            <p class="text-gray-400">{{ row.invoice_status|title }}</p>
+            {% else %}
+            <span class="text-gray-400">Missing</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-xs">
+            {% if row.snapshot %}
+            <a href="/billing/snapshots/{{ row.snapshot.pk }}/" class="font-mono text-blue-600 hover:underline">{{ row.snapshot.snapshot_number }}</a>
+            <p class="text-gray-400">{{ row.snapshot_status|title }}</p>
+            {% else %}
+            <span class="text-gray-400">Missing</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-xs">
+            <p class="{% if row.sms.eligible_today %}text-green-600 font-medium{% else %}text-gray-500{% endif %}">{{ row.sms_status_label }}</p>
+            {% if row.sms.next_sms_date %}
+            <p class="text-gray-400">Next {{ row.sms.next_sms_date|date:"M d, Y" }}</p>
+            {% else %}
+            <p class="text-gray-400">First {{ row.sms.first_sms_date|date:"M d, Y" }}</p>
+            {% endif %}
+            {% if row.sms.reminder_stage %}
+            <p class="text-gray-400">Stage {{ row.sms.reminder_stage }}</p>
+            {% endif %}
+            {% if row.sms_logs %}
+            <a href="/sms/log/?snapshot={{ row.snapshot.pk }}" class="text-blue-600 hover:underline">History</a>
+            <p class="text-gray-400">Last {{ row.sms_logs.0.status|title }} {{ row.sms_logs.0.created_at|date:"M d H:i" }}</p>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3 text-xs">
+            <span class="font-medium text-gray-700">{{ row.action_label }}</span>
+            {% if row.errors %}
+            <p class="text-red-500 mt-1">{{ row.errors|join:", " }}</p>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="11" class="px-4 py-12 text-center text-gray-400 text-sm">No billing queue items found.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if page_obj.has_other_pages %}
+  <div class="flex items-center justify-between px-4 py-3 border-t border-gray-100">
+    <p class="text-xs text-gray-500">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</p>
+    <div class="flex gap-1">
+      {% if page_obj.has_previous %}
+      <a href="?page={{ page_obj.previous_page_number }}&date={{ selected_date|date:'Y-m-d' }}&event={{ event_filter }}&billing_type={{ billing_type }}&q={{ q|urlencode }}"
+        class="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50">Prev</a>
+      {% endif %}
+      {% if page_obj.has_next %}
+      <a href="?page={{ page_obj.next_page_number }}&date={{ selected_date|date:'Y-m-d' }}&event={{ event_filter }}&billing_type={{ billing_type }}&q={{ q|urlencode }}"
+        class="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50">Next</a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+</form>
+{% endblock %}

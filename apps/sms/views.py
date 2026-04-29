@@ -10,7 +10,7 @@ from apps.core.models import AuditLog
 
 @login_required
 def sms_dashboard(request):
-    recent = SMSLog.objects.select_related('subscriber').all()[:10]
+    recent = SMSLog.objects.select_related('subscriber', 'billing_snapshot').all()[:10]
     sent_today = SMSLog.objects.filter(
         created_at__date=__import__('datetime').date.today()
     ).count()
@@ -25,10 +25,16 @@ def sms_dashboard(request):
 
 @login_required
 def sms_log(request):
-    qs = SMSLog.objects.select_related('subscriber').all()
+    qs = SMSLog.objects.select_related('subscriber', 'billing_snapshot').all()
+    snapshot_id = request.GET.get('snapshot', '').strip()
+    if snapshot_id:
+        qs = qs.filter(billing_snapshot_id=snapshot_id)
     paginator = Paginator(qs, 25)
     page = paginator.get_page(request.GET.get('page', 1))
-    return render(request, 'sms/log.html', {'page_obj': page})
+    return render(request, 'sms/log.html', {
+        'page_obj': page,
+        'snapshot_id': snapshot_id,
+    })
 
 
 @login_required

@@ -42,6 +42,11 @@ class Subscriber(models.Model):
         ('manual', 'Choose Manually'),
     ]
 
+    BILLING_TYPE_CHOICES = [
+        ('postpaid', 'Postpaid'),
+        ('prepaid', 'Prepaid'),
+    ]
+
     # MikroTik-owned fields (updated on every sync)
     router = models.ForeignKey(
         Router, on_delete=models.SET_NULL,
@@ -72,7 +77,13 @@ class Subscriber(models.Model):
     cutoff_day = models.IntegerField(
         null=True,
         blank=True,
-        help_text='Optional day of month for billing cutoff (1-28). Leave blank to use billing settings.'
+        help_text='Optional day of month for billing cutoff (1-31). Leave blank to use billing settings.'
+    )
+    billing_type = models.CharField(
+        max_length=20,
+        choices=BILLING_TYPE_CHOICES,
+        default='postpaid',
+        help_text='Postpaid bills after service use; prepaid bills before service use.'
     )
     billing_due_days = models.IntegerField(
         null=True,

@@ -18,7 +18,7 @@ SUBSCRIBER_IMPORT_HEADERS = [
     'username', 'full_name', 'phone', 'address', 'email',
     'service_type', 'mt_password', 'mt_profile',
     'plan_name', 'monthly_rate', 'cutoff_day',
-    'billing_effective_from', 'billing_due_days',
+    'billing_type', 'billing_effective_from', 'billing_due_days',
     'is_billable', 'start_date', 'status', 'notes', 'sms_opt_out',
 ]
 
@@ -118,6 +118,7 @@ def subscriber_export_rows(queryset):
             subscriber.plan.name if subscriber.plan else '',
             subscriber.monthly_rate or '',
             subscriber.cutoff_day if subscriber.cutoff_day is not None else '',
+            subscriber.billing_type,
             subscriber.billing_effective_from or '',
             subscriber.billing_due_days if subscriber.billing_due_days is not None else '',
             'yes' if subscriber.is_billable else 'no',
@@ -190,7 +191,7 @@ def subscriber_export_headers():
     return [
         'username', 'full_name', 'phone', 'address', 'email',
         'service_type', 'mt_profile', 'plan_name', 'monthly_rate',
-        'cutoff_day', 'billing_effective_from', 'billing_due_days',
+        'cutoff_day', 'billing_type', 'billing_effective_from', 'billing_due_days',
         'is_billable', 'start_date', 'status', 'sms_opt_out', 'updated_at',
     ]
 
@@ -222,7 +223,7 @@ def subscriber_template_response():
     sample_row = [
         'juan.pppoe', 'Juan Dela Cruz', '09171234567', 'Purok 1, Barangay Sample',
         'juan@example.com', 'pppoe', 'samplepass', 'basic-pppoe',
-        'Starter Plan', '999.00', '5', '2026-04-01', '5',
+        'Starter Plan', '999.00', '5', 'postpaid', '2026-04-01', '5',
         'yes', '2026-04-01', 'active', 'Imported from legacy list', 'no',
     ]
     return csv_response('subscriber-import-template.csv', SUBSCRIBER_IMPORT_HEADERS, [sample_row])
@@ -254,6 +255,7 @@ def preview_subscriber_import(rows, update_existing=True):
 
     service_choices = {choice[0] for choice in Subscriber.SERVICE_CHOICES}
     status_choices = {choice[0] for choice in Subscriber.STATUS_CHOICES}
+    billing_type_choices = {choice[0] for choice in Subscriber.BILLING_TYPE_CHOICES}
     seen_usernames = set()
 
     for line_number, row in enumerate(rows, start=2):
@@ -302,6 +304,13 @@ def preview_subscriber_import(rows, update_existing=True):
             else:
                 attrs['status'] = status
 
+        billing_type = (row.get('billing_type') or '').strip()
+        if billing_type:
+            if billing_type not in billing_type_choices:
+                line_errors.append(f"Line {line_number}: billing_type must be one of {', '.join(sorted(billing_type_choices))}.")
+            else:
+                attrs['billing_type'] = billing_type
+
         plan_name = (row.get('plan_name') or '').strip()
         if plan_name:
             plan = plan_map.get(plan_name.lower())
@@ -320,8 +329,8 @@ def preview_subscriber_import(rows, update_existing=True):
         if error:
             line_errors.append(f"Line {line_number}: {error}")
         elif cutoff_day is not None:
-            if not 1 <= cutoff_day <= 28:
-                line_errors.append(f"Line {line_number}: cutoff_day must be between 1 and 28.")
+            if not 1 <= cutoff_day <= 31:
+                line_errors.append(f"Line {line_number}: cutoff_day must be between 1 and 31.")
             else:
                 attrs['cutoff_day'] = cutoff_day
 

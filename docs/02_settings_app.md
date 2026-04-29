@@ -36,7 +36,7 @@
 - Used for one-off settings that do not need a full model
 
 ### BillingSettings (singleton pk=1)
-- billing_day: day of month to generate bills (1-28)
+- billing_day: default cutoff day (1-31, with month-end fallback for short months)
 - due_days: days after billing day before overdue
 - grace_period_days: days before disconnection
 - currency_symbol: default PHP
@@ -48,6 +48,9 @@
 - sender_name: max 11 chars (Semaphore limit)
 - billing_sms_schedule: HH:MM time string
 - billing_sms_days_before_due: how early to send
+- billing_sms_repeat_interval_days: repeat reminder interval while unpaid
+- billing_sms_send_after_due: continue collections reminders after due date
+- billing_sms_after_due_interval_days: repeat interval for after-due reminders
 - billing_sms_template: supports {name} {amount} {currency} {due_date} {link}
 
 ### TelegramSettings (singleton pk=1)

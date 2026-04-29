@@ -16,7 +16,7 @@
         class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       {% if form.sender_name.errors %}<p class="text-red-500 text-xs mt-1">{{ form.sender_name.errors.0 }}</p>{% endif %}
     </div>
-    <div class="grid grid-cols-2 gap-4">
+    <div class="grid grid-cols-3 gap-4">
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Send Time (HH:MM)</label>
         <input type="time" name="billing_sms_schedule" value="{{ form.billing_sms_schedule.value|default:'08:00' }}"
@@ -24,7 +24,24 @@
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Days Before Due Date</label>
-        <input type="number" name="billing_sms_days_before_due" min="1" value="{{ form.billing_sms_days_before_due.value|default:3 }}"
+        <input type="number" name="billing_sms_days_before_due" min="0" value="{{ form.billing_sms_days_before_due.value|default:3 }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Repeat Every</label>
+        <input type="number" name="billing_sms_repeat_interval_days" min="1" value="{{ form.billing_sms_repeat_interval_days.value|default:2 }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <label class="flex items-center gap-3 cursor-pointer pt-7">
+        <input type="checkbox" name="billing_sms_send_after_due" {% if form.billing_sms_send_after_due.value %}checked{% endif %}
+          class="w-4 h-4 rounded border-gray-300 text-blue-600">
+        <span class="text-sm text-gray-700">Continue reminders after due date</span>
+      </label>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">After Due Repeat Every</label>
+        <input type="number" name="billing_sms_after_due_interval_days" min="1" value="{{ form.billing_sms_after_due_interval_days.value|default:2 }}"
           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
     </div>
@@ -32,7 +49,7 @@
       <label class="block text-sm font-medium text-gray-700 mb-1">SMS Template</label>
       <textarea name="billing_sms_template" rows="4"
         class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ form.billing_sms_template.value }}</textarea>
-      <p class="text-xs text-gray-400 mt-1">Variables: {name} {amount} {currency} {due_date} {link}</p>
+      <p class="text-xs text-gray-400 mt-1">Variables: {name} {amount} {currency} {due_date} {link} {previous_balance} {current_charge}</p>
     </div>
     <label class="flex items-center gap-3 cursor-pointer">
       <input type="checkbox" name="enable_billing_sms" {% if form.enable_billing_sms.value %}checked{% endif %}

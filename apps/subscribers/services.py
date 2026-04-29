@@ -364,7 +364,7 @@ def create_cutoff_usage_snapshots(reference_date=None):
     subscribers = Subscriber.objects.filter(
         status__in=['active', 'suspended'],
         is_billable=True,
-    ).filter(get_cutoff_day_queryset_filter(today.day, billing_settings))
+    ).filter(get_cutoff_day_queryset_filter(today.day, billing_settings, today))
 
     for subscriber in subscribers:
         if SubscriberUsageCutoffSnapshot.objects.filter(

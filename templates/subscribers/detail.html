@@ -214,6 +214,7 @@
           <h3 class="font-semibold text-gray-700 mb-4">Account State</h3>
           <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div><dt class="text-xs text-gray-400">Start Date</dt><dd class="font-medium mt-0.5">{{ subscriber.start_date|default:'-' }}</dd></div>
+            <div><dt class="text-xs text-gray-400">Billing Type</dt><dd class="font-medium mt-0.5">{{ subscriber.get_billing_type_display }}</dd></div>
             <div><dt class="text-xs text-gray-400">Cutoff Day</dt><dd class="font-medium mt-0.5">{% if subscriber.cutoff_day is not None %}Day {{ subscriber.cutoff_day }}{% else %}Settings Default (Day {{ billing_profile.cutoff_day }}){% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Due Offset</dt><dd class="font-medium mt-0.5">{% if subscriber.billing_due_days is not None %}{{ subscriber.billing_due_days }} day(s){% else %}Settings Default ({{ billing_profile.due_offset_days }} day(s)){% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Billable</dt><dd class="font-medium mt-0.5">{% if subscriber.is_billable %}Yes{% else %}No{% endif %}</dd></div>
@@ -396,6 +397,7 @@
             <div><dt class="text-xs text-gray-400">Plan</dt><dd class="font-medium mt-0.5">{{ subscriber.plan.name|default:'No Plan' }}</dd></div>
             <div><dt class="text-xs text-gray-400">Monthly Rate</dt><dd class="font-bold text-lg mt-0.5 text-blue-700">{% if subscriber.effective_rate %}PHP {{ subscriber.effective_rate }}{% else %}-{% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Effective From</dt><dd class="font-medium mt-0.5">{{ subscriber.billing_effective_from|default:'-' }}</dd></div>
+            <div><dt class="text-xs text-gray-400">Billing Type</dt><dd class="font-medium mt-0.5">{{ subscriber.get_billing_type_display }}</dd></div>
             <div><dt class="text-xs text-gray-400">Cutoff Day</dt><dd class="font-medium mt-0.5">{% if subscriber.cutoff_day is not None %}Day {{ subscriber.cutoff_day }}{% else %}Settings Default (Day {{ billing_profile.cutoff_day }}){% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Due Offset</dt><dd class="font-medium mt-0.5">{% if subscriber.billing_due_days is not None %}{{ subscriber.billing_due_days }} day(s){% else %}Settings Default ({{ billing_profile.due_offset_days }} day(s)){% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Billable</dt><dd class="font-medium mt-0.5">{% if subscriber.is_billable %}Yes{% else %}No{% endif %}</dd></div>
@@ -738,6 +740,10 @@
           <div class="flex justify-between gap-4">
             <dt class="text-gray-400">Start Date</dt>
             <dd class="font-medium text-right">{{ subscriber.start_date|default:'-' }}</dd>
+          </div>
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-400">Billing Type</dt>
+            <dd class="font-medium text-right">{{ subscriber.get_billing_type_display }}</dd>
           </div>
           <div class="flex justify-between gap-4">
             <dt class="text-gray-400">Cutoff Day</dt>

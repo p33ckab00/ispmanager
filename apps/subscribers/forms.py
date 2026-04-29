@@ -8,8 +8,8 @@ class SubscriberBillingFieldsMixin:
         day = self.cleaned_data.get('cutoff_day')
         if day in (None, ''):
             return None
-        if not 1 <= int(day) <= 28:
-            raise forms.ValidationError('Cutoff day must be between 1 and 28.')
+        if not 1 <= int(day) <= 31:
+            raise forms.ValidationError('Cutoff day must be between 1 and 31.')
         return day
 
     def clean_billing_due_days(self):
@@ -27,7 +27,7 @@ class SubscriberAdminForm(SubscriberBillingFieldsMixin, forms.ModelForm):
         fields = [
             'full_name', 'phone', 'address', 'email',
             'latitude', 'longitude', 'cutoff_day', 'billing_effective_from',
-            'billing_due_days', 'is_billable', 'start_date', 'status', 'notes', 'sms_opt_out',
+            'billing_type', 'billing_due_days', 'is_billable', 'start_date', 'status', 'notes', 'sms_opt_out',
         ]
         widgets = {
             'address': forms.Textarea(attrs={'rows': 2}),
@@ -88,7 +88,7 @@ class ManualSubscriberForm(SubscriberBillingFieldsMixin, forms.ModelForm):
             'username', 'mt_password', 'mt_profile', 'service_type',
             'full_name', 'phone', 'address', 'email',
             'cutoff_day', 'billing_effective_from', 'billing_due_days',
-            'is_billable', 'start_date', 'status', 'notes',
+            'billing_type', 'is_billable', 'start_date', 'status', 'notes',
         ]
         widgets = {
             'mt_password': forms.PasswordInput(render_value=True),

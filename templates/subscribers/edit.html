@@ -35,11 +35,20 @@
         <p class="text-xs text-gray-400 mt-1">Used for billing cycle tracking.</p>
       </div>
       <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Cutoff Day (1-28)</label>
-        <input type="number" name="cutoff_day" min="1" max="28" value="{{ subscriber.cutoff_day|default:'' }}"
+        <label class="block text-sm font-medium text-gray-700 mb-1">Cutoff Day (1-31)</label>
+        <input type="number" name="cutoff_day" min="1" max="31" value="{{ subscriber.cutoff_day|default:'' }}"
           placeholder="Use settings default if blank"
           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <p class="text-xs text-gray-400 mt-1">Leave blank to use the default cutoff day from Settings > Billing.</p>
+        <p class="text-xs text-gray-400 mt-1">Leave blank to use the default cutoff day from Settings > Billing. Short months use month-end.</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Billing Type</label>
+        <select name="billing_type" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for value, label in form.fields.billing_type.choices %}
+          <option value="{{ value }}" {% if subscriber.billing_type == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <p class="text-xs text-gray-400 mt-1">Postpaid bills after use. Prepaid bills before use.</p>
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Billing Effective From</label>

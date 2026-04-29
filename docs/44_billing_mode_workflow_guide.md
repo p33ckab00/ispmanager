@@ -26,13 +26,13 @@ Treat `billing_mode` as a UI/config label until a mode-specific branch is implem
 | Settings page | `templates/settings_app/billing_settings.html` | Shows Billing Mode dropdown plus default cutoff and due fields. |
 | Core billing calculation | `apps/billing/services.py` | Resolves cutoff day, period, due offset, due date, invoices, snapshots, and overdue status. |
 | Billing scheduler | `apps/core/scheduler.py` | Runs invoice generation, snapshot generation, draft auto-freeze, overdue marking, SMS, and auto-suspend jobs. |
-| Subscriber overrides | `apps/subscribers/models.py` | Stores per-subscriber `cutoff_day`, `billing_due_days`, and `is_billable`. |
+| Subscriber overrides | `apps/subscribers/models.py` | Stores per-subscriber `cutoff_day`, `billing_type`, `billing_due_days`, and `is_billable`. |
 
 ## Settings Fields
 
 | Field | Meaning in current code |
 | --- | --- |
-| `billing_day` | Default cutoff day, limited to 1-28. Used when a subscriber has no custom `cutoff_day`. |
+| `billing_day` | Default cutoff day, limited to 1-31. Used when a subscriber has no custom `cutoff_day`; short months use month-end fallback. |
 | `due_days` | Legacy/default due-day fallback. Used only when no subscriber due override exists and `billing_due_offset_days` is `0` or blank. |
 | `billing_due_offset_days` | Preferred global due offset after cutoff when non-zero. |
 | `billing_mode` | Stored/displayed mode, but not used by calculation logic today. |
@@ -44,36 +44,47 @@ Treat `billing_mode` as a UI/config label until a mode-specific branch is implem
 
 Due offset precedence:
 
-1. Subscriber `billing_due_days`, when set. A subscriber value of `0` means due on the cutoff date.
+1. Subscriber `billing_due_days`, when set. A subscriber value of `0` means use the billing-type base due date.
 2. Global `billing_due_offset_days`, when non-zero.
 3. Global `due_days`, when non-zero.
 4. `0`.
 
 Important nuance: because the global fallback uses `billing_due_offset_days or due_days or 0`, setting global `billing_due_offset_days = 0` does not force same-day due if `due_days` is still greater than `0`. For global same-day due, set both fields to `0`. Subscriber-level `billing_due_days = 0` works because subscriber override is checked with `is not None`.
 
-## Current Cutoff Advance Workflow
+## Current Cutoff and Billing Type Workflow
 
-All current invoice and snapshot generation flows use `resolve_billing_profile()`.
+Current invoice and snapshot generation flows use `resolve_billing_profile()`.
 
 1. Resolve cutoff day:
    - Use subscriber `cutoff_day` if set.
    - Otherwise use `BillingSettings.billing_day`.
-2. Resolve target service period with `get_next_cutoff_period(cutoff_day, reference_date)`.
-   - If `reference_date.day >= cutoff_day`, period starts the day after this month's cutoff and ends on next month's cutoff.
-   - If `reference_date.day < cutoff_day`, period starts the day after the previous month's cutoff and ends on this month's cutoff.
-3. Set `cutoff_date = period_start - 1 day`.
-4. Resolve due offset using subscriber override, global due offset, then legacy/default due days.
-5. Set `due_date = cutoff_date + due_offset_days`.
-6. Use the rate effective on the reference date.
-7. Create or reuse one invoice per subscriber and `period_start`.
+2. Resolve the effective cutoff date for the month.
+   - Cutoff supports `1-31`.
+   - If the configured cutoff does not exist in a month, use that month's last day.
+3. Resolve target service period based on subscriber `billing_type`.
+   - `postpaid`: use the cycle containing the reference date; due date normally equals `period_end`.
+   - `prepaid`: use the next advance-billed cycle; due date normally equals `period_start`.
+4. Set `cutoff_date = period_end`.
+5. Set `generation_date`.
+   - `postpaid`: `generation_date = period_end`.
+   - `prepaid`: `generation_date = period_start - 1 day`.
+6. Resolve due offset using subscriber override, global due offset, then legacy/default due days.
+7. Add due offset to the billing-type base due date.
+8. Use the rate effective on the reference date.
+9. Create or reuse one invoice per subscriber and `period_start`.
 
-Example for a subscriber with cutoff day `10`:
+Example for a postpaid subscriber with cutoff day `28`:
 
-| Reference date | Target period | Cutoff date | Due date if offset is 7 |
-| --- | --- | --- | --- |
-| April 10, 2026 | April 11-May 10, 2026 | April 10, 2026 | April 17, 2026 |
-| April 11, 2026 | April 11-May 10, 2026 | April 10, 2026 | April 17, 2026 |
-| April 9, 2026 | March 11-April 10, 2026 | March 10, 2026 | March 17, 2026 |
+| Reference date | Target period | Cutoff date | Generation date | Due date if offset is 0 |
+| --- | --- | --- | --- | --- |
+| May 25, 2026 | Apr 29-May 28, 2026 | May 28, 2026 | May 28, 2026 | May 28, 2026 |
+| May 28, 2026 | Apr 29-May 28, 2026 | May 28, 2026 | May 28, 2026 | May 28, 2026 |
+
+Example for a prepaid subscriber with cutoff day `28`:
+
+| Reference date | Target period | Cutoff date | Generation date | Due date if offset is 0 |
+| --- | --- | --- | --- | --- |
+| May 28, 2026 | May 29-Jun 28, 2026 | Jun 28, 2026 | May 28, 2026 | May 29, 2026 |
 
 ## Planned Billing Model
 
@@ -177,26 +188,27 @@ Example:
 
 This keeps prepaid easy to explain: payment is due when the prepaid service period starts.
 
-## Planned Billing SMS Workflow
+## Current Billing SMS Workflow
 
-The current SMS setting only supports a single "days before due" target. The target workflow needs a reminder schedule.
+The billing SMS workflow now has a due-date reminder schedule with duplicate tracking.
 
-Target SMS behavior:
+Current SMS behavior:
 
-- Send billing SMS based on invoice or frozen billing snapshot due date.
+- Send billing SMS based on the frozen billing snapshot due date.
 - Send only while the invoice still has an unpaid balance.
 - Stop reminders once paid.
-- Avoid duplicate sends for the same invoice and reminder date or reminder stage.
+- Avoid duplicate sends for the same billing snapshot and reminder date.
+- Track reminder stage, reminder run date, and billing due date on `SMSLog`.
 
-Recommended SMS settings:
+Current SMS settings:
 
 | Setting | Purpose |
 | --- | --- |
 | `billing_sms_days_before_due` | First reminder lead time, for example `3` days before due date. |
-| `billing_sms_repeat_every_days` | Repeat interval, for example every `2` days. |
-| `billing_sms_send_on_due_date` | Whether to send a due-day reminder. |
-| `billing_sms_send_after_due` | Whether to keep reminding after due date. |
-| `billing_sms_stop_when_paid` | Should remain enabled by default. |
+| `billing_sms_repeat_interval_days` | Repeat interval, for example every `2` days. |
+| `billing_sms_send_after_due` | Enables collections reminders after the due date. |
+| `billing_sms_after_due_interval_days` | Repeat interval after the due date. |
+| `enable_billing_sms` | Master switch for scheduled billing SMS. |
 
 Example postpaid reminder schedule:
 
@@ -259,8 +271,8 @@ Example postpaid schedule:
 7. Update invoice and snapshot generation so billing can be created before due date when SMS reminders require it.
 8. Add SMS repeat scheduling and duplicate-send protection.
 9. Keep overdue and auto-suspend based on invoice due date plus grace period.
-10. Update settings form validation from `1-28` to `1-31` where appropriate.
-11. Update subscriber form validation from `1-28` to `1-31` where appropriate.
+10. Keep settings form validation aligned with cutoff `1-31`.
+11. Keep subscriber form validation aligned with cutoff `1-31`.
 12. Update data import validation for cutoff day `1-31`.
 13. Update UI helper text and docs to explain month-end fallback behavior.
 14. Add tests for cutoff `28`, `29`, `30`, and `31`, including February leap and non-leap years.
@@ -273,21 +285,20 @@ The current codebase already has the right major building blocks:
 | --- | --- |
 | `apps/billing/services.py` | Main billing engine for cutoff calculation, cycle resolution, invoice generation, snapshot generation, due dates, and overdue status. |
 | `apps/core/scheduler.py` | Daily orchestration for invoice generation, snapshot generation, SMS reminders, overdue marking, and auto-suspend. |
-| `apps/sms/services.py` | Billing SMS sender and future reminder scheduler logic. |
+| `apps/sms/services.py` | Billing SMS sender, reminder scheduler logic, and duplicate tracking. |
 | `apps/billing/models.py::Invoice` | Accounting and receivable source of truth. |
 | `apps/billing/models.py::BillingSnapshot` | Client-facing billing statement. |
 | `apps/subscribers/models.py::Subscriber` | Subscriber-level billing settings, including future prepaid/postpaid type. |
 
 Current limitation:
 
-- The system is effectively cutoff-advance billing only.
-- Cutoff behavior is limited to `1-28`.
-- Due date is currently cutoff date plus due offset.
+- The system has started moving beyond cutoff-advance billing by adding subscriber `billing_type`.
+- Cutoff behavior now supports `1-31` with month-end fallback in the billing profile foundation.
+- Due date now uses the subscriber billing type base date plus due offset.
 - Invoice generation runs daily for all active or suspended billable subscribers.
-- Snapshot generation runs only when today's raw day matches the resolved cutoff day.
-- Scheduled billing SMS sends only once, based on frozen snapshots where `due_date = today + billing_sms_days_before_due`.
-- There is no subscriber-level prepaid/postpaid distinction.
-- There is no repeat billing SMS schedule or duplicate reminder tracking.
+- Snapshot generation runs when today's date matches the effective cutoff date.
+- Scheduled billing SMS uses frozen snapshots whose due date is inside the configured lead window.
+- Repeat billing SMS scheduling and duplicate reminder-date tracking are implemented through `SMSLog`.
 
 Target billing flow:
 
@@ -510,7 +521,8 @@ Target behavior:
 - SMS reminders should be due-date based.
 - Reminders should stop when fully paid.
 - Partial balances should continue reminders using remaining balance.
-- Duplicate sends should be blocked per invoice and reminder date or stage.
+- Duplicate sends are blocked per billing snapshot and reminder date.
+- Due-date reminders are included even if the repeat interval does not land exactly on the due date.
 
 Recommended settings:
 
@@ -518,10 +530,10 @@ Recommended settings:
 | --- | --- | --- |
 | `enable_billing_sms` | existing setting | Master switch. |
 | `billing_sms_days_before_due` | existing setting, currently `3` | First reminder lead time. |
-| `billing_sms_repeat_every_days` | `2` | Repeat interval while unpaid. |
-| `billing_sms_send_on_due_date` | `true` | Sends due-day reminder if unpaid. |
+| `billing_sms_repeat_interval_days` | `2` | Repeat interval while unpaid. |
+| due-date reminder | fixed enabled | Sends due-day reminder if unpaid. |
 | `billing_sms_send_after_due` | `false` initially | Can be enabled for collections workflow. |
-| `billing_sms_after_due_every_days` | `2` if enabled | Repeat interval after due date. |
+| `billing_sms_after_due_interval_days` | `2` if enabled | Repeat interval after due date. |
 | `billing_sms_stop_when_paid` | `true` | Should usually remain fixed true. |
 
 Template recommendations:
@@ -810,39 +822,109 @@ Phase 1: Billing preview engine
 - It should not create invoices, snapshots, payments, or SMS logs.
 - This preview should be the shared source for the calendar, queue, and future bulk actions.
 
-Phase 2: Read-only calendar
+Current implementation status:
 
-- Add a monthly Billing Calendar view.
-- Show daily counts for effective cutoffs, due bills, SMS reminders, overdue transitions, and auto-suspend candidates.
-- Start read-only to validate date calculations before adding actions.
+- `get_billing_preview_for_subscriber()` provides a read-only subscriber billing preview.
+- `get_billing_previews()` provides batch preview support for a subscriber queryset.
+- Preview includes period, cutoff date, generation date, due date, billing type, rate, current charge, previous balance, account credit, credit applied, total due, invoice status, snapshot status, flags, and current SMS eligibility.
+- The preview engine does not create invoices, snapshots, payments, allocations, or SMS logs.
 
-Phase 3: Daily queue
+Phase 2: Read-only daily queue
 
-- Add a selected-date queue view.
+Current implementation status:
+
+- `/billing/queue/` exposes the preview engine as a read-only Daily Billing Queue.
+- The queue supports selected date, event type, billing type, and subscriber/phone search filters.
+- Event filters are:
+  - day events
+  - generation
+  - due
+  - SMS
+  - attention
+  - all subscribers
+- The queue summarizes day events, generation count, due count, SMS reminder count, attention count, and expected day total.
+- It shows `generation_date` separately from `cutoff_date`, which is important for prepaid subscribers whose bill is generated before the next prepaid cycle starts.
+- The queue can now run selected generation actions for generation-ready rows only.
+- Supported selected actions:
+  - generate selected invoices
+  - generate selected statements
+- Statement generation uses `generate_snapshot_for_subscriber()`, which also ensures the invoice exists.
+- The server re-checks selected subscribers before generating, so non-generation rows, invalid billing profiles, and non-billable accounts are skipped or reported.
+- The queue still does not create payments, allocations, or SMS logs.
+
+Phase 3: Read-only calendar
+
+Current implementation status:
+
+- `/billing/calendar/` exposes the preview engine as a read-only monthly Billing Calendar.
+- The calendar supports month navigation and billing type filtering.
+- Each day shows counts for generation, due, SMS reminder, attention, day event total, and expected amount due.
+- Clicking a day opens `/billing/queue/?date=YYYY-MM-DD` for the detailed subscriber list.
+- The calendar does not create invoices, snapshots, payments, allocations, or SMS logs.
+
+Remaining calendar enhancements:
+
+- Add overdue transition and auto-suspend candidate counts.
+- Add optional range summaries such as next 7 days or next 30 days.
+- Add export once the queue export format is defined.
+
+Phase 4: Daily queue enhancements
+
 - Group subscribers by ready to generate, already generated, SMS eligible, paid, partial, missing setup, exceptions, and auto-suspend risk.
-- Include the billing run summary at the top.
+- Add optional upcoming range mode such as next 7 days.
+- Add export for the selected queue day.
 
-Phase 4: Safe generation actions
+Phase 5: Safe generation actions
 
-- Add selected invoice generation.
-- Add selected snapshot generation.
-- Keep duplicate protection strict by subscriber and period.
-- Show a result summary after every bulk action.
+Current implementation status:
 
-Phase 5: SMS eligibility and sending
+- Selected invoice generation is available from `/billing/queue/`.
+- Selected statement generation is available from `/billing/queue/`.
+- Duplicate invoice protection remains in `generate_invoice_for_subscriber()` through the subscriber and `period_start` check.
+- Duplicate statement protection remains in `generate_snapshot_for_subscriber()` through the subscriber and `period_start` check.
+- Every bulk action shows created, skipped, and error counts.
+- The action is intentionally limited to generation-ready rows. SMS and due-only rows are visible but not selectable for generation.
 
-- Display first SMS date, next SMS date, last sent, reminder stage, and skip reason.
-- Add selected SMS send action only after duplicate reminder tracking exists.
-- Block SMS sends for fully paid invoices.
+Remaining generation enhancements:
 
-Phase 6: Review, export, and collections tools
+- Add select-all by visible page or current filtered result.
+- Add CSV export for the bulk result.
+- Add optional confirmation page for large batches.
+
+Phase 6: SMS eligibility and sending
+
+Current implementation status:
+
+- Billing preview now uses the SMS schedule engine.
+- Queue rows show SMS eligibility, next SMS date, and reminder stage.
+- Scheduled SMS sends from `send_bulk_billing_sms()` now support:
+  - first reminder based on `billing_sms_days_before_due`
+  - repeat reminders based on `billing_sms_repeat_interval_days`
+  - due-date reminder
+  - optional after-due reminders based on `billing_sms_send_after_due`
+  - skip when already attempted today
+  - skip when already sent today
+  - skip when paid or credit-covered
+  - skip when opted out, missing phone, or missing frozen statement
+- Queue-selected SMS sending is available for SMS-ready rows.
+- Queue-selected failed SMS retry is available for failed attempts that were not successfully sent.
+- Queue rows link to filtered SMS history for their billing statement.
+- `SMSLog` now stores billing snapshot, reminder stage, reminder run date, and billing due date for billing SMS tracking.
+- The billing SMS link now uses Django `APP_BASE_URL` correctly instead of the SMS settings object.
+
+Remaining SMS enhancements:
+
+- Add provider API response IDs if the SMS gateway exposes them.
+- Add a dedicated collections template if after-due reminders need different copy.
+
+Phase 7: Review, export, and collections tools
 
 - Add mark-reviewed state if draft review is enabled.
 - Add CSV export for the selected date or range.
 - Add quick links to record payment and subscriber detail.
 - Add collection-focused filters for partial, overdue, and auto-suspend risk.
 
-Phase 7: Dashboard integration
+Phase 8: Dashboard integration
 
 - Feed high-level queue metrics into the billing health dashboard.
 - Highlight today's billing workload, failed SMS, missing setup, and expected receivables.
@@ -856,7 +938,7 @@ Recommended settings:
 | `billing_queue_show_sms_dates` | `true` | Shows reminder schedule in the queue. |
 | `billing_queue_show_credit_covered` | `true` | Helps finance separate paid/credit-covered accounts. |
 | `billing_queue_allow_bulk_generate` | `true` | Enables selected invoice/snapshot generation. |
-| `billing_queue_allow_bulk_sms` | `false` initially | Safer until duplicate SMS tracking is implemented. |
+| `billing_queue_allow_bulk_sms` | `true` | Safe now that duplicate SMS tracking is implemented. |
 | `billing_queue_require_preview_before_bulk_actions` | `true` | Helps prevent accidental billing blasts. |
 
 Recommended fixed system behavior:
@@ -896,13 +978,14 @@ Scheduled snapshot generation:
 - Scheduler job: `job_generate_snapshots()`.
 - Runs daily at `00:15`.
 - Skips entirely when `billing_snapshot_mode='manual'`.
-- Filters subscribers whose resolved cutoff day matches today's day.
-- Checks if a snapshot already exists for that subscriber and today's cutoff date before creating one.
+- Filters subscribers whose effective cutoff date matches today, including month-end fallback cutoffs such as `30` or `31` on February month-end.
 - Calls `generate_snapshot_for_subscriber()`.
+- Counts only newly created snapshots.
 
 Snapshot creation:
 
 - Uses the same billing profile as invoice generation.
+- Skips safely when a snapshot already exists for the same subscriber and `period_start`.
 - Ensures the current-cycle invoice exists by calling `generate_invoice_for_subscriber()`.
 - Adds previous open, partial, and overdue invoice balances except the current-cycle invoice.
 - Creates a `BillingSnapshot` and line items.
@@ -921,7 +1004,43 @@ Manual snapshot generation:
 - Entry point is subscriber detail action.
 - Calls `generate_snapshot_for_subscriber()` directly.
 - It uses the same profile calculation as the scheduler.
-- The scheduler prevents duplicate same-day snapshots; the manual path should be used carefully because the model does not enforce a unique `(subscriber, cutoff_date)` snapshot constraint.
+- If a snapshot already exists for the same subscriber and period, the manual path redirects to the existing snapshot instead of creating a duplicate.
+
+## Billing SMS Reminder Workflow
+
+Scheduled billing SMS:
+
+- Scheduler job: `job_send_billing_sms()`.
+- Runs daily at the configured `billing_sms_schedule`.
+- Skips entirely when `enable_billing_sms=False`.
+- Uses frozen billing snapshots whose due date is inside the configured lead window.
+- Calls `send_bulk_billing_sms()`.
+
+Reminder schedule:
+
+- First reminder date is `due_date - billing_sms_days_before_due`.
+- Repeat reminders use `billing_sms_repeat_interval_days`.
+- The due date is always included as a reminder date while unpaid.
+- If `billing_sms_send_after_due=True`, reminders continue after the due date using `billing_sms_after_due_interval_days`.
+
+Duplicate protection:
+
+- Billing SMS logs are linked to `billing_snapshot`.
+- `SMSLog.reminder_run_date` records the scheduled reminder date.
+- `SMSLog.reminder_stage` records which reminder in the schedule was attempted.
+- The scheduler skips a snapshot if it already has any billing SMS attempt for today's reminder date.
+
+Skip rules:
+
+- SMS disabled.
+- Paid or credit-covered.
+- Subscriber opted out.
+- Missing phone number.
+- Frozen statement missing.
+- Before the SMS window.
+- After due date when after-due reminders are disabled.
+- Already sent or attempted today.
+- Not a scheduled reminder day.
 
 ## Legacy Due Day Mode
 

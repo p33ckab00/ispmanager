@@ -3,6 +3,8 @@ from apps.billing import views
 
 urlpatterns = [
     path('', views.invoice_list, name='billing-list'),
+    path('calendar/', views.billing_calendar, name='billing-calendar'),
+    path('queue/', views.billing_queue, name='billing-queue'),
     path('invoices/', views.invoice_list, name='invoice-list'),
     path('invoices/generate/', views.generate_invoices, name='generate-invoices'),
     path('invoices/<int:pk>/', views.invoice_detail, name='invoice-detail'),

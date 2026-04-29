@@ -72,6 +72,9 @@ class SMSSettings(models.Model):
     enable_billing_sms = models.BooleanField(default=False)
     billing_sms_schedule = models.CharField(max_length=50, default='08:00')
     billing_sms_days_before_due = models.IntegerField(default=3)
+    billing_sms_repeat_interval_days = models.IntegerField(default=2)
+    billing_sms_send_after_due = models.BooleanField(default=False)
+    billing_sms_after_due_interval_days = models.IntegerField(default=2)
     billing_sms_template = models.TextField(
         default='Hi {name}, your bill of {currency}{amount} is due on {due_date}. Pay here: {link}'
     )

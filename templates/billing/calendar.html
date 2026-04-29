@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Billing Calendar - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex flex-col gap-3 mb-6 lg:flex-row lg:items-center lg:justify-between">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Billing Calendar</h2>
+    <p class="text-sm text-gray-500 mt-1">{{ month_start|date:"F Y" }}</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    <a href="/billing/calendar/?month={{ previous_month|date:'Y-m' }}&billing_type={{ billing_type }}"
+      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      <i class="fa fa-chevron-left mr-1"></i> Prev
+    </a>
+    <a href="/billing/calendar/?month={{ today|date:'Y-m' }}&billing_type={{ billing_type }}"
+      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      This Month
+    </a>
+    <a href="/billing/calendar/?month={{ next_month|date:'Y-m' }}&billing_type={{ billing_type }}"
+      class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      Next <i class="fa fa-chevron-right ml-1"></i>
+    </a>
+    <a href="/billing/queue/" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      Queue
+    </a>
+    <a href="/billing/" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+      Invoices
+    </a>
+  </div>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="grid grid-cols-2 gap-4 mb-6 lg:grid-cols-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-gray-800">{{ month_totals.day_events }}</p>
+    <p class="text-xs text-gray-400 mt-1">Month Events</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-blue-600">{{ month_totals.generation }}</p>
+    <p class="text-xs text-gray-400 mt-1">Generation</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-orange-600">{{ month_totals.due }}</p>
+    <p class="text-xs text-gray-400 mt-1">Due</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-green-600">{{ month_totals.sms }}</p>
+    <p class="text-xs text-gray-400 mt-1">SMS</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-red-600">{{ month_totals.attention }}</p>
+    <p class="text-xs text-gray-400 mt-1">Attention</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-2xl font-bold text-gray-800">PHP {{ month_totals.total_due }}</p>
+    <p class="text-xs text-gray-400 mt-1">Month Total</p>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
+  <form method="get" class="grid gap-3 p-4 lg:grid-cols-[150px_150px_auto]">
+    <input type="month" name="month" value="{{ month_start|date:'Y-m' }}"
+      class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <select name="billing_type" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <option value="">All Types</option>
+      <option value="postpaid" {% if billing_type == 'postpaid' %}selected{% endif %}>Postpaid</option>
+      <option value="prepaid" {% if billing_type == 'prepaid' %}selected{% endif %}>Prepaid</option>
+    </select>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+      Filter
+    </button>
+  </form>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <div class="grid grid-cols-7 bg-gray-50 border-b border-gray-100">
+    <div class="px-3 py-3 text-xs font-medium text-gray-500">Mon</div>
+    <div class="px-3 py-3 text-xs font-medium text-gray-500">Tue</div>
+    <div class="px-3 py-3 text-xs font-medium text-gray-500">Wed</div>
+    <div class="px-3 py-3 text-xs font-medium text-gray-500">Thu</div>
+    <div class="px-3 py-3 text-xs font-medium text-gray-500">Fri</div>
+    <div class="px-3 py-3 text-xs font-medium text-gray-500">Sat</div>
+    <div class="px-3 py-3 text-xs font-medium text-gray-500">Sun</div>
+  </div>
+
+  {% for week in calendar_days %}
+  <div class="grid grid-cols-7 border-b border-gray-100 last:border-b-0">
+    {% for day in week %}
+    <a href="/billing/queue/?date={{ day.date|date:'Y-m-d' }}"
+      class="min-h-[132px] border-r border-gray-100 last:border-r-0 p-3 hover:bg-gray-50 {% if not day.is_current_month %}bg-gray-50/70 text-gray-400{% endif %} {% if day.is_today %}ring-2 ring-blue-500 ring-inset{% endif %}">
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-sm font-semibold {% if day.is_current_month %}text-gray-800{% else %}text-gray-400{% endif %}">
+          {{ day.date|date:"j" }}
+        </span>
+        {% if day.summary.day_events %}
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">{{ day.summary.day_events }}</span>
+        {% endif %}
+      </div>
+
+      <div class="mt-3 space-y-1">
+        {% if day.summary.generation %}
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-blue-700">Generation</span>
+          <span class="font-semibold text-blue-700">{{ day.summary.generation }}</span>
+        </div>
+        {% endif %}
+        {% if day.summary.due %}
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-orange-700">Due</span>
+          <span class="font-semibold text-orange-700">{{ day.summary.due }}</span>
+        </div>
+        {% endif %}
+        {% if day.summary.sms %}
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-green-700">SMS</span>
+          <span class="font-semibold text-green-700">{{ day.summary.sms }}</span>
+        </div>
+        {% endif %}
+        {% if day.summary.attention %}
+        <div class="flex items-center justify-between text-xs">
+          <span class="text-red-700">Attention</span>
+          <span class="font-semibold text-red-700">{{ day.summary.attention }}</span>
+        </div>
+        {% endif %}
+        {% if day.summary.total_due > 0 %}
+        <div class="pt-2 text-xs font-semibold text-gray-700">PHP {{ day.summary.total_due }}</div>
+        {% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

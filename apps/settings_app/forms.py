@@ -22,8 +22,8 @@ class BillingSettingsForm(forms.ModelForm):
 
     def clean_billing_day(self):
         day = self.cleaned_data['billing_day']
-        if not 1 <= day <= 28:
-            raise forms.ValidationError('Billing day must be between 1 and 28.')
+        if not 1 <= day <= 31:
+            raise forms.ValidationError('Billing day must be between 1 and 31.')
         return day
 
     def clean_due_days(self):
@@ -44,7 +44,9 @@ class SMSSettingsForm(forms.ModelForm):
         model = SMSSettings
         fields = [
             'semaphore_api_key', 'sender_name', 'enable_billing_sms',
-            'billing_sms_schedule', 'billing_sms_days_before_due', 'billing_sms_template',
+            'billing_sms_schedule', 'billing_sms_days_before_due',
+            'billing_sms_repeat_interval_days', 'billing_sms_send_after_due',
+            'billing_sms_after_due_interval_days', 'billing_sms_template',
         ]
         widgets = {
             'semaphore_api_key': forms.PasswordInput(render_value=True),
@@ -56,6 +58,24 @@ class SMSSettingsForm(forms.ModelForm):
         if len(name) > 11:
             raise forms.ValidationError('Sender name cannot exceed 11 characters.')
         return name
+
+    def clean_billing_sms_days_before_due(self):
+        days = self.cleaned_data['billing_sms_days_before_due']
+        if days < 0:
+            raise forms.ValidationError('Days before due date must be 0 or higher.')
+        return days
+
+    def clean_billing_sms_repeat_interval_days(self):
+        days = self.cleaned_data['billing_sms_repeat_interval_days']
+        if days < 1:
+            raise forms.ValidationError('Repeat interval must be at least 1 day.')
+        return days
+
+    def clean_billing_sms_after_due_interval_days(self):
+        days = self.cleaned_data['billing_sms_after_due_interval_days']
+        if days < 1:
+            raise forms.ValidationError('After-due interval must be at least 1 day.')
+        return days
 
 
 class TelegramSettingsForm(forms.ModelForm):

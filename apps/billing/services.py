@@ -1,36 +1,63 @@
 from decimal import Decimal
 from datetime import date, timedelta
+import calendar
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
 from apps.billing.models import Invoice, Payment, PaymentAllocation, BillingSnapshot, BillingSnapshotItem
 from apps.settings_app.models import BillingSettings
 
 
 # ── Period Calculation ─────────────────────────────────────────────────────────
 
+def get_effective_cutoff_date(cutoff_day, year, month):
+    day = max(1, min(int(cutoff_day), 31))
+    last_day = calendar.monthrange(year, month)[1]
+    return date(year, month, min(day, last_day))
+
+
+def _shift_month(year, month, delta):
+    absolute_month = year * 12 + (month - 1) + delta
+    return absolute_month // 12, absolute_month % 12 + 1
+
+
 def get_next_cutoff_period(cutoff_day, reference_date=None):
     """
-    Returns (period_start, period_end) for the NEXT service cycle.
-    Bills in advance: if cutoff is March 19, period is March 20 - April 19.
+    Returns (period_start, period_end) for the next advance-billed cycle.
+    If the configured cutoff is not present in a month, the month-end date is used.
     """
     today = reference_date or date.today()
-    day = min(cutoff_day, 28)
+    current_cutoff = get_effective_cutoff_date(cutoff_day, today.year, today.month)
 
-    if today.day >= day:
-        period_start = today.replace(day=day) + timedelta(days=1)
+    if today >= current_cutoff:
+        period_start = current_cutoff + timedelta(days=1)
+        end_year, end_month = _shift_month(current_cutoff.year, current_cutoff.month, 1)
+        period_end = get_effective_cutoff_date(cutoff_day, end_year, end_month)
     else:
-        if today.month == 1:
-            period_start = today.replace(year=today.year - 1, month=12, day=day) + timedelta(days=1)
-        else:
-            period_start = today.replace(month=today.month - 1, day=day) + timedelta(days=1)
-
-    if period_start.month == 12:
-        period_end = period_start.replace(year=period_start.year + 1, month=1, day=day)
-    else:
-        period_end = period_start.replace(month=period_start.month + 1, day=day)
+        start_year, start_month = _shift_month(current_cutoff.year, current_cutoff.month, -1)
+        previous_cutoff = get_effective_cutoff_date(cutoff_day, start_year, start_month)
+        period_start = previous_cutoff + timedelta(days=1)
+        period_end = current_cutoff
 
     return period_start, period_end
+
+
+def get_current_cutoff_period(cutoff_day, reference_date=None):
+    """
+    Returns the service cycle containing reference_date.
+    Used for postpaid billing where the bill is due at the end of the cycle.
+    """
+    today = reference_date or date.today()
+    current_cutoff = get_effective_cutoff_date(cutoff_day, today.year, today.month)
+
+    if today <= current_cutoff:
+        start_year, start_month = _shift_month(current_cutoff.year, current_cutoff.month, -1)
+        previous_cutoff = get_effective_cutoff_date(cutoff_day, start_year, start_month)
+        return previous_cutoff + timedelta(days=1), current_cutoff
+
+    end_year, end_month = _shift_month(current_cutoff.year, current_cutoff.month, 1)
+    next_cutoff = get_effective_cutoff_date(cutoff_day, end_year, end_month)
+    return current_cutoff + timedelta(days=1), next_cutoff
 
 
 def get_effective_rate_at(subscriber, as_of_date=None):
@@ -57,12 +84,23 @@ def resolve_due_offset_days(subscriber, billing_settings=None):
     return billing_settings.billing_due_offset_days or billing_settings.due_days or 0
 
 
-def get_cutoff_day_queryset_filter(target_day, billing_settings=None):
+def get_cutoff_day_queryset_filter(target_day, billing_settings=None, target_date=None):
     if billing_settings is None:
         billing_settings = BillingSettings.get_settings()
+    target_date = target_date or date.today()
 
-    query = Q(cutoff_day=target_day)
-    if billing_settings.billing_day == target_day:
+    effective_cutoff_days = [
+        day for day in range(1, 32)
+        if get_effective_cutoff_date(day, target_date.year, target_date.month).day == target_day
+    ]
+
+    query = Q(cutoff_day__in=effective_cutoff_days)
+    default_cutoff = get_effective_cutoff_date(
+        billing_settings.billing_day,
+        target_date.year,
+        target_date.month,
+    )
+    if default_cutoff.day == target_day:
         query |= Q(cutoff_day__isnull=True)
     return query
 
@@ -73,21 +111,211 @@ def resolve_billing_profile(subscriber, billing_settings=None, reference_date=No
 
     today = reference_date or date.today()
     cutoff_day = resolve_cutoff_day(subscriber, billing_settings)
-    period_start, period_end = get_next_cutoff_period(cutoff_day, today)
-    cutoff_date = period_start - timedelta(days=1)
+    billing_type = getattr(subscriber, 'billing_type', 'postpaid')
+    if billing_type == 'prepaid':
+        period_start, period_end = get_next_cutoff_period(cutoff_day, today)
+        due_base = period_start
+        generation_date = period_start - timedelta(days=1)
+    else:
+        billing_type = 'postpaid'
+        period_start, period_end = get_current_cutoff_period(cutoff_day, today)
+        due_base = period_end
+        generation_date = period_end
+
+    cutoff_date = period_end
     due_offset = resolve_due_offset_days(subscriber, billing_settings)
-    due_date = cutoff_date + timedelta(days=due_offset)
+    due_date = due_base + timedelta(days=due_offset)
     effective_from = subscriber.billing_effective_from or subscriber.start_date
 
     return {
+        'billing_type': billing_type,
         'cutoff_day': cutoff_day,
         'period_start': period_start,
         'period_end': period_end,
         'cutoff_date': cutoff_date,
+        'generation_date': generation_date,
         'due_offset_days': due_offset,
         'due_date': due_date,
         'effective_from': effective_from,
     }
+
+
+# ── Billing Preview ────────────────────────────────────────────────────────────
+
+def get_account_credit_for_subscriber(subscriber):
+    payment_total = Payment.objects.filter(subscriber=subscriber).aggregate(
+        total=Sum('amount')
+    )['total'] or Decimal('0.00')
+    allocated_total = PaymentAllocation.objects.filter(
+        payment__subscriber=subscriber
+    ).aggregate(
+        total=Sum('amount_allocated')
+    )['total'] or Decimal('0.00')
+    return max(payment_total - allocated_total, Decimal('0.00'))
+
+
+def get_billing_preview_for_subscriber(subscriber, billing_settings=None,
+                                       sms_settings=None, reference_date=None):
+    """
+    Read-only billing preview for queues/calendars.
+    Does not create invoices, snapshots, payments, allocations, or SMS logs.
+    """
+    from apps.settings_app.models import SMSSettings
+
+    if billing_settings is None:
+        billing_settings = BillingSettings.get_settings()
+    if sms_settings is None:
+        sms_settings = SMSSettings.get_settings()
+
+    today = reference_date or date.today()
+    profile = resolve_billing_profile(subscriber, billing_settings, today)
+    rate = get_effective_rate_at(subscriber, today)
+    errors = []
+    flags = []
+
+    if not subscriber.can_generate_billing:
+        errors.append(f"Subscriber {subscriber.username} cannot generate billing.")
+        flags.append('not_billable')
+
+    effective_from = profile['effective_from']
+    if effective_from and today < effective_from:
+        errors.append(f"Billing starts on {effective_from}.")
+        flags.append('billing_not_effective')
+
+    if rate is None:
+        errors.append('No rate set.')
+        flags.append('missing_rate')
+
+    current_invoice = Invoice.objects.filter(
+        subscriber=subscriber,
+        period_start=profile['period_start'],
+    ).first()
+
+    snapshot = BillingSnapshot.objects.filter(
+        subscriber=subscriber,
+        period_start=profile['period_start'],
+        cutoff_date=profile['cutoff_date'],
+    ).order_by('-created_at').first()
+
+    current_charge = current_invoice.amount if current_invoice else (rate or Decimal('0.00'))
+    current_balance = current_invoice.remaining_balance if current_invoice else current_charge
+
+    previous_invoices = Invoice.objects.filter(
+        subscriber=subscriber,
+        status__in=['open', 'partial', 'overdue'],
+    ).exclude(
+        period_start=profile['period_start'],
+    ).order_by('period_start')
+
+    previous_balance = sum((inv.remaining_balance for inv in previous_invoices), Decimal('0.00'))
+    account_credit = get_account_credit_for_subscriber(subscriber)
+    gross_due = current_balance + previous_balance
+    credit_applied = min(account_credit, gross_due)
+    total_due = max(gross_due - credit_applied, Decimal('0.00'))
+    remaining_credit = max(account_credit - credit_applied, Decimal('0.00'))
+
+    if current_invoice:
+        flags.append('invoice_exists')
+    else:
+        flags.append('invoice_missing')
+
+    if snapshot:
+        flags.append(f'snapshot_{snapshot.status}')
+    else:
+        flags.append('snapshot_missing')
+
+    if account_credit > Decimal('0.00'):
+        flags.append('has_account_credit')
+    if total_due == Decimal('0.00') and gross_due > Decimal('0.00'):
+        flags.append('credit_covered')
+
+    from apps.sms.services import get_billing_sms_schedule_state
+    sms_state = get_billing_sms_schedule_state(
+        snapshot=snapshot,
+        subscriber=subscriber,
+        due_date=profile['due_date'],
+        total_due=total_due,
+        sms_settings=sms_settings,
+        reference_date=today,
+    )
+
+    if sms_state['eligible_today']:
+        flags.append('sms_eligible_today')
+    elif sms_state['skip_reason']:
+        flags.append(sms_state['skip_reason'])
+
+    can_generate = not errors
+    if can_generate and current_invoice is None:
+        flags.append('ready_to_generate_invoice')
+    if can_generate and snapshot is None:
+        flags.append('ready_to_generate_snapshot')
+
+    return {
+        'subscriber': subscriber,
+        'can_generate': can_generate,
+        'errors': errors,
+        'flags': flags,
+        'profile': profile,
+        'billing_type': profile['billing_type'],
+        'cutoff_day': profile['cutoff_day'],
+        'period_start': profile['period_start'],
+        'period_end': profile['period_end'],
+        'cutoff_date': profile['cutoff_date'],
+        'generation_date': profile['generation_date'],
+        'due_date': profile['due_date'],
+        'due_offset_days': profile['due_offset_days'],
+        'rate': rate,
+        'current_charge': current_charge,
+        'current_balance': current_balance,
+        'previous_balance': previous_balance,
+        'account_credit': account_credit,
+        'credit_applied': credit_applied,
+        'remaining_credit': remaining_credit,
+        'total_due': total_due,
+        'invoice': current_invoice,
+        'invoice_status': current_invoice.status if current_invoice else 'missing',
+        'snapshot': snapshot,
+        'snapshot_status': snapshot.status if snapshot else 'missing',
+        'sms': {
+            'enabled': sms_state['enabled'],
+            'days_before_due': sms_state['days_before_due'],
+            'repeat_interval_days': sms_state['repeat_interval_days'],
+            'send_after_due': sms_state['send_after_due'],
+            'after_due_interval_days': sms_state['after_due_interval_days'],
+            'first_sms_date': sms_state['first_sms_date'],
+            'next_sms_date': sms_state['next_sms_date'],
+            'send_dates': sms_state['send_dates'],
+            'eligible_today': sms_state['eligible_today'],
+            'skip_reason': sms_state['skip_reason'],
+            'reminder_stage': sms_state['reminder_stage'],
+            'last_sent_at': sms_state['last_sent_at'],
+            'last_attempt_at': sms_state['last_attempt_at'],
+            'last_attempt_status': sms_state['last_attempt_status'],
+            'sent_today': sms_state['sent_today'],
+            'attempted_today': sms_state['attempted_today'],
+        },
+    }
+
+
+def get_billing_previews(reference_date=None, subscribers=None,
+                         billing_settings=None, sms_settings=None):
+    from apps.subscribers.models import Subscriber
+
+    if subscribers is None:
+        subscribers = Subscriber.objects.filter(
+            status__in=['active', 'suspended'],
+            is_billable=True,
+        ).select_related('plan')
+
+    return [
+        get_billing_preview_for_subscriber(
+            subscriber,
+            billing_settings=billing_settings,
+            sms_settings=sms_settings,
+            reference_date=reference_date,
+        )
+        for subscriber in subscribers
+    ]
 
 
 # ── Invoice Generation ─────────────────────────────────────────────────────────
@@ -240,6 +468,13 @@ def generate_snapshot_for_subscriber(subscriber, billing_settings=None,
 
     if rate is None:
         return None, f"No rate for {subscriber.username}."
+
+    existing_snapshot = BillingSnapshot.objects.filter(
+        subscriber=subscriber,
+        period_start=period_start,
+    ).first()
+    if existing_snapshot:
+        return existing_snapshot, 'Snapshot already exists for this period.'
 
     invoice, _ = generate_invoice_for_subscriber(subscriber, billing_settings, today)
 
