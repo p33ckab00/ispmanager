@@ -42,6 +42,34 @@ def find_portal_subscriber_by_phone(phone):
         ).order_by('username')[:2]
     )
 
+    if len(matches) < 2:
+        matched_ids = {subscriber.pk for subscriber in matches}
+        fallback_matches = []
+        fallback_qs = Subscriber.objects.exclude(
+            pk__in=matched_ids,
+        ).exclude(
+            phone='',
+        ).exclude(
+            status__in=['deceased', 'archived'],
+        ).only(
+            'pk', 'username', 'phone', 'normalized_phone',
+        ).order_by('username')
+
+        for subscriber in fallback_qs.iterator():
+            if normalize_phone_digits(subscriber.phone) != normalized_phone:
+                continue
+            if subscriber.normalized_phone != normalized_phone:
+                Subscriber.objects.filter(pk=subscriber.pk).update(
+                    normalized_phone=normalized_phone,
+                )
+                subscriber.normalized_phone = normalized_phone
+            fallback_matches.append(subscriber)
+            if len(matches) + len(fallback_matches) >= 2:
+                break
+
+        if fallback_matches:
+            matches = (matches + fallback_matches)[:2]
+
     if not matches:
         return None, 'No account found with this phone number.', normalized_phone
     if len(matches) > 1:

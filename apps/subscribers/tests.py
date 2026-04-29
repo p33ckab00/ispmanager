@@ -181,6 +181,21 @@ class SubscriberPhoneNormalizationTests(TestCase):
         self.assertIn('Multiple accounts use this phone number', error)
         self.assertEqual(normalized_phone, '639171234567')
 
+    def test_portal_phone_lookup_repairs_stale_normalized_phone(self):
+        subscriber = Subscriber.objects.create(
+            username='portal-stale-phone',
+            phone='09663067637',
+        )
+        Subscriber.objects.filter(pk=subscriber.pk).update(normalized_phone='639077613830')
+
+        match, error, normalized_phone = find_portal_subscriber_by_phone('09663067637')
+
+        subscriber.refresh_from_db()
+        self.assertEqual(match, subscriber)
+        self.assertIsNone(error)
+        self.assertEqual(normalized_phone, '639663067637')
+        self.assertEqual(subscriber.normalized_phone, '639663067637')
+
     def test_otp_verification_uses_pending_subscriber_id(self):
         subscriber = Subscriber.objects.create(
             username='portal-otp',
