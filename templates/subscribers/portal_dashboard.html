@@ -5,202 +5,383 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>My Account - {{ isp_name }}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
-
-  <!-- Header -->
-  <div class="bg-blue-600 text-white px-4 py-4 sticky top-0 z-10">
-    <div class="max-w-2xl mx-auto flex items-center justify-between">
-      <div>
-        <h1 class="font-bold text-lg">{{ isp_name }}</h1>
-        <p class="text-blue-200 text-xs">My Account</p>
-      </div>
-      <a href="/subscribers/portal/logout/" class="text-blue-200 hover:text-white text-sm flex items-center gap-1">
-        <i class="fa fa-right-from-bracket"></i> Logout
-      </a>
-    </div>
-  </div>
-
-  <div class="max-w-2xl mx-auto px-4 py-5 space-y-4">
-
-    <!-- Account Summary -->
-    <div class="bg-white rounded-2xl shadow-sm p-5">
-      <div class="flex items-start justify-between">
-        <div>
-          <h2 class="text-lg font-bold text-gray-800">{{ subscriber.display_name }}</h2>
-          <p class="text-xs text-gray-400 font-mono mt-0.5">{{ subscriber.username }}</p>
+<body class="min-h-screen bg-gray-100 text-gray-800">
+  <div x-data="{ tab: 'overview' }" class="min-h-screen">
+    <header class="sticky top-0 z-20 bg-blue-600 text-white shadow-sm">
+      <div class="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-4">
+        <div class="min-w-0">
+          <p class="text-xs font-medium text-blue-100">{{ isp_name }}</p>
+          <h1 class="truncate text-lg font-bold">{{ subscriber.display_name }}</h1>
+          <p class="mt-0.5 truncate font-mono text-xs text-blue-100">@{{ subscriber.username }}</p>
         </div>
-        <span class="px-2.5 py-1 rounded-full text-xs font-semibold
-          {% if subscriber.status == 'active' %}bg-green-100 text-green-700
-          {% elif subscriber.status == 'suspended' %}bg-yellow-100 text-yellow-700
-          {% elif subscriber.status == 'disconnected' %}bg-gray-200 text-gray-500
-          {% else %}bg-blue-100 text-blue-700{% endif %}">
-          {{ subscriber.get_status_display }}
-        </span>
-      </div>
-      <div class="grid grid-cols-2 gap-3 mt-4 text-sm">
-        <div><p class="text-xs text-gray-400">Plan</p><p class="font-medium mt-0.5">{{ subscriber.plan.name|default:'No Plan' }}</p></div>
-        <div><p class="text-xs text-gray-400">Speed</p><p class="font-medium mt-0.5">{% if subscriber.plan %}{{ subscriber.plan.speed_down_mbps }}M/{{ subscriber.plan.speed_up_mbps }}M{% else %}-{% endif %}</p></div>
-        <div><p class="text-xs text-gray-400">IP Address</p><p class="font-mono text-xs mt-0.5">{{ subscriber.ip_address|default:'-' }}</p></div>
-        <div><p class="text-xs text-gray-400">Connection</p>
-          <p class="mt-0.5 flex items-center gap-1 text-xs">
-            <span class="w-2 h-2 rounded-full {% if subscriber.mt_status == 'online' %}bg-green-400{% else %}bg-gray-300{% endif %}"></span>
-            {{ subscriber.mt_status|title }}
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Current Bill -->
-    {% if latest_snapshot %}
-    <div class="bg-white rounded-2xl shadow-sm p-5">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="font-semibold text-gray-700">Current Bill</h3>
-        <span class="text-xs text-gray-400">Due: {{ latest_snapshot.due_date }}</span>
-      </div>
-      <div class="bg-blue-50 rounded-xl p-4 mb-3">
-        <p class="text-xs text-blue-500 mb-1">Total Amount Due</p>
-        <p class="text-3xl font-bold text-blue-700">PHP {{ latest_snapshot.total_due_amount }}</p>
-        <p class="text-xs text-blue-400 mt-1">{{ latest_snapshot.period_start|date:"M d" }} to {{ latest_snapshot.period_end|date:"M d, Y" }}</p>
-      </div>
-      <div class="space-y-2 text-sm">
-        <div class="flex justify-between text-gray-600">
-          <span>Current Cycle Charge</span>
-          <span class="font-medium">PHP {{ latest_snapshot.current_cycle_amount }}</span>
-        </div>
-        {% if latest_snapshot.previous_balance_amount > 0 %}
-        <div class="flex justify-between text-orange-600">
-          <span>Previous Balance</span>
-          <span class="font-medium">PHP {{ latest_snapshot.previous_balance_amount }}</span>
-        </div>
-        {% endif %}
-        {% if latest_snapshot.credit_amount > 0 %}
-        <div class="flex justify-between text-green-600">
-          <span>Credits</span>
-          <span class="font-medium">-PHP {{ latest_snapshot.credit_amount }}</span>
-        </div>
-        {% endif %}
-      </div>
-      <div class="mt-3 flex gap-2">
-        <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/view/" target="_blank"
-          class="flex-1 text-center bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg transition">
-          <i class="fa fa-eye mr-1"></i> View PDF
-        </a>
-        <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/download/"
-          class="flex-1 text-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold py-2 rounded-lg transition">
-          <i class="fa fa-download mr-1"></i> Download
+        <a href="/subscribers/portal/logout/" class="inline-flex shrink-0 items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm font-medium text-blue-50 transition hover:bg-white/20 hover:text-white">
+          <i class="fa fa-right-from-bracket"></i>
+          <span>Logout</span>
         </a>
       </div>
-    </div>
-    {% endif %}
+    </header>
 
-    <!-- Data Usage -->
-    <div class="bg-white rounded-2xl shadow-sm p-5">
-      <h3 class="font-semibold text-gray-700 mb-3">Data Usage</h3>
-      <div class="grid grid-cols-3 gap-3 mb-4 text-center">
-        <div class="bg-blue-50 rounded-xl p-3">
-          <p class="text-xs text-blue-500">Download</p>
-          <p class="text-lg font-bold text-blue-700">{{ usage_rx_today|default:'0' }}</p>
-          <p class="text-xs text-blue-400">GB today</p>
-        </div>
-        <div class="bg-green-50 rounded-xl p-3">
-          <p class="text-xs text-green-500">Upload</p>
-          <p class="text-lg font-bold text-green-700">{{ usage_tx_today|default:'0' }}</p>
-          <p class="text-xs text-green-400">GB today</p>
-        </div>
-        <div class="bg-gray-50 rounded-xl p-3">
-          <p class="text-xs text-gray-400">This Cycle</p>
-          <p class="text-lg font-bold text-gray-700" id="portal-total">--</p>
-          <p class="text-xs text-gray-400">GB total</p>
-        </div>
-      </div>
-      <div class="relative h-40">
-        <canvas id="portalUsageChart"></canvas>
-      </div>
-      <p id="portal-usage-empty" class="text-xs text-gray-400 mt-3 text-center hidden">
-        Usage data is not available yet. Please check again after the sampler runs.
-      </p>
-    </div>
-
-    <!-- Payment History -->
-    <div class="bg-white rounded-2xl shadow-sm p-5">
-      <h3 class="font-semibold text-gray-700 mb-3">Payment History</h3>
-      <div class="space-y-2">
-        {% for payment in payments %}
-        <div class="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-          <div>
-            <p class="text-sm font-medium text-gray-700">PHP {{ payment.amount }}</p>
-            <p class="text-xs text-gray-400">{{ payment.paid_at|date:"M d, Y" }} via {{ payment.get_method_display }}</p>
+    <main class="mx-auto max-w-5xl px-4 py-5 sm:py-6">
+      <section class="mb-4 rounded-xl border border-gray-100 bg-white p-4 shadow-sm sm:p-5">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="text-xl font-bold text-gray-900">{{ subscriber.display_name }}</h2>
+              <span class="rounded-full px-2.5 py-1 text-xs font-semibold
+                {% if subscriber.status == 'active' %}bg-green-100 text-green-700
+                {% elif subscriber.status == 'suspended' %}bg-yellow-100 text-yellow-700
+                {% elif subscriber.status == 'disconnected' %}bg-gray-200 text-gray-600
+                {% else %}bg-blue-100 text-blue-700{% endif %}">
+                {{ subscriber.get_status_display }}
+              </span>
+            </div>
+            <p class="mt-1 text-sm text-gray-500">Account overview, billing, usage, payments, and statements.</p>
           </div>
-          <span class="text-xs text-green-600 font-medium"><i class="fa fa-check-circle mr-1"></i>Received</span>
-        </div>
-        {% empty %}
-        <p class="text-sm text-gray-400 text-center py-4">No payments recorded yet.</p>
-        {% endfor %}
-      </div>
-    </div>
-
-    <!-- Statement History -->
-    <div class="bg-white rounded-2xl shadow-sm p-5">
-      <h3 class="font-semibold text-gray-700 mb-3">Statement History</h3>
-      <div class="space-y-2">
-        {% for snap in snapshots %}
-        <div class="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-          <div>
-            <p class="text-sm font-medium text-gray-700">PHP {{ snap.total_due_amount }}</p>
-            <p class="text-xs text-gray-400">{{ snap.period_start|date:"M d" }} - {{ snap.period_end|date:"M d, Y" }}</p>
+          <div class="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4 lg:w-[560px]">
+            <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p class="text-xs text-gray-400">Amount Due</p>
+              <p class="mt-1 font-bold {% if latest_snapshot and latest_snapshot.total_due_amount > 0 %}text-red-600{% else %}text-green-600{% endif %}">
+                {% if latest_snapshot %}PHP {{ latest_snapshot.total_due_amount }}{% else %}PHP 0.00{% endif %}
+              </p>
+            </div>
+            <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p class="text-xs text-gray-400">Due Date</p>
+              <p class="mt-1 font-semibold text-gray-800">{% if latest_snapshot %}{{ latest_snapshot.due_date }}{% else %}-{% endif %}</p>
+            </div>
+            <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p class="text-xs text-gray-400">Plan</p>
+              <p class="mt-1 truncate font-semibold text-gray-800">{{ subscriber.plan.name|default:'No Plan' }}</p>
+            </div>
+            <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p class="text-xs text-gray-400">Connection</p>
+              <p class="mt-1 flex items-center gap-1.5 font-semibold text-gray-800">
+                <span class="h-2 w-2 rounded-full {% if subscriber.mt_status == 'online' %}bg-green-400{% elif subscriber.mt_status == 'offline' %}bg-red-300{% else %}bg-gray-300{% endif %}"></span>
+                {{ subscriber.mt_status|title }}
+              </p>
+            </div>
           </div>
-          <div class="flex gap-2 items-center">
-            <span class="text-xs {% if snap.status == 'frozen' %}text-blue-600{% else %}text-gray-400{% endif %}">
-              {{ snap.get_status_display }}
-            </span>
-            {% if snap.status == 'frozen' %}
-            <a href="/billing/snapshots/{{ snap.pk }}/pdf/download/" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-1 rounded">
-              <i class="fa fa-download"></i>
-            </a>
+        </div>
+      </section>
+
+      <nav class="mb-4 overflow-x-auto">
+        <div class="inline-flex min-w-full gap-1 rounded-xl bg-gray-200 p-1 sm:min-w-0">
+          <button type="button" @click="tab='overview'"
+            :class="tab=='overview' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+            class="inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition">
+            <i class="fa fa-table-columns text-xs"></i> Overview
+          </button>
+          <button type="button" @click="tab='bill'"
+            :class="tab=='bill' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+            class="inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition">
+            <i class="fa fa-file-invoice text-xs"></i> Current Bill
+          </button>
+          <button type="button" @click="tab='usage'; $nextTick(() => renderPortalUsageChart())"
+            :class="tab=='usage' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+            class="inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition">
+            <i class="fa fa-chart-column text-xs"></i> Usage
+          </button>
+          <button type="button" @click="tab='payments'"
+            :class="tab=='payments' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+            class="inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition">
+            <i class="fa fa-receipt text-xs"></i> Payments
+          </button>
+          <button type="button" @click="tab='statements'"
+            :class="tab=='statements' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'"
+            class="inline-flex items-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition">
+            <i class="fa fa-folder-open text-xs"></i> Statements
+          </button>
+        </div>
+      </nav>
+
+      <section x-show="tab=='overview'" x-cloak class="space-y-4">
+        <div class="grid gap-4 lg:grid-cols-3">
+          <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm lg:col-span-2">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 class="font-semibold text-gray-800">Account Summary</h3>
+                <p class="mt-1 text-sm text-gray-500">Your active service details.</p>
+              </div>
+              {% if latest_snapshot %}
+              <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/view/" target="_blank" class="inline-flex w-fit items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
+                <i class="fa fa-eye"></i> View Bill
+              </a>
+              {% endif %}
+            </div>
+            <dl class="mt-5 grid gap-4 text-sm sm:grid-cols-2">
+              <div>
+                <dt class="text-xs text-gray-400">Plan</dt>
+                <dd class="mt-1 font-semibold text-gray-800">{{ subscriber.plan.name|default:'No Plan' }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-gray-400">Speed</dt>
+                <dd class="mt-1 font-semibold text-gray-800">{% if subscriber.plan %}{{ subscriber.plan.speed_down_mbps }}M/{{ subscriber.plan.speed_up_mbps }}M{% else %}-{% endif %}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-gray-400">IP Address</dt>
+                <dd class="mt-1 font-mono text-xs text-gray-700">{{ subscriber.ip_address|default:'-' }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-gray-400">Connection</dt>
+                <dd class="mt-1 flex items-center gap-1.5 font-semibold text-gray-800">
+                  <span class="h-2 w-2 rounded-full {% if subscriber.mt_status == 'online' %}bg-green-400{% elif subscriber.mt_status == 'offline' %}bg-red-300{% else %}bg-gray-300{% endif %}"></span>
+                  {{ subscriber.mt_status|title }}
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h3 class="font-semibold text-gray-800">Current Balance</h3>
+            {% if latest_snapshot %}
+            <p class="mt-4 text-3xl font-bold text-blue-700">PHP {{ latest_snapshot.total_due_amount }}</p>
+            <p class="mt-1 text-sm text-gray-500">Due on {{ latest_snapshot.due_date }}</p>
+            <p class="mt-3 text-xs text-gray-400">{{ latest_snapshot.period_start|date:"M d" }} to {{ latest_snapshot.period_end|date:"M d, Y" }}</p>
+            {% else %}
+            <p class="mt-4 text-2xl font-bold text-green-600">PHP 0.00</p>
+            <p class="mt-1 text-sm text-gray-500">No current statement is available.</p>
             {% endif %}
           </div>
         </div>
-        {% empty %}
-        <p class="text-sm text-gray-400 text-center py-4">No statements yet.</p>
-        {% endfor %}
-      </div>
-    </div>
 
+        <div class="grid gap-4 sm:grid-cols-3">
+          <div class="rounded-xl border border-gray-100 bg-white p-4 text-center shadow-sm">
+            <p class="text-xs text-blue-500">Download Today</p>
+            <p class="mt-1 text-xl font-bold text-blue-700">{{ usage_rx_today|default:'0' }}</p>
+            <p class="text-xs text-gray-400">GB</p>
+          </div>
+          <div class="rounded-xl border border-gray-100 bg-white p-4 text-center shadow-sm">
+            <p class="text-xs text-green-500">Upload Today</p>
+            <p class="mt-1 text-xl font-bold text-green-700">{{ usage_tx_today|default:'0' }}</p>
+            <p class="text-xs text-gray-400">GB</p>
+          </div>
+          <div class="rounded-xl border border-gray-100 bg-white p-4 text-center shadow-sm">
+            <p class="text-xs text-gray-500">This Cycle</p>
+            <p class="mt-1 text-xl font-bold text-gray-800" id="portal-total-overview">--</p>
+            <p class="text-xs text-gray-400">GB total</p>
+          </div>
+        </div>
+      </section>
+
+      <section x-show="tab=='bill'" x-cloak class="space-y-4">
+        {% if latest_snapshot %}
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 class="font-semibold text-gray-800">Current Bill</h3>
+              <p class="mt-1 text-sm text-gray-500">{{ latest_snapshot.period_start|date:"M d" }} to {{ latest_snapshot.period_end|date:"M d, Y" }}</p>
+            </div>
+            <span class="w-fit rounded-full px-2.5 py-1 text-xs font-semibold {% if latest_snapshot.status == 'frozen' %}bg-blue-50 text-blue-700{% elif latest_snapshot.status == 'issued' %}bg-green-50 text-green-700{% else %}bg-gray-50 text-gray-500{% endif %}">
+              {{ latest_snapshot.get_status_display }}
+            </span>
+          </div>
+
+          <div class="mt-5 rounded-lg bg-blue-50 p-4">
+            <p class="text-xs font-medium text-blue-500">Total Amount Due</p>
+            <p class="mt-1 text-3xl font-bold text-blue-700">PHP {{ latest_snapshot.total_due_amount }}</p>
+            <p class="mt-1 text-sm text-blue-500">Due: {{ latest_snapshot.due_date }}</p>
+          </div>
+
+          <div class="mt-5 space-y-3 text-sm">
+            {% for item in latest_snapshot.items.all %}
+            <div class="flex justify-between gap-4 {% if item.item_type == 'previous_balance' %}text-orange-600{% elif item.item_type == 'credit' %}text-green-600{% else %}text-gray-700{% endif %}">
+              <span>{{ item.label }}</span>
+              <span class="whitespace-nowrap font-semibold">PHP {{ item.amount }}</span>
+            </div>
+            {% empty %}
+            <div class="flex justify-between gap-4 text-gray-700">
+              <span>Current Cycle Charge</span>
+              <span class="whitespace-nowrap font-semibold">PHP {{ latest_snapshot.current_cycle_amount }}</span>
+            </div>
+            {% if latest_snapshot.previous_balance_amount > 0 %}
+            <div class="flex justify-between gap-4 text-orange-600">
+              <span>Previous Balance</span>
+              <span class="whitespace-nowrap font-semibold">PHP {{ latest_snapshot.previous_balance_amount }}</span>
+            </div>
+            {% endif %}
+            {% if latest_snapshot.credit_amount > 0 %}
+            <div class="flex justify-between gap-4 text-green-600">
+              <span>Credits</span>
+              <span class="whitespace-nowrap font-semibold">-PHP {{ latest_snapshot.credit_amount }}</span>
+            </div>
+            {% endif %}
+            {% endfor %}
+            <div class="flex justify-between gap-4 border-t border-gray-100 pt-3 font-bold text-gray-900">
+              <span>Total Due</span>
+              <span class="whitespace-nowrap">PHP {{ latest_snapshot.total_due_amount }}</span>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-2 sm:grid-cols-2">
+            <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/view/" target="_blank" class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700">
+              <i class="fa fa-eye"></i> View PDF
+            </a>
+            <a href="/billing/snapshots/{{ latest_snapshot.pk }}/pdf/download/" class="inline-flex items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-200">
+              <i class="fa fa-download"></i> Download
+            </a>
+          </div>
+        </div>
+        {% else %}
+        <div class="rounded-xl border border-gray-100 bg-white px-5 py-10 text-center text-sm text-gray-500 shadow-sm">
+          No current bill is available yet.
+        </div>
+        {% endif %}
+      </section>
+
+      <section x-show="tab=='usage'" x-cloak class="space-y-4">
+        <div class="rounded-xl border border-gray-100 bg-white p-5 shadow-sm">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 class="font-semibold text-gray-800">Data Usage</h3>
+              <p class="mt-1 text-sm text-gray-500">Current cycle usage in GB.</p>
+            </div>
+          </div>
+          <div class="mt-5 grid grid-cols-3 gap-3 text-center">
+            <div class="rounded-lg border border-blue-100 bg-blue-50 p-3">
+              <p class="text-xs text-blue-500">Download</p>
+              <p class="mt-1 text-lg font-bold text-blue-700">{{ usage_rx_today|default:'0' }}</p>
+              <p class="text-xs text-blue-400">GB today</p>
+            </div>
+            <div class="rounded-lg border border-green-100 bg-green-50 p-3">
+              <p class="text-xs text-green-500">Upload</p>
+              <p class="mt-1 text-lg font-bold text-green-700">{{ usage_tx_today|default:'0' }}</p>
+              <p class="text-xs text-green-400">GB today</p>
+            </div>
+            <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p class="text-xs text-gray-400">This Cycle</p>
+              <p class="mt-1 text-lg font-bold text-gray-700" id="portal-total">--</p>
+              <p class="text-xs text-gray-400">GB total</p>
+            </div>
+          </div>
+          <div class="relative mt-5 h-56 sm:h-72">
+            <canvas id="portalUsageChart"></canvas>
+          </div>
+          <p id="portal-usage-empty" class="mt-3 hidden text-center text-xs text-gray-400">
+            Usage data is not available yet. Please check again after the sampler runs.
+          </p>
+        </div>
+      </section>
+
+      <section x-show="tab=='payments'" x-cloak class="space-y-4">
+        <div class="rounded-xl border border-gray-100 bg-white shadow-sm">
+          <div class="border-b border-gray-100 px-5 py-4">
+            <h3 class="font-semibold text-gray-800">Payment History</h3>
+          </div>
+          <div class="divide-y divide-gray-50">
+            {% for payment in payments %}
+            <div class="flex items-start justify-between gap-4 px-5 py-4">
+              <div>
+                <p class="font-semibold text-gray-800">PHP {{ payment.amount }}</p>
+                <p class="mt-1 text-xs text-gray-500">{{ payment.paid_at|date:"M d, Y" }} via {{ payment.get_method_display }}</p>
+                {% if payment.reference %}
+                <p class="mt-1 font-mono text-xs text-gray-400">{{ payment.reference }}</p>
+                {% endif %}
+              </div>
+              <span class="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700">
+                <i class="fa fa-check-circle"></i> Received
+              </span>
+            </div>
+            {% empty %}
+            <div class="px-5 py-10 text-center text-sm text-gray-400">No payments recorded yet.</div>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+
+      <section x-show="tab=='statements'" x-cloak class="space-y-4">
+        <div class="rounded-xl border border-gray-100 bg-white shadow-sm">
+          <div class="border-b border-gray-100 px-5 py-4">
+            <h3 class="font-semibold text-gray-800">Statement History</h3>
+          </div>
+          <div class="divide-y divide-gray-50">
+            {% for snap in snapshots %}
+            <div class="flex items-center justify-between gap-4 px-5 py-4">
+              <div>
+                <p class="font-semibold text-gray-800">PHP {{ snap.total_due_amount }}</p>
+                <p class="mt-1 text-xs text-gray-500">{{ snap.period_start|date:"M d" }} - {{ snap.period_end|date:"M d, Y" }}</p>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <span class="text-xs {% if snap.status == 'frozen' %}text-blue-600{% elif snap.status == 'issued' %}text-green-600{% else %}text-gray-400{% endif %}">
+                  {{ snap.get_status_display }}
+                </span>
+                {% if snap.status == 'frozen' %}
+                <a href="/billing/snapshots/{{ snap.pk }}/pdf/download/" class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 text-gray-600 transition hover:bg-gray-200" aria-label="Download statement">
+                  <i class="fa fa-download text-xs"></i>
+                </a>
+                {% endif %}
+              </div>
+            </div>
+            {% empty %}
+            <div class="px-5 py-10 text-center text-sm text-gray-400">No statements yet.</div>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 
   <script>
-  const data = {{ usage_data|safe }}
+  const portalUsageData = {{ usage_data|safe }}
+  let portalUsageChart = null
 
-  const ctx = document.getElementById('portalUsageChart')
-  const emptyState = document.getElementById('portal-usage-empty')
-  if (ctx && data.labels.length && data.has_data) {
-    new Chart(ctx, {
+  function getUsageTotal(data) {
+    if (!data || !Array.isArray(data.rx) || !Array.isArray(data.tx)) return 0
+    const rxTotal = data.rx.reduce((total, value) => total + Number(value || 0), 0)
+    const txTotal = data.tx.reduce((total, value) => total + Number(value || 0), 0)
+    return rxTotal + txTotal
+  }
+
+  function setUsageTotals() {
+    const total = getUsageTotal(portalUsageData).toFixed(2)
+    const overviewTotal = document.getElementById('portal-total-overview')
+    const usageTotal = document.getElementById('portal-total')
+    if (overviewTotal) overviewTotal.textContent = total
+    if (usageTotal) usageTotal.textContent = total
+  }
+
+  function renderPortalUsageChart() {
+    setUsageTotals()
+    const ctx = document.getElementById('portalUsageChart')
+    const emptyState = document.getElementById('portal-usage-empty')
+    if (!ctx) return
+    if (portalUsageChart) {
+      portalUsageChart.resize()
+      return
+    }
+    if (!portalUsageData || !portalUsageData.labels.length || !portalUsageData.has_data) {
+      if (emptyState) emptyState.classList.remove('hidden')
+      return
+    }
+
+    portalUsageChart = new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: data.labels,
+        labels: portalUsageData.labels,
         datasets: [
-          { label: 'Download GB', data: data.rx, backgroundColor: 'rgba(59,130,246,0.7)' },
-          { label: 'Upload GB', data: data.tx, backgroundColor: 'rgba(34,197,94,0.7)' },
+          { label: 'Download GB', data: portalUsageData.rx, backgroundColor: 'rgba(59,130,246,0.7)' },
+          { label: 'Upload GB', data: portalUsageData.tx, backgroundColor: 'rgba(34,197,94,0.7)' },
         ]
       },
       options: {
-        responsive: true, maintainAspectRatio: false,
+        responsive: true,
+        maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { position: 'top', labels: { font: { size: 10 } } } },
-        scales: { x: { ticks: { font: { size: 10 } } }, y: { ticks: { font: { size: 10 } } } }
+        plugins: { legend: { position: 'top', labels: { font: { size: 11 } } } },
+        scales: {
+          x: { ticks: { font: { size: 10 } } },
+          y: { ticks: { font: { size: 10 } } }
+        }
       }
     })
-
-    const rxTotal = data.rx.reduce((a,b) => a+b, 0)
-    const txTotal = data.tx.reduce((a,b) => a+b, 0)
-    document.getElementById('portal-total').textContent = (rxTotal + txTotal).toFixed(2)
-  } else if (emptyState) {
-    emptyState.classList.remove('hidden')
-    document.getElementById('portal-total').textContent = '0.00'
   }
+
+  document.addEventListener('DOMContentLoaded', setUsageTotals)
   </script>
 </body>
 </html>

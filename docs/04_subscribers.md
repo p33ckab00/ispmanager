@@ -30,7 +30,7 @@
 | templates/subscribers/plan_form.html | Add/edit plan form |
 | templates/subscribers/portal_otp_request.html | Client portal: enter phone |
 | templates/subscribers/portal_otp_verify.html | Client portal: enter OTP |
-| templates/subscribers/portal_dashboard.html | Client portal: account + bills |
+| templates/subscribers/portal_dashboard.html | Client portal: tabbed account, billing, usage, payments, and statements |
 
 ---
 
@@ -90,7 +90,19 @@
 5. Client enters OTP at /subscribers/portal/verify/
 6. On success: subscriber pk stored in session
 7. Portal dashboard shown at /subscribers/portal/dashboard/
-8. Shows account info + last 5 bills with pay links
+8. Shows a customer-facing tabbed dashboard for Overview, Current Bill, Usage, Payments, and Statements
+
+### Portal Dashboard UX
+
+- The portal remains separate from the internal admin shell and does not extend `base.html`.
+- The dashboard mirrors the admin subscriber detail information structure, but only exposes subscriber-safe content.
+- Tabs include:
+  - Overview: service summary, status, current balance, and today/cycle usage totals
+  - Current Bill: latest issued/frozen statement breakdown and PDF actions
+  - Usage: current cycle chart and usage totals
+  - Payments: recent payment history
+  - Statements: downloadable historical statements
+- Admin-only concepts such as billing readiness, topology/NMS, palugit controls, rate changes, router assignment, and internal notes stay out of the portal.
 
 ---
 
