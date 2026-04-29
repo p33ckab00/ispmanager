@@ -121,7 +121,7 @@ def get_subscriber_billing_readiness(subscriber, billing_settings=None, referenc
     if subscriber.billing_type not in ('postpaid', 'prepaid'):
         billing_issues.append('Billing type must be postpaid or prepaid.')
 
-    phone_digits = subscriber.normalized_phone or normalize_phone_digits(subscriber.phone)
+    phone_digits = normalize_phone_digits(subscriber.phone)
     if subscriber.sms_opt_out:
         sms_issues.append('Subscriber opted out of SMS.')
     if not phone_digits:

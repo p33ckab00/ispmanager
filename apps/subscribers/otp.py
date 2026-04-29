@@ -12,7 +12,7 @@ def generate_otp(length=6):
 def create_otp(subscriber):
     code = generate_otp()
     expires_at = timezone.now() + timedelta(minutes=10)
-    normalized_phone = subscriber.normalized_phone or normalize_phone_digits(subscriber.phone)
+    normalized_phone = normalize_phone_digits(subscriber.phone)
 
     SubscriberOTP.objects.filter(
         subscriber=subscriber,
@@ -34,41 +34,21 @@ def find_portal_subscriber_by_phone(phone):
     if not normalized_phone or len(normalized_phone) < 10:
         return None, 'Enter a valid phone number.', normalized_phone
 
-    matches = list(
-        Subscriber.objects.filter(
-            normalized_phone=normalized_phone,
-        ).exclude(
-            status__in=['deceased', 'archived'],
-        ).order_by('username')[:2]
-    )
+    matches = []
+    subscribers = Subscriber.objects.exclude(
+        phone='',
+    ).exclude(
+        status__in=['deceased', 'archived'],
+    ).only(
+        'pk', 'username', 'phone',
+    ).order_by('username')
 
-    if len(matches) < 2:
-        matched_ids = {subscriber.pk for subscriber in matches}
-        fallback_matches = []
-        fallback_qs = Subscriber.objects.exclude(
-            pk__in=matched_ids,
-        ).exclude(
-            phone='',
-        ).exclude(
-            status__in=['deceased', 'archived'],
-        ).only(
-            'pk', 'username', 'phone', 'normalized_phone',
-        ).order_by('username')
-
-        for subscriber in fallback_qs.iterator():
-            if normalize_phone_digits(subscriber.phone) != normalized_phone:
-                continue
-            if subscriber.normalized_phone != normalized_phone:
-                Subscriber.objects.filter(pk=subscriber.pk).update(
-                    normalized_phone=normalized_phone,
-                )
-                subscriber.normalized_phone = normalized_phone
-            fallback_matches.append(subscriber)
-            if len(matches) + len(fallback_matches) >= 2:
-                break
-
-        if fallback_matches:
-            matches = (matches + fallback_matches)[:2]
+    for subscriber in subscribers.iterator():
+        if normalize_phone_digits(subscriber.phone) != normalized_phone:
+            continue
+        matches.append(subscriber)
+        if len(matches) >= 2:
+            break
 
     if not matches:
         return None, 'No account found with this phone number.', normalized_phone
