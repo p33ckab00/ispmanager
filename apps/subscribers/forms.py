@@ -39,8 +39,12 @@ class SubscriberAdminForm(SubscriberBillingFieldsMixin, forms.ModelForm):
     def clean_status(self):
         status = self.cleaned_data.get('status', 'active')
         allowed = ['active', 'inactive', 'suspended']
+        if self.instance and self.instance.pk and self.instance.status in ('disconnected', 'deceased', 'archived'):
+            if status != self.instance.status:
+                raise forms.ValidationError('Use the dedicated lifecycle action for this status change.')
+            return status
         if status not in allowed:
-            return 'active'
+            raise forms.ValidationError('Use the dedicated lifecycle action for this status change.')
         return status
 
 
@@ -87,6 +91,7 @@ class ManualSubscriberForm(SubscriberBillingFieldsMixin, forms.ModelForm):
         fields = [
             'username', 'mt_password', 'mt_profile', 'service_type',
             'full_name', 'phone', 'address', 'email',
+            'plan', 'monthly_rate',
             'cutoff_day', 'billing_effective_from', 'billing_due_days',
             'billing_type', 'is_billable', 'start_date', 'status', 'notes',
         ]
@@ -97,6 +102,25 @@ class ManualSubscriberForm(SubscriberBillingFieldsMixin, forms.ModelForm):
             'start_date': forms.DateInput(attrs={'type': 'date'}),
             'billing_effective_from': forms.DateInput(attrs={'type': 'date'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['plan'].queryset = Plan.objects.filter(is_active=True)
+        if not self.is_bound and not self.instance.pk:
+            self.fields['is_billable'].initial = False
+            self.fields['status'].initial = 'inactive'
+
+    def clean(self):
+        cleaned = super().clean()
+        is_billable = cleaned.get('is_billable')
+        if not is_billable:
+            return cleaned
+
+        if not cleaned.get('plan') and cleaned.get('monthly_rate') is None:
+            raise forms.ValidationError('Billable subscribers need a plan or monthly rate.')
+        if not cleaned.get('start_date') and not cleaned.get('billing_effective_from'):
+            raise forms.ValidationError('Billable subscribers need a start date or billing effective date.')
+        return cleaned
 
 
 class StatusChangeForm(forms.Form):

@@ -13,9 +13,9 @@ from apps.subscribers.forms import (
 )
 from apps.subscribers.services import (
     sync_ppp_secrets, sync_active_sessions,
-    suspend_subscriber, reconnect_subscriber,
+    transition_subscriber_status,
     disconnect_subscriber, mark_deceased, archive_subscriber,
-    get_usage_chart_data,
+    get_subscriber_billing_readiness, get_usage_chart_data,
 )
 from apps.nms.services import (
     get_service_attachment,
@@ -63,6 +63,7 @@ def subscriber_list(request):
             subscriber,
             table_ready=service_attachment_ready,
         )
+        subscriber.billing_readiness = get_subscriber_billing_readiness(subscriber)
 
     return render(request, 'subscribers/list.html', {
         'page_obj': page, 'q': q, 'status': status,
@@ -104,6 +105,7 @@ def subscriber_detail(request, pk):
 
     usage_views = [('this_cycle','This Cycle'),('last_7','Last 7 Days'),('last_30','Last 30 Days'),('by_cycle','By Cycle')]
     billing_profile = resolve_billing_profile(subscriber)
+    billing_readiness = get_subscriber_billing_readiness(subscriber)
     return render(request, 'subscribers/detail.html', {
         'subscriber': subscriber,
         'invoices': invoices[:10],
@@ -120,6 +122,7 @@ def subscriber_detail(request, pk):
         'nodes': NetworkNode.objects.filter(is_active=True).order_by('name'),
         'usage_views': usage_views,
         'billing_profile': billing_profile,
+        'billing_readiness': billing_readiness,
     })
 
 
@@ -156,12 +159,36 @@ def subscriber_send_billing_sms(request, pk):
 def subscriber_edit(request, pk):
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
+        old_status = subscriber.status
         form = SubscriberAdminForm(request.POST, instance=subscriber)
         if form.is_valid():
-            form.save()
+            target_status = form.cleaned_data['status']
+            updated_subscriber = form.save(commit=False)
+            updated_subscriber.status = old_status
+            updated_subscriber.save()
+
             AuditLog.log('update', 'subscribers',
                          f"Subscriber info updated: {subscriber.username}", user=request.user)
-            messages.success(request, 'Subscriber information updated.')
+            if target_status != old_status:
+                ok, err = transition_subscriber_status(
+                    updated_subscriber,
+                    target_status,
+                    changed_by=request.user.username,
+                    reason='Profile edit',
+                )
+                updated_subscriber.refresh_from_db()
+                if err and updated_subscriber.status == target_status:
+                    messages.warning(request, f"Information saved and status updated, but MikroTik warning: {err}")
+                elif err:
+                    messages.error(request, f"Information saved, but status was not changed: {err}")
+                else:
+                    messages.success(
+                        request,
+                        f"Subscriber information updated. Status changed to {updated_subscriber.get_status_display()}."
+                    )
+                    return redirect('subscriber-detail', pk=pk)
+            else:
+                messages.success(request, 'Subscriber information updated.')
             return redirect('subscriber-detail', pk=pk)
     else:
         form = SubscriberAdminForm(instance=subscriber)
@@ -239,9 +266,16 @@ def subscriber_rate_change(request, pk):
 def subscriber_suspend(request, pk):
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
-        ok, err = suspend_subscriber(subscriber, suspended_by=request.user.username)
-        if err and not ok:
+        ok, err = transition_subscriber_status(
+            subscriber,
+            'suspended',
+            changed_by=request.user.username,
+        )
+        subscriber.refresh_from_db()
+        if err and subscriber.status == 'suspended':
             messages.warning(request, f"Status updated but MikroTik error: {err}")
+        elif err:
+            messages.error(request, err)
         else:
             messages.success(request, f"{subscriber.display_name} suspended.")
     return redirect('subscriber-detail', pk=pk)
@@ -251,11 +285,20 @@ def subscriber_suspend(request, pk):
 def subscriber_reconnect(request, pk):
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
-        ok, err = reconnect_subscriber(subscriber, reconnected_by=request.user.username)
-        if err and not ok:
+        old_status = subscriber.status
+        ok, err = transition_subscriber_status(
+            subscriber,
+            'active',
+            changed_by=request.user.username,
+        )
+        subscriber.refresh_from_db()
+        if err and subscriber.status == 'active':
             messages.warning(request, f"Status updated but MikroTik error: {err}")
+        elif err:
+            messages.error(request, err)
         else:
-            messages.success(request, f"{subscriber.display_name} reconnected.")
+            action = 'activated' if old_status == 'inactive' else 'reconnected'
+            messages.success(request, f"{subscriber.display_name} {action}.")
     return redirect('subscriber-detail', pk=pk)
 
 

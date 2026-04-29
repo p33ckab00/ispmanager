@@ -64,12 +64,21 @@
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+        {% if subscriber.status == 'disconnected' or subscriber.status == 'deceased' or subscriber.status == 'archived' %}
+        <input type="hidden" name="status" value="{{ subscriber.status }}">
+        <div class="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500">
+          {{ subscriber.get_status_display }}
+        </div>
+        <p class="text-xs text-gray-400 mt-1">Use the dedicated lifecycle action for terminal status changes.</p>
+        {% else %}
         <select name="status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="active" {% if subscriber.status == 'active' %}selected{% endif %}>Active</option>
           <option value="inactive" {% if subscriber.status == 'inactive' %}selected{% endif %}>Inactive</option>
           <option value="suspended" {% if subscriber.status == 'suspended' %}selected{% endif %}>Suspended</option>
         </select>
-        <p class="text-xs text-gray-400 mt-1">Use Disconnect/Deceased actions for other status changes.</p>
+        <p class="text-xs text-gray-400 mt-1">Status changes run through lifecycle services and audit logging.</p>
+        {% endif %}
+        {% if form.status.errors %}<p class="text-red-500 text-xs mt-1">{{ form.status.errors.0 }}</p>{% endif %}
       </div>
       <div class="md:col-span-2">
         <label class="block text-sm font-medium text-gray-700 mb-1">Address</label>

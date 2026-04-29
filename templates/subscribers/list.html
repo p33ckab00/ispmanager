@@ -75,6 +75,9 @@
             {% else %}bg-gray-100 text-gray-500{% endif %}">
             {{ sub.get_status_display }}
           </span>
+          <span class="px-2.5 py-1 rounded-full text-[11px] font-semibold {{ sub.billing_readiness.badge_classes }}">
+            {{ sub.billing_readiness.label }}
+          </span>
           <span class="inline-flex h-9 w-9 items-center justify-center rounded-full bg-blue-50 text-blue-600 border border-blue-100">
             <i class="fa fa-eye"></i>
             <span class="sr-only">View subscriber</span>
@@ -130,6 +133,11 @@
           {% if sub.has_active_suspension_hold %}
           <span class="px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">Palugit</span>
           {% endif %}
+          {% if not sub.billing_readiness.billing_ready %}
+          <span class="px-2 py-0.5 rounded-full text-xs bg-red-50 text-red-600">Setup</span>
+          {% elif not sub.billing_readiness.sms_ready %}
+          <span class="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700">SMS</span>
+          {% endif %}
           <span class="inline-flex items-center gap-2 text-xs font-semibold text-blue-600">
             <span>Open</span>
             <i class="fa fa-chevron-right text-[10px]"></i>
@@ -156,6 +164,7 @@
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Plan</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Rate</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Billing Setup</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">MT Status</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Topology</th>
             <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 md:sticky md:right-0 md:bg-gray-50 md:shadow-[-10px_0_12px_-12px_rgba(15,23,42,0.25)] xl:static xl:shadow-none">View</th>
@@ -186,6 +195,14 @@
               <span class="ml-1 px-2 py-0.5 rounded-full text-xs bg-amber-100 text-amber-700">
                 Palugit
               </span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3">
+              <span class="px-2 py-0.5 rounded-full text-xs font-medium {{ sub.billing_readiness.badge_classes }}">
+                {{ sub.billing_readiness.label }}
+              </span>
+              {% if sub.billing_readiness.issues %}
+              <p class="text-xs text-gray-400 mt-1 max-w-[220px] truncate">{{ sub.billing_readiness.issues|join:", " }}</p>
               {% endif %}
             </td>
             <td class="px-4 py-3">
@@ -223,7 +240,7 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="10" class="px-4 py-12 text-center text-gray-400 text-sm">
+            <td colspan="11" class="px-4 py-12 text-center text-gray-400 text-sm">
               No subscribers found. Sync from MikroTik or add manually.
             </td>
           </tr>

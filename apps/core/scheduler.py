@@ -37,8 +37,7 @@ def job_generate_invoices():
 
 
 def job_generate_snapshots():
-    from apps.billing.services import generate_snapshot_for_subscriber, get_cutoff_day_queryset_filter
-    from apps.subscribers.models import Subscriber
+    from apps.billing.services import generate_due_billing_snapshots
     from apps.settings_app.models import BillingSettings
     from datetime import date
     try:
@@ -46,15 +45,11 @@ def job_generate_snapshots():
         if settings.billing_snapshot_mode == 'manual':
             return
         today = date.today()
-        subs = Subscriber.objects.filter(
-            status__in=['active', 'suspended'],
-        ).filter(get_cutoff_day_queryset_filter(today.day, settings, today))
-        created = 0
-        for sub in subs:
-            snapshot, err = generate_snapshot_for_subscriber(sub, settings, reference_date=today)
-            if snapshot and err is None:
-                created += 1
-        logger.info(f"Snapshots generated: {created}")
+        created, skipped, errors = generate_due_billing_snapshots(
+            billing_settings=settings,
+            reference_date=today,
+        )
+        logger.info(f"Snapshots generated: {created}, skipped: {skipped}, errors: {len(errors)}")
     except Exception as e:
         logger.error(f"job_generate_snapshots error: {e}")
 

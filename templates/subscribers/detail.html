@@ -37,6 +37,9 @@
             PALUGIT UNTIL {{ palugit_until|date:"M d, Y g:i A" }}
           </span>
           {% endif %}
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold {{ billing_readiness.badge_classes }}">
+            {{ billing_readiness.label|upper }}
+          </span>
           <span class="inline-flex items-center gap-2 text-xs {% if subscriber.mt_status == 'online' %}text-green-600{% elif subscriber.mt_status == 'offline' %}text-red-500{% else %}text-gray-400{% endif %}">
             <span class="w-2 h-2 rounded-full {% if subscriber.mt_status == 'online' %}bg-green-400{% elif subscriber.mt_status == 'offline' %}bg-red-300{% else %}bg-gray-300{% endif %}"></span>
             MikroTik {{ subscriber.mt_status|title }}
@@ -66,6 +69,14 @@
             {% csrf_token %}
             <button type="submit" class="w-full inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition">
               <i class="fa fa-play"></i> Reconnect
+            </button>
+          </form>
+          {% elif subscriber.status == 'inactive' %}
+          <form method="post" action="/subscribers/{{ subscriber.pk }}/reconnect/"
+                onsubmit="return confirm('Activate {{ subscriber.display_name }}?')">
+            {% csrf_token %}
+            <button type="submit" class="w-full inline-flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition">
+              <i class="fa fa-play"></i> Activate
             </button>
           </form>
           {% endif %}
@@ -220,6 +231,13 @@
             <div><dt class="text-xs text-gray-400">Billable</dt><dd class="font-medium mt-0.5">{% if subscriber.is_billable %}Yes{% else %}No{% endif %}</dd></div>
             <div><dt class="text-xs text-gray-400">Plan</dt><dd class="font-medium mt-0.5">{{ subscriber.plan.name|default:'-' }}</dd></div>
             <div><dt class="text-xs text-gray-400">Rate Effective</dt><dd class="font-medium mt-0.5">{{ subscriber.billing_effective_from|default:'-' }}</dd></div>
+            <div class="sm:col-span-2">
+              <dt class="text-xs text-gray-400">Billing Readiness</dt>
+              <dd class="font-medium mt-0.5 {% if billing_readiness.billing_ready %}text-green-700{% else %}text-red-600{% endif %}">{{ billing_readiness.label }}</dd>
+              {% if billing_readiness.issues %}
+              <dd class="text-xs text-gray-500 mt-1">{{ billing_readiness.issues|join:", " }}</dd>
+              {% endif %}
+            </div>
             {% if latest_snapshot %}
             <div><dt class="text-xs text-gray-400">Current Due</dt><dd class="font-medium mt-0.5">{{ latest_snapshot.due_date }}</dd></div>
             <div><dt class="text-xs text-gray-400">Bill Amount</dt><dd class="font-medium mt-0.5">PHP {{ latest_snapshot.total_due_amount }}</dd></div>
@@ -756,6 +774,15 @@
           <div class="flex justify-between gap-4">
             <dt class="text-gray-400">Billable</dt>
             <dd class="font-medium text-right">{% if subscriber.is_billable %}Yes{% else %}No{% endif %}</dd>
+          </div>
+          <div class="pt-2 border-t border-gray-100">
+            <dt class="text-gray-400 mb-1">Billing Readiness</dt>
+            <dd class="font-medium {% if billing_readiness.billing_ready %}text-green-700{% else %}text-red-600{% endif %}">
+              {{ billing_readiness.label }}
+            </dd>
+            {% if billing_readiness.issues %}
+            <dd class="text-gray-500 mt-1">{{ billing_readiness.issues|join:", " }}</dd>
+            {% endif %}
           </div>
           <div class="flex justify-between gap-4">
             <dt class="text-gray-400">Plan</dt>

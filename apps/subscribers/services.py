@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from django.utils import timezone
 from apps.subscribers.models import (
@@ -11,6 +12,92 @@ from apps.routers import mikrotik
 
 
 MIKROTIK_FIELDS = ['mt_password', 'mt_profile', 'mac_address', 'ip_address', 'mt_status', 'service_type']
+
+
+def normalize_phone_digits(phone):
+    return re.sub(r'\D+', '', phone or '')
+
+
+def get_subscriber_billing_readiness(subscriber, billing_settings=None, reference_date=None):
+    """
+    Returns setup/readiness state for billing and SMS.
+    Billing readiness intentionally does not require a phone number; SMS readiness does.
+    """
+    from apps.settings_app.models import BillingSettings
+
+    if billing_settings is None:
+        billing_settings = BillingSettings.get_settings()
+
+    today = reference_date or date.today()
+    billing_issues = []
+    sms_issues = []
+
+    if not subscriber.is_billable:
+        billing_issues.append('Billing is disabled for this subscriber.')
+    if subscriber.status not in ('active', 'suspended'):
+        billing_issues.append(f"Subscriber status is {subscriber.get_status_display()}.")
+
+    if subscriber.pk:
+        rate = RateHistory.get_effective_rate(subscriber, today)
+    else:
+        rate = subscriber.effective_rate
+    if rate is None:
+        billing_issues.append('Missing plan or monthly rate.')
+
+    effective_from = subscriber.billing_effective_from or subscriber.start_date
+    if effective_from is None:
+        billing_issues.append('Missing service start date or billing effective date.')
+
+    cutoff_day = subscriber.cutoff_day if subscriber.cutoff_day is not None else billing_settings.billing_day
+    try:
+        cutoff_day = int(cutoff_day)
+    except (TypeError, ValueError):
+        billing_issues.append('Invalid cutoff day.')
+        cutoff_day = None
+    else:
+        if not 1 <= cutoff_day <= 31:
+            billing_issues.append('Cutoff day must be between 1 and 31.')
+
+    if subscriber.billing_type not in ('postpaid', 'prepaid'):
+        billing_issues.append('Billing type must be postpaid or prepaid.')
+
+    phone_digits = normalize_phone_digits(subscriber.phone)
+    if subscriber.sms_opt_out:
+        sms_issues.append('Subscriber opted out of SMS.')
+    if not phone_digits:
+        sms_issues.append('Missing phone number.')
+    elif len(phone_digits) < 10:
+        sms_issues.append('Phone number looks incomplete.')
+
+    billing_ready = not billing_issues
+    sms_ready = billing_ready and not sms_issues
+
+    if billing_ready and sms_ready:
+        status = 'ready'
+        label = 'Billing and SMS ready'
+        badge_classes = 'bg-green-100 text-green-700'
+    elif billing_ready:
+        status = 'billing_ready_sms_attention'
+        label = 'Billing ready, SMS attention'
+        badge_classes = 'bg-amber-100 text-amber-700'
+    else:
+        status = 'needs_setup'
+        label = 'Needs billing setup'
+        badge_classes = 'bg-red-100 text-red-600'
+
+    return {
+        'billing_ready': billing_ready,
+        'sms_ready': sms_ready,
+        'status': status,
+        'label': label,
+        'badge_classes': badge_classes,
+        'billing_issues': billing_issues,
+        'sms_issues': sms_issues,
+        'issues': billing_issues + sms_issues,
+        'rate': rate,
+        'effective_from': effective_from,
+        'resolved_cutoff_day': cutoff_day,
+    }
 
 
 # ── Sync ───────────────────────────────────────────────────────────────────────
@@ -49,6 +136,9 @@ def sync_ppp_secrets(router):
                 mt_password=password,
                 mt_profile=profile,
                 service_type=service if service in ['pppoe', 'hotspot', 'dhcp'] else 'pppoe',
+                status='inactive',
+                is_billable=False,
+                notes='Imported from MikroTik sync. Complete subscriber and billing setup before activation.',
                 last_synced=timezone.now(),
             )
             added += 1
@@ -123,13 +213,26 @@ def reconnect_on_mikrotik(subscriber):
 
 # ── Subscriber Status Lifecycle ────────────────────────────────────────────────
 
-def suspend_subscriber(subscriber, suspended_by='admin'):
-    ok, err = suspend_on_mikrotik(subscriber)
-    subscriber.status = 'suspended'
+SERVICEABLE_STATUSES = ('active', 'inactive', 'suspended')
+TERMINAL_STATUSES = ('disconnected', 'deceased', 'archived')
+
+
+def _clear_suspension_hold(subscriber):
     subscriber.suspension_hold_until = None
     subscriber.suspension_hold_reason = ''
     subscriber.suspension_hold_by = ''
     subscriber.suspension_hold_created_at = None
+
+
+def _status_label(status):
+    return dict(Subscriber.STATUS_CHOICES).get(status, status)
+
+
+def suspend_subscriber(subscriber, suspended_by='admin'):
+    old_status = subscriber.status
+    ok, err = suspend_on_mikrotik(subscriber)
+    subscriber.status = 'suspended'
+    _clear_suspension_hold(subscriber)
     subscriber.save(update_fields=[
         'status',
         'suspension_hold_until',
@@ -140,7 +243,11 @@ def suspend_subscriber(subscriber, suspended_by='admin'):
     ])
 
     from apps.core.models import AuditLog
-    AuditLog.log('update', 'subscribers', f"{subscriber.username} suspended by {suspended_by}", )
+    AuditLog.log(
+        'update',
+        'subscribers',
+        f"{subscriber.username} status {old_status} -> suspended by {suspended_by}",
+    )
 
     from apps.notifications.telegram import notify_event
     notify_event('subscriber_status', f"Subscriber Suspended",
@@ -150,12 +257,25 @@ def suspend_subscriber(subscriber, suspended_by='admin'):
 
 
 def reconnect_subscriber(subscriber, reconnected_by='admin'):
+    old_status = subscriber.status
     ok, err = reconnect_on_mikrotik(subscriber)
     subscriber.status = 'active'
-    subscriber.save(update_fields=['status', 'updated_at'])
+    _clear_suspension_hold(subscriber)
+    subscriber.save(update_fields=[
+        'status',
+        'suspension_hold_until',
+        'suspension_hold_reason',
+        'suspension_hold_by',
+        'suspension_hold_created_at',
+        'updated_at',
+    ])
 
     from apps.core.models import AuditLog
-    AuditLog.log('update', 'subscribers', f"{subscriber.username} reconnected by {reconnected_by}")
+    AuditLog.log(
+        'update',
+        'subscribers',
+        f"{subscriber.username} status {old_status} -> active by {reconnected_by}",
+    )
 
     from apps.notifications.telegram import notify_event
     notify_event('subscriber_status', 'Subscriber Reconnected',
@@ -164,15 +284,74 @@ def reconnect_subscriber(subscriber, reconnected_by='admin'):
     return ok, err
 
 
+def deactivate_subscriber(subscriber, deactivated_by='admin', reason=''):
+    old_status = subscriber.status
+    ok, err = suspend_on_mikrotik(subscriber)
+    subscriber.status = 'inactive'
+    _clear_suspension_hold(subscriber)
+    subscriber.save(update_fields=[
+        'status',
+        'suspension_hold_until',
+        'suspension_hold_reason',
+        'suspension_hold_by',
+        'suspension_hold_created_at',
+        'updated_at',
+    ])
+
+    from apps.core.models import AuditLog
+    note = f": {reason}" if reason else ''
+    AuditLog.log(
+        'update',
+        'subscribers',
+        f"{subscriber.username} status {old_status} -> inactive by {deactivated_by}{note}",
+    )
+
+    from apps.notifications.telegram import notify_event
+    notify_event(
+        'subscriber_status',
+        'Subscriber Deactivated',
+        f"{subscriber.display_name} ({subscriber.username}) has been marked inactive.",
+    )
+
+    return ok, err
+
+
+def transition_subscriber_status(subscriber, target_status, changed_by='admin', reason=''):
+    """
+    Formal non-terminal status transition router.
+    Terminal statuses must use disconnect/deceased/archive workflows.
+    """
+    target_status = (target_status or '').strip()
+    current_status = subscriber.status
+
+    if target_status == current_status:
+        return True, None
+
+    if current_status in TERMINAL_STATUSES or target_status in TERMINAL_STATUSES:
+        return False, (
+            f"Use the dedicated workflow for {_status_label(current_status)} "
+            f"to {_status_label(target_status)} status changes."
+        )
+
+    if target_status not in SERVICEABLE_STATUSES:
+        return False, f"Unsupported subscriber status: {target_status}."
+
+    if target_status == 'active':
+        return reconnect_subscriber(subscriber, reconnected_by=changed_by)
+    if target_status == 'suspended':
+        return suspend_subscriber(subscriber, suspended_by=changed_by)
+    if target_status == 'inactive':
+        return deactivate_subscriber(subscriber, deactivated_by=changed_by, reason=reason)
+
+    return False, f"Unsupported subscriber status: {target_status}."
+
+
 def disconnect_subscriber(subscriber, reason='', disconnected_by='admin'):
     suspend_on_mikrotik(subscriber)
     subscriber.status = 'disconnected'
     subscriber.disconnected_date = date.today()
     subscriber.disconnected_reason = reason
-    subscriber.suspension_hold_until = None
-    subscriber.suspension_hold_reason = ''
-    subscriber.suspension_hold_by = ''
-    subscriber.suspension_hold_created_at = None
+    _clear_suspension_hold(subscriber)
     subscriber.save(update_fields=[
         'status',
         'disconnected_date',
@@ -198,10 +377,7 @@ def mark_deceased(subscriber, deceased_date=None, note='', marked_by='admin'):
     subscriber.status = 'deceased'
     subscriber.deceased_date = deceased_date or date.today()
     subscriber.deceased_note = note
-    subscriber.suspension_hold_until = None
-    subscriber.suspension_hold_reason = ''
-    subscriber.suspension_hold_by = ''
-    subscriber.suspension_hold_created_at = None
+    _clear_suspension_hold(subscriber)
     subscriber.save(update_fields=[
         'status',
         'deceased_date',

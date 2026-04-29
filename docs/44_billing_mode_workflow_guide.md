@@ -414,12 +414,14 @@ These improvements are recommended after the prepaid/postpaid and cutoff `1-31` 
 
 ### Account credit and advance payments
 
-Target behavior:
+Current behavior:
 
 - Early payments should be accepted.
 - Overpayments should become account credit.
-- Account credit should auto-apply to the oldest unpaid invoice first.
-- Future invoices should consume available credit automatically.
+- Payments are allocated oldest-first when recorded.
+- Any overpayment remains as unallocated payment credit.
+- Future invoices consume available unallocated credit automatically when the invoice is created or reused.
+- Billing snapshots show a credit/payment line when those payments reduce the amount due.
 
 Example:
 
@@ -978,8 +980,11 @@ Scheduled snapshot generation:
 - Scheduler job: `job_generate_snapshots()`.
 - Runs daily at `00:15`.
 - Skips entirely when `billing_snapshot_mode='manual'`.
-- Filters subscribers whose effective cutoff date matches today, including month-end fallback cutoffs such as `30` or `31` on February month-end.
-- Calls `generate_snapshot_for_subscriber()`.
+- Uses `generate_due_billing_snapshots()`.
+- Prepares snapshots when the selected cycle reaches its preparation date.
+- Preparation date is normally the generation/cutoff date.
+- If billing SMS is enabled and the first reminder is earlier than the generation/cutoff date, preparation date becomes the first SMS reminder date.
+- This closes the postpaid lead-window gap: a bill due May 28 with SMS 3 days before due can be generated and frozen on May 25.
 - Counts only newly created snapshots.
 
 Snapshot creation:
@@ -987,7 +992,11 @@ Snapshot creation:
 - Uses the same billing profile as invoice generation.
 - Skips safely when a snapshot already exists for the same subscriber and `period_start`.
 - Ensures the current-cycle invoice exists by calling `generate_invoice_for_subscriber()`.
+- Applies existing unallocated payments to the current invoice when the invoice is created or reused.
+- Recomputes the billing preview after invoice/credit allocation.
+- Uses preview totals for current charge, previous balance, credit/payment applied, and total due.
 - Adds previous open, partial, and overdue invoice balances except the current-cycle invoice.
+- Adds a credit line item when payments or account credit reduce the amount due.
 - Creates a `BillingSnapshot` and line items.
 - If snapshot mode is `auto`, status becomes `frozen` and `frozen_at` is set.
 - If snapshot mode is `draft`, status remains `draft`.
@@ -1005,6 +1014,12 @@ Manual snapshot generation:
 - Calls `generate_snapshot_for_subscriber()` directly.
 - It uses the same profile calculation as the scheduler.
 - If a snapshot already exists for the same subscriber and period, the manual path redirects to the existing snapshot instead of creating a duplicate.
+
+Duplicate protection:
+
+- `Invoice` has a database unique constraint on subscriber and `period_start`.
+- `BillingSnapshot` has a database unique constraint on subscriber and `period_start`.
+- These constraints backstop the application-level duplicate checks and protect against race conditions.
 
 ## Billing SMS Reminder Workflow
 
@@ -1081,6 +1096,65 @@ Auto-suspend:
 - Selects active subscribers with overdue invoices.
 - Skips subscribers with an active `suspension_hold_until`.
 - Calls `suspend_subscriber()` for the rest.
+
+## Subscriber Billing Readiness and Onboarding Guardrails
+
+Current subscriber module strengths:
+
+- Subscriber records already carry billing fields: `billing_type`, `cutoff_day`, `billing_due_days`, `is_billable`, `start_date`, `billing_effective_from`, and `sms_opt_out`.
+- Subscriber lifecycle actions already exist for suspend, reconnect, disconnect, deceased, and archive.
+- Palugit / suspension hold is tracked per subscriber and respected by auto-suspend.
+
+Production gaps identified:
+
+- New subscribers synced from MikroTik can be incomplete because router data may not include plan, rate, phone, start date, or billing policy.
+- Direct status editing can bypass lifecycle actions if not controlled carefully.
+- MikroTik suspend/reconnect currently targets PPP secrets and should become service-type-aware for hotspot, DHCP/IPoE, and static accounts.
+- Subscriber pages need a visible billing/SMS readiness indicator.
+- Auto-reconnect after full payment is not fully implemented yet.
+- Disconnected account billing policy still needs a final-bill/waive/preserve-balance decision.
+- Phone/OTP flow needs duplicate-phone handling and stronger phone normalization.
+- Audit logging is mostly event-level; field-level before/after history is future work.
+- Permissions are broad because most subscriber actions currently rely on `login_required`.
+
+Implemented guardrail slice:
+
+- New subscribers created by MikroTik sync are imported as `inactive` and `is_billable=False`.
+- Admin must complete onboarding before the account enters automatic billing.
+- Billing readiness checks:
+  - account is billable,
+  - status is active or suspended,
+  - plan or monthly rate exists,
+  - service start date or billing effective date exists,
+  - billing type is postpaid or prepaid,
+  - resolved cutoff day is valid from subscriber override or billing settings.
+- SMS readiness is separate from billing readiness:
+  - billing can be ready even if phone is missing,
+  - SMS is not ready when phone is missing/incomplete or the subscriber opted out.
+- Billing preview, queue, invoice generation, and snapshot generation now surface or block incomplete billing setup with clear reasons.
+- Subscriber list and subscriber detail show the readiness badge so onboarding issues are visible before the scheduler reaches the account.
+
+Implemented status transition slice:
+
+- Generic subscriber status changes now route through a formal transition service.
+- The edit form can request only serviceable statuses: active, inactive, or suspended.
+- Profile edits save subscriber information first, then status changes are applied through lifecycle services.
+- Active transitions call the reconnect/activate path and clear active palugit.
+- Suspended transitions call the suspend path and clear active palugit.
+- Inactive transitions call the deactivate path, disable service where MikroTik auto-suspend is configured, and clear active palugit.
+- Disconnected, deceased, and archived are terminal workflow states and cannot be changed through the generic edit form.
+- Terminal workflow changes must use their dedicated actions: disconnect, deceased, and archive.
+- Suspend/reconnect buttons now use the same formal transition service as edit-driven status changes.
+- Audit logs record old status to new status transitions.
+- If the database status changes but MikroTik returns a warning, the UI reports the warning instead of hiding it.
+
+Recommended next subscriber slices:
+
+- Service-type-aware MikroTik suspend/reconnect for PPPoE, Hotspot, DHCP/IPoE, and Static subscribers.
+- Auto-reconnect rule after full payment, with a setting to require manual approval or allow automatic reconnect.
+- Disconnected final-billing policy with options to final bill, waive open balance, preserve balance, or refund credit.
+- Phone normalization and duplicate-phone policy for subscriber portal OTP.
+- Field-level subscriber audit trail and role-based permissions for billing-sensitive changes.
 
 ## Implementation Gap and Future Work
 

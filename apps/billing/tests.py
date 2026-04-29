@@ -9,8 +9,10 @@ from apps.billing.services import (
     get_cutoff_day_queryset_filter,
     get_effective_cutoff_date,
     get_billing_preview_for_subscriber,
+    get_billing_snapshot_preparation_date,
     get_next_cutoff_period,
     resolve_billing_profile,
+    should_prepare_billing_snapshot,
 )
 from apps.billing.models import BillingSnapshot, Invoice, Payment
 from apps.settings_app.models import BillingSettings
@@ -68,6 +70,34 @@ class BillingCutoffPeriodTests(SimpleTestCase):
         self.assertEqual(profile['generation_date'], date(2026, 5, 28))
         self.assertEqual(profile['due_date'], date(2026, 5, 29))
 
+    def test_snapshot_preparation_uses_sms_lead_window_when_enabled(self):
+        preview = {
+            'errors': [],
+            'snapshot': None,
+            'generation_date': date(2026, 5, 28),
+            'sms': {
+                'enabled': True,
+                'first_sms_date': date(2026, 5, 25),
+            },
+        }
+
+        self.assertEqual(get_billing_snapshot_preparation_date(preview), date(2026, 5, 25))
+        self.assertTrue(should_prepare_billing_snapshot(preview, date(2026, 5, 25)))
+
+    def test_snapshot_preparation_falls_back_to_generation_date_without_sms(self):
+        preview = {
+            'errors': [],
+            'snapshot': None,
+            'generation_date': date(2026, 5, 28),
+            'sms': {
+                'enabled': False,
+                'first_sms_date': date(2026, 5, 25),
+            },
+        }
+
+        self.assertEqual(get_billing_snapshot_preparation_date(preview), date(2026, 5, 28))
+        self.assertFalse(should_prepare_billing_snapshot(preview, date(2026, 5, 25)))
+
 
 class BillingPreviewTests(TestCase):
     def _billing_settings(self):
@@ -84,6 +114,7 @@ class BillingPreviewTests(TestCase):
             monthly_rate=Decimal('1000.00'),
             cutoff_day=28,
             billing_type='postpaid',
+            start_date=date(2026, 4, 29),
             status='active',
         )
 
@@ -114,6 +145,7 @@ class BillingPreviewTests(TestCase):
             monthly_rate=Decimal('1000.00'),
             cutoff_day=28,
             billing_type='postpaid',
+            start_date=date(2026, 4, 29),
             status='active',
         )
         Invoice.objects.create(
@@ -152,6 +184,7 @@ class BillingPreviewTests(TestCase):
             monthly_rate=Decimal('1000.00'),
             cutoff_day=28,
             billing_type='postpaid',
+            start_date=date(2026, 4, 29),
             status='active',
         )
         invoice = Invoice.objects.create(

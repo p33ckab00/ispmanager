@@ -2,7 +2,7 @@ from decimal import Decimal
 from datetime import date, timedelta
 import calendar
 from django.utils import timezone
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
 from apps.billing.models import Invoice, Payment, PaymentAllocation, BillingSnapshot, BillingSnapshotItem
 from apps.settings_app.models import BillingSettings
@@ -154,6 +154,57 @@ def get_account_credit_for_subscriber(subscriber):
     return max(payment_total - allocated_total, Decimal('0.00'))
 
 
+def _apply_payment_status(invoice):
+    if invoice.status in ('voided', 'waived'):
+        return
+    if invoice.amount_paid >= invoice.amount:
+        invoice.status = 'paid'
+    elif invoice.amount_paid > Decimal('0.00'):
+        invoice.status = 'partial'
+    else:
+        invoice.status = 'open'
+
+
+def apply_unallocated_payments_to_invoice(invoice):
+    """
+    Applies existing unallocated payments to the invoice oldest-first.
+    This turns early payments into actual allocations once the invoice exists.
+    """
+    if invoice.status in ('paid', 'voided', 'waived') or invoice.remaining_balance <= Decimal('0.00'):
+        return Decimal('0.00')
+
+    applied = Decimal('0.00')
+    payments = Payment.objects.filter(
+        subscriber=invoice.subscriber,
+    ).order_by('paid_at', 'created_at', 'pk')
+
+    for payment in payments:
+        if invoice.remaining_balance <= Decimal('0.00'):
+            break
+        if PaymentAllocation.objects.filter(payment=payment, invoice=invoice).exists():
+            continue
+
+        available = payment.unallocated_amount
+        if available <= Decimal('0.00'):
+            continue
+
+        allocate = min(available, invoice.remaining_balance)
+        if allocate <= Decimal('0.00'):
+            continue
+
+        PaymentAllocation.objects.create(
+            payment=payment,
+            invoice=invoice,
+            amount_allocated=allocate,
+        )
+        invoice.amount_paid += allocate
+        applied += allocate
+        _apply_payment_status(invoice)
+        invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])
+
+    return applied
+
+
 def get_billing_preview_for_subscriber(subscriber, billing_settings=None,
                                        sms_settings=None, reference_date=None):
     """
@@ -170,19 +221,27 @@ def get_billing_preview_for_subscriber(subscriber, billing_settings=None,
     today = reference_date or date.today()
     profile = resolve_billing_profile(subscriber, billing_settings, today)
     rate = get_effective_rate_at(subscriber, today)
+    from apps.subscribers.services import get_subscriber_billing_readiness
+    readiness = get_subscriber_billing_readiness(
+        subscriber,
+        billing_settings=billing_settings,
+        reference_date=today,
+    )
     errors = []
     flags = []
 
-    if not subscriber.can_generate_billing:
-        errors.append(f"Subscriber {subscriber.username} cannot generate billing.")
-        flags.append('not_billable')
+    if not readiness['billing_ready']:
+        errors.extend(readiness['billing_issues'])
+        flags.append('billing_setup_incomplete')
+        if not subscriber.can_generate_billing:
+            flags.append('not_billable')
 
     effective_from = profile['effective_from']
     if effective_from and today < effective_from:
         errors.append(f"Billing starts on {effective_from}.")
         flags.append('billing_not_effective')
 
-    if rate is None:
+    if rate is None and 'Missing plan or monthly rate.' not in errors:
         errors.append('No rate set.')
         flags.append('missing_rate')
 
@@ -253,6 +312,7 @@ def get_billing_preview_for_subscriber(subscriber, billing_settings=None,
     return {
         'subscriber': subscriber,
         'can_generate': can_generate,
+        'readiness': readiness,
         'errors': errors,
         'flags': flags,
         'profile': profile,
@@ -318,6 +378,68 @@ def get_billing_previews(reference_date=None, subscribers=None,
     ]
 
 
+def get_billing_snapshot_preparation_date(preview):
+    preparation_date = preview['generation_date']
+    first_sms_date = preview['sms'].get('first_sms_date')
+    if preview['sms'].get('enabled') and first_sms_date:
+        preparation_date = min(preparation_date, first_sms_date)
+    return preparation_date
+
+
+def should_prepare_billing_snapshot(preview, reference_date=None):
+    today = reference_date or date.today()
+    if preview['errors'] or preview['snapshot'] is not None:
+        return False
+    return today >= get_billing_snapshot_preparation_date(preview)
+
+
+def generate_due_billing_snapshots(billing_settings=None, sms_settings=None,
+                                   reference_date=None):
+    from apps.subscribers.models import Subscriber
+    from apps.settings_app.models import SMSSettings
+
+    if billing_settings is None:
+        billing_settings = BillingSettings.get_settings()
+    if sms_settings is None:
+        sms_settings = SMSSettings.get_settings()
+    if billing_settings.billing_snapshot_mode == 'manual':
+        return 0, 0, []
+
+    today = reference_date or date.today()
+    subscribers = Subscriber.objects.filter(
+        status__in=['active', 'suspended'],
+        is_billable=True,
+    ).select_related('plan')
+
+    created = 0
+    skipped = 0
+    errors = []
+    for subscriber in subscribers:
+        preview = get_billing_preview_for_subscriber(
+            subscriber,
+            billing_settings=billing_settings,
+            sms_settings=sms_settings,
+            reference_date=today,
+        )
+        if not should_prepare_billing_snapshot(preview, today):
+            skipped += 1
+            continue
+
+        snapshot, err = generate_snapshot_for_subscriber(
+            subscriber,
+            billing_settings=billing_settings,
+            reference_date=today,
+        )
+        if snapshot and err is None:
+            created += 1
+        elif err and 'already exists' in err:
+            skipped += 1
+        elif err:
+            errors.append(f"{subscriber.username}: {err}")
+
+    return created, skipped, errors
+
+
 # ── Invoice Generation ─────────────────────────────────────────────────────────
 
 @transaction.atomic
@@ -329,6 +451,15 @@ def generate_invoice_for_subscriber(subscriber, billing_settings=None, reference
         return None, f"Subscriber {subscriber.username} is {subscriber.status}, billing skipped."
 
     today = reference_date or date.today()
+    from apps.subscribers.services import get_subscriber_billing_readiness
+    readiness = get_subscriber_billing_readiness(
+        subscriber,
+        billing_settings=billing_settings,
+        reference_date=today,
+    )
+    if not readiness['billing_ready']:
+        return None, f"Subscriber {subscriber.username} is not billing-ready: {'; '.join(readiness['billing_issues'])}"
+
     profile = resolve_billing_profile(subscriber, billing_settings, today)
     if profile['effective_from'] and today < profile['effective_from']:
         return None, f"Billing for {subscriber.username} starts on {profile['effective_from']}."
@@ -348,16 +479,27 @@ def generate_invoice_for_subscriber(subscriber, billing_settings=None, reference
     ).first()
 
     if existing:
+        apply_unallocated_payments_to_invoice(existing)
         return existing, 'Invoice already exists for this period.'
 
-    invoice = Invoice.objects.create(
-        subscriber=subscriber,
-        period_start=period_start,
-        period_end=period_end,
-        due_date=due_date,
-        amount=rate,
-        rate_snapshot=rate,
-    )
+    try:
+        with transaction.atomic():
+            invoice = Invoice.objects.create(
+                subscriber=subscriber,
+                period_start=period_start,
+                period_end=period_end,
+                due_date=due_date,
+                amount=rate,
+                rate_snapshot=rate,
+            )
+    except IntegrityError:
+        invoice = Invoice.objects.get(
+            subscriber=subscriber,
+            period_start=period_start,
+        )
+        apply_unallocated_payments_to_invoice(invoice)
+        return invoice, 'Invoice already exists for this period.'
+    apply_unallocated_payments_to_invoice(invoice)
 
     return invoice, None
 
@@ -457,6 +599,15 @@ def generate_snapshot_for_subscriber(subscriber, billing_settings=None,
         return None, f"Subscriber {subscriber.username} cannot generate billing."
 
     today = reference_date or date.today()
+    from apps.subscribers.services import get_subscriber_billing_readiness
+    readiness = get_subscriber_billing_readiness(
+        subscriber,
+        billing_settings=billing_settings,
+        reference_date=today,
+    )
+    if not readiness['billing_ready']:
+        return None, f"Subscriber {subscriber.username} is not billing-ready: {'; '.join(readiness['billing_issues'])}"
+
     profile = resolve_billing_profile(subscriber, billing_settings, today)
     if profile['effective_from'] and today < profile['effective_from']:
         return None, f"Billing for {subscriber.username} starts on {profile['effective_from']}."
@@ -477,6 +628,11 @@ def generate_snapshot_for_subscriber(subscriber, billing_settings=None,
         return existing_snapshot, 'Snapshot already exists for this period.'
 
     invoice, _ = generate_invoice_for_subscriber(subscriber, billing_settings, today)
+    preview = get_billing_preview_for_subscriber(
+        subscriber,
+        billing_settings=billing_settings,
+        reference_date=today,
+    )
 
     open_invoices = Invoice.objects.filter(
         subscriber=subscriber,
@@ -485,28 +641,37 @@ def generate_snapshot_for_subscriber(subscriber, billing_settings=None,
         period_start=period_start,
     ).order_by('period_start')
 
-    previous_balance = sum(inv.remaining_balance for inv in open_invoices)
-    credit = Decimal('0.00')
-    total_due = rate + previous_balance - credit
+    current_charge = preview['current_charge']
+    previous_balance = preview['previous_balance']
+    total_due = preview['total_due']
+    credit = max(current_charge + previous_balance - total_due, Decimal('0.00'))
 
     mode = billing_settings.billing_snapshot_mode
     status = 'frozen' if mode == 'auto' else 'draft'
 
-    snapshot = BillingSnapshot.objects.create(
-        subscriber=subscriber,
-        cutoff_date=profile['cutoff_date'],
-        issue_date=today,
-        due_date=due_date,
-        period_start=period_start,
-        period_end=period_end,
-        current_cycle_amount=rate,
-        previous_balance_amount=previous_balance,
-        credit_amount=credit,
-        total_due_amount=total_due,
-        status=status,
-        source='scheduler' if created_by == 'system' else 'manual',
-        created_by=created_by,
-    )
+    try:
+        with transaction.atomic():
+            snapshot = BillingSnapshot.objects.create(
+                subscriber=subscriber,
+                cutoff_date=profile['cutoff_date'],
+                issue_date=today,
+                due_date=profile['due_date'],
+                period_start=profile['period_start'],
+                period_end=profile['period_end'],
+                current_cycle_amount=current_charge,
+                previous_balance_amount=previous_balance,
+                credit_amount=credit,
+                total_due_amount=total_due,
+                status=status,
+                source='scheduler' if created_by == 'system' else 'manual',
+                created_by=created_by,
+            )
+    except IntegrityError:
+        snapshot = BillingSnapshot.objects.get(
+            subscriber=subscriber,
+            period_start=period_start,
+        )
+        return snapshot, 'Snapshot already exists for this period.'
 
     if mode == 'auto':
         snapshot.frozen_at = timezone.now()
@@ -517,10 +682,10 @@ def generate_snapshot_for_subscriber(subscriber, billing_settings=None,
         snapshot=snapshot,
         item_type='current_charge',
         invoice=invoice,
-        label=f"Monthly Service - {period_start.strftime('%b %d')} to {period_end.strftime('%b %d, %Y')}",
-        period_start=period_start,
-        period_end=period_end,
-        amount=rate,
+        label=f"Monthly Service - {profile['period_start'].strftime('%b %d')} to {profile['period_end'].strftime('%b %d, %Y')}",
+        period_start=profile['period_start'],
+        period_end=profile['period_end'],
+        amount=current_charge,
         sort_order=sort,
     )
 
@@ -534,6 +699,17 @@ def generate_snapshot_for_subscriber(subscriber, billing_settings=None,
             period_start=inv.period_start,
             period_end=inv.period_end,
             amount=inv.remaining_balance,
+            sort_order=sort,
+        )
+
+    if credit > Decimal('0.00'):
+        sort += 1
+        BillingSnapshotItem.objects.create(
+            snapshot=snapshot,
+            item_type='credit',
+            invoice=invoice,
+            label='Payments / Credits Applied',
+            amount=credit,
             sort_order=sort,
         )
 

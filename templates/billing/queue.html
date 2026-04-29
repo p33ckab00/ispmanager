@@ -144,6 +144,9 @@
             <a href="/subscribers/{{ row.subscriber.pk }}/" class="font-medium hover:text-blue-600">{{ row.subscriber.display_name }}</a>
             <p class="text-xs text-gray-400 font-mono">{{ row.subscriber.username }}</p>
             {% if row.subscriber.phone %}<p class="text-xs text-gray-400">{{ row.subscriber.phone }}</p>{% endif %}
+            <span class="inline-flex mt-1 px-2 py-0.5 rounded-full text-[11px] font-medium {{ row.readiness.badge_classes }}">
+              {{ row.readiness.label }}
+            </span>
           </td>
           <td class="px-4 py-3 text-xs text-gray-500">
             <p class="font-medium text-gray-700">{{ row.billing_type|title }}</p>

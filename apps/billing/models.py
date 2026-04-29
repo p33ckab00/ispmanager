@@ -64,6 +64,12 @@ class Invoice(models.Model):
 
     class Meta:
         ordering = ['-period_start']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['subscriber', 'period_start'],
+                name='uniq_invoice_subscriber_period_start',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.invoice_number} - {self.subscriber.username}"
@@ -192,6 +198,12 @@ class BillingSnapshot(models.Model):
 
     class Meta:
         ordering = ['-cutoff_date']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['subscriber', 'period_start'],
+                name='uniq_snapshot_subscriber_period_start',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.snapshot_number} - {self.subscriber.username}"
