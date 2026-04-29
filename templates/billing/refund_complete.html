@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Complete Refund - {{ subscriber.display_name }}{% endblock %}
+{% block content %}
+<div class="max-w-lg">
+  <div class="mb-6">
+    <h2 class="text-2xl font-bold text-gray-800">Complete Refund</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ subscriber.display_name }}</p>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+    <div class="bg-orange-50 border border-orange-100 rounded-lg p-4 mb-5">
+      <p class="text-xs text-orange-600 uppercase font-semibold">Pending refund</p>
+      <p class="text-2xl font-bold text-orange-700 mt-1">PHP {{ adjustment.amount }}</p>
+      {% if adjustment.reason %}
+      <p class="text-xs text-orange-700 mt-2 whitespace-pre-line">{{ adjustment.reason }}</p>
+      {% endif %}
+    </div>
+
+    <form method="post" class="space-y-4">
+      {% csrf_token %}
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Reference</label>
+        {{ form.reference }}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Paid At</label>
+        {{ form.paid_at }}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+        {{ form.notes }}
+      </div>
+      <label class="flex items-start gap-3 rounded-lg border border-gray-100 p-3">
+        {{ form.create_expense }}
+        <span>
+          <span class="block text-sm font-medium text-gray-700">Create accounting expense</span>
+          <span class="block text-xs text-gray-400 mt-0.5">Adds this refund to Accounting > Expenses.</span>
+        </span>
+      </label>
+      <div class="flex flex-col-reverse gap-3 sm:flex-row">
+        <a href="/subscribers/{{ subscriber.pk }}/" class="inline-flex items-center justify-center px-4 py-2 text-sm text-gray-500">Cancel</a>
+        <button type="submit" class="inline-flex items-center justify-center bg-orange-600 hover:bg-orange-700 text-white font-semibold px-5 py-2 rounded-lg text-sm">
+          Mark Refund Paid
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -132,6 +132,21 @@ def subscriber_settings(request):
     if request.method == 'POST':
         obj.mikrotik_auto_suspend = 'mikrotik_auto_suspend' in request.POST
         obj.mikrotik_auto_reconnect = 'mikrotik_auto_reconnect' in request.POST
+        obj.auto_reconnect_after_full_payment = 'auto_reconnect_after_full_payment' in request.POST
+        disconnected_policy = request.POST.get('disconnected_billing_policy', 'preserve_balance')
+        allowed_policies = {choice[0] for choice in SubscriberSettings.DISCONNECTED_BILLING_POLICY_CHOICES}
+        obj.disconnected_billing_policy = (
+            disconnected_policy
+            if disconnected_policy in allowed_policies
+            else 'preserve_balance'
+        )
+        credit_policy = request.POST.get('disconnected_credit_policy', 'preserve_credit')
+        allowed_credit_policies = {choice[0] for choice in SubscriberSettings.DISCONNECTED_CREDIT_POLICY_CHOICES}
+        obj.disconnected_credit_policy = (
+            credit_policy
+            if credit_policy in allowed_credit_policies
+            else 'preserve_credit'
+        )
         obj.archive_after_days = int(request.POST.get('archive_after_days', 90))
         obj.save()
         AuditLog.log('update', 'settings', 'Subscriber settings updated', user=request.user)

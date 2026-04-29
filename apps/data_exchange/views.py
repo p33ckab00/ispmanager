@@ -111,6 +111,10 @@ def _handle_import(request, dataset, form_class, preview_fn, apply_fn, recorded_
 
 @login_required
 def import_subscribers(request):
+    if not request.user.has_perm('subscribers.import_subscribers'):
+        messages.error(request, 'You do not have permission to import subscriber records.')
+        return redirect('data-exchange-dashboard')
+
     update_existing = request.POST.get('update_existing') == 'on'
 
     def preview(rows):

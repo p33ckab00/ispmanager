@@ -1,6 +1,16 @@
+import re
 from django.db import models
 from django.utils import timezone
 from apps.routers.models import Router
+
+
+def normalize_phone_digits(phone):
+    digits = re.sub(r'\D+', '', phone or '')
+    if len(digits) == 11 and digits.startswith('09'):
+        return f"63{digits[1:]}"
+    if len(digits) == 10 and digits.startswith('9'):
+        return f"63{digits}"
+    return digits
 
 
 class Plan(models.Model):
@@ -64,6 +74,7 @@ class Subscriber(models.Model):
     # Admin-owned fields
     full_name = models.CharField(max_length=255, blank=True)
     phone = models.CharField(max_length=20, blank=True)
+    normalized_phone = models.CharField(max_length=20, blank=True, db_index=True, editable=False)
     address = models.TextField(blank=True)
     email = models.EmailField(blank=True)
     latitude = models.FloatField(null=True, blank=True)
@@ -125,9 +136,21 @@ class Subscriber(models.Model):
 
     class Meta:
         ordering = ['username']
+        permissions = [
+            ('manage_subscriber_billing', 'Can manage subscriber billing fields'),
+            ('manage_subscriber_lifecycle', 'Can suspend, reconnect, disconnect, mark deceased, and archive subscribers'),
+            ('import_subscribers', 'Can sync or import subscribers from routers'),
+        ]
 
     def __str__(self):
         return f"{self.username} ({self.full_name or 'No name'})"
+
+    def save(self, *args, **kwargs):
+        self.normalized_phone = normalize_phone_digits(self.phone)
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None and 'phone' in update_fields:
+            kwargs['update_fields'] = set(update_fields) | {'normalized_phone'}
+        super().save(*args, **kwargs)
 
     @property
     def display_name(self):
@@ -211,6 +234,7 @@ class RateHistory(models.Model):
 class SubscriberOTP(models.Model):
     subscriber = models.ForeignKey(Subscriber, on_delete=models.CASCADE, related_name='otps')
     phone = models.CharField(max_length=20)
+    normalized_phone = models.CharField(max_length=20, blank=True, db_index=True)
     code = models.CharField(max_length=6)
     is_used = models.BooleanField(default=False)
     expires_at = models.DateTimeField()
@@ -221,6 +245,13 @@ class SubscriberOTP(models.Model):
 
     def __str__(self):
         return f"OTP for {self.phone}"
+
+    def save(self, *args, **kwargs):
+        self.normalized_phone = normalize_phone_digits(self.phone)
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None and 'phone' in update_fields:
+            kwargs['update_fields'] = set(update_fields) | {'normalized_phone'}
+        super().save(*args, **kwargs)
 
 
 # ── Usage Tracking ─────────────────────────────────────────────────────────────

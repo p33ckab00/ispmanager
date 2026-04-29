@@ -39,6 +39,10 @@ def sms_log(request):
 
 @login_required
 def sms_send(request):
+    if not request.user.has_perm('sms.add_smslog'):
+        messages.error(request, 'You do not have permission to send SMS.')
+        return redirect('sms-log')
+
     subscribers = Subscriber.objects.filter(
         status='active', sms_opt_out=False
     ).exclude(phone='').order_by('username')

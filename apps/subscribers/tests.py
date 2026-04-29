@@ -3,13 +3,16 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.contrib.auth.models import Permission, User
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
+from apps.core.models import AuditLog
 from apps.settings_app.models import BillingSettings
 from apps.subscribers.forms import ManualSubscriberForm, SubscriberAdminForm
-from apps.subscribers.models import Subscriber
-from apps.subscribers.services import get_subscriber_billing_readiness
+from apps.subscribers.models import Subscriber, SubscriberOTP, normalize_phone_digits
+from apps.subscribers.otp import create_otp, find_portal_subscriber_by_phone, verify_otp_for_subscriber
+from apps.subscribers.services import audit_subscriber_field_changes, get_subscriber_billing_readiness
 from apps.subscribers.services import set_subscriber_mikrotik_access, transition_subscriber_status
 
 
@@ -113,6 +116,143 @@ class SubscriberBillingReadinessTests(TestCase):
         self.assertFalse(readiness['billing_ready'])
         self.assertIn('Missing plan or monthly rate.', readiness['billing_issues'])
         self.assertIn('Missing service start date or billing effective date.', readiness['billing_issues'])
+
+    def test_duplicate_normalized_phone_marks_sms_not_ready(self):
+        first = Subscriber.objects.create(
+            username='phone-owner-a',
+            phone='0917 123 4567',
+            monthly_rate=Decimal('1000.00'),
+            start_date=date(2026, 4, 29),
+            cutoff_day=28,
+            billing_type='postpaid',
+            status='active',
+            is_billable=True,
+        )
+        Subscriber.objects.create(
+            username='phone-owner-b',
+            phone='+63 917 123 4567',
+            monthly_rate=Decimal('1000.00'),
+            start_date=date(2026, 4, 29),
+            cutoff_day=28,
+            billing_type='postpaid',
+            status='active',
+            is_billable=True,
+        )
+
+        readiness = get_subscriber_billing_readiness(
+            first,
+            billing_settings=self._billing_settings(),
+            reference_date=date(2026, 5, 1),
+        )
+
+        self.assertFalse(readiness['sms_ready'])
+        self.assertIn('Phone number is shared with another subscriber.', readiness['sms_issues'])
+
+
+class SubscriberPhoneNormalizationTests(TestCase):
+    def test_subscriber_save_stores_normalized_phone(self):
+        subscriber = Subscriber.objects.create(
+            username='normal-phone',
+            phone='+63 917 123 4567',
+        )
+
+        self.assertEqual(subscriber.normalized_phone, '639171234567')
+        self.assertEqual(normalize_phone_digits(subscriber.phone), '639171234567')
+
+    def test_portal_phone_lookup_accepts_formatting(self):
+        subscriber = Subscriber.objects.create(
+            username='portal-phone',
+            phone='0917 123 4567',
+        )
+
+        match, error, normalized_phone = find_portal_subscriber_by_phone('+63 917 123 4567')
+
+        self.assertEqual(match, subscriber)
+        self.assertIsNone(error)
+        self.assertEqual(normalized_phone, '639171234567')
+
+    def test_portal_phone_lookup_blocks_duplicates(self):
+        Subscriber.objects.create(username='portal-dup-a', phone='0917 123 4567')
+        Subscriber.objects.create(username='portal-dup-b', phone='0917-123-4567')
+
+        match, error, normalized_phone = find_portal_subscriber_by_phone('09171234567')
+
+        self.assertIsNone(match)
+        self.assertIn('Multiple accounts use this phone number', error)
+        self.assertEqual(normalized_phone, '639171234567')
+
+    def test_otp_verification_uses_pending_subscriber_id(self):
+        subscriber = Subscriber.objects.create(
+            username='portal-otp',
+            phone='0917 123 4567',
+        )
+        otp = create_otp(subscriber)
+
+        verified, error = verify_otp_for_subscriber(subscriber.pk, otp.code)
+
+        otp.refresh_from_db()
+        self.assertEqual(verified, subscriber)
+        self.assertIsNone(error)
+        self.assertTrue(otp.is_used)
+        self.assertEqual(otp.normalized_phone, '639171234567')
+
+
+class SubscriberFieldAuditTests(TestCase):
+    def test_field_change_audit_logs_before_and_after_values(self):
+        user = User.objects.create_user(username='auditor', password='secret')
+        before = Subscriber.objects.create(
+            username='audit-client',
+            full_name='Old Name',
+            cutoff_day=28,
+        )
+        after = Subscriber.objects.get(pk=before.pk)
+        after.full_name = 'New Name'
+        after.cutoff_day = 30
+
+        logged = audit_subscriber_field_changes(
+            before,
+            after,
+            ['full_name', 'cutoff_day'],
+            user=user,
+        )
+
+        descriptions = list(AuditLog.objects.values_list('description', flat=True))
+        self.assertEqual(logged, 2)
+        self.assertTrue(any("Full name from 'Old Name' to 'New Name'" in item for item in descriptions))
+        self.assertTrue(any("Cutoff day from '28' to '30'" in item for item in descriptions))
+
+
+class SubscriberPermissionTests(TestCase):
+    def test_suspend_requires_lifecycle_permission(self):
+        user = User.objects.create_user(username='viewer', password='secret')
+        subscriber = Subscriber.objects.create(username='permission-client', status='active')
+        self.client.force_login(user)
+
+        response = self.client.post(f'/subscribers/{subscriber.pk}/suspend/')
+
+        subscriber.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(subscriber.status, 'active')
+
+    def test_edit_requires_change_permission(self):
+        user = User.objects.create_user(username='viewer-edit', password='secret')
+        subscriber = Subscriber.objects.create(username='permission-edit', status='active')
+        self.client.force_login(user)
+
+        response = self.client.get(f'/subscribers/{subscriber.pk}/edit/')
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_edit_with_change_permission_allows_profile_page(self):
+        user = User.objects.create_user(username='editor', password='secret')
+        permission = Permission.objects.get(codename='change_subscriber')
+        user.user_permissions.add(permission)
+        subscriber = Subscriber.objects.create(username='permission-edit-ok', status='active')
+        self.client.force_login(user)
+
+        response = self.client.get(f'/subscribers/{subscriber.pk}/edit/')
+
+        self.assertEqual(response.status_code, 200)
 
 
 class ManualSubscriberFormTests(TestCase):

@@ -165,6 +165,52 @@ class PaymentAllocation(models.Model):
         return f"{self.payment} -> {self.invoice.invoice_number}: PHP {self.amount_allocated}"
 
 
+class AccountCreditAdjustment(models.Model):
+    """
+    Reduces available unallocated payment credit without rewriting payment history.
+    Used for refund reservations, completed refunds, and credit forfeitures.
+    """
+    ADJUSTMENT_TYPE_CHOICES = [
+        ('refund_due', 'Refund Due'),
+        ('refund_paid', 'Refund Paid'),
+        ('forfeit', 'Credit Forfeited'),
+    ]
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('canceled', 'Canceled'),
+    ]
+
+    subscriber = models.ForeignKey(
+        'subscribers.Subscriber',
+        on_delete=models.CASCADE,
+        related_name='credit_adjustments',
+    )
+    adjustment_type = models.CharField(max_length=20, choices=ADJUSTMENT_TYPE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    reason = models.TextField(blank=True)
+    reference = models.CharField(max_length=255, blank=True)
+    expense_record = models.OneToOneField(
+        'accounting.ExpenseRecord',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='credit_refund_adjustment',
+    )
+    recorded_by = models.CharField(max_length=100, default='system')
+    effective_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-effective_at', '-created_at']
+
+    def __str__(self):
+        return f"{self.get_adjustment_type_display()} PHP {self.amount} - {self.subscriber.username}"
+
+
 class BillingSnapshot(models.Model):
     """
     Client-facing statement. Frozen at creation. Separate from Invoice ledger.

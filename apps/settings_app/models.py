@@ -139,6 +139,17 @@ class RouterSettings(models.Model):
 
 
 class SubscriberSettings(models.Model):
+    DISCONNECTED_BILLING_POLICY_CHOICES = [
+        ('preserve_balance', 'Preserve existing balance'),
+        ('final_invoice', 'Generate final invoice'),
+        ('waive_open_balances', 'Waive open balances'),
+    ]
+    DISCONNECTED_CREDIT_POLICY_CHOICES = [
+        ('preserve_credit', 'Preserve account credit'),
+        ('mark_refund_due', 'Mark refund due'),
+        ('forfeit_credit', 'Forfeit account credit'),
+    ]
+
     mikrotik_auto_suspend = models.BooleanField(
         default=True,
         help_text='Automatically disable PPP secret on MikroTik when subscriber is suspended'
@@ -146,6 +157,22 @@ class SubscriberSettings(models.Model):
     mikrotik_auto_reconnect = models.BooleanField(
         default=True,
         help_text='Automatically enable PPP secret on MikroTik when subscriber is reconnected'
+    )
+    auto_reconnect_after_full_payment = models.BooleanField(
+        default=False,
+        help_text='Automatically reconnect suspended subscribers after all open balances are fully paid'
+    )
+    disconnected_billing_policy = models.CharField(
+        max_length=30,
+        choices=DISCONNECTED_BILLING_POLICY_CHOICES,
+        default='preserve_balance',
+        help_text='Billing action to apply when a subscriber is marked disconnected'
+    )
+    disconnected_credit_policy = models.CharField(
+        max_length=30,
+        choices=DISCONNECTED_CREDIT_POLICY_CHOICES,
+        default='preserve_credit',
+        help_text='Credit action to apply when a disconnected subscriber has remaining account credit'
     )
     archive_after_days = models.IntegerField(
         default=90,

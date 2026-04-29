@@ -8,14 +8,18 @@
       <p class="text-gray-500 text-sm mt-1">{{ total }} total subscribers</p>
     </div>
     <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-wrap">
+      {% if perms.subscribers.add_subscriber %}
       <a href="/subscribers/add/"
         class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center justify-center gap-2">
         <i class="fa fa-plus"></i> Add Manual
       </a>
+      {% endif %}
+      {% if perms.subscribers.import_subscribers %}
       <a href="/subscribers/sync/"
         class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center justify-center gap-2">
         <i class="fa fa-rotate"></i> Sync from MikroTik
       </a>
+      {% endif %}
       <a href="{% url 'data-exchange-export' dataset='subscribers' %}?q={{ q }}&status={{ status }}&service={{ service }}"
         class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition flex items-center justify-center gap-2">
         <i class="fa fa-download"></i> Export CSV

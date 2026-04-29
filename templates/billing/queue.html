@@ -82,6 +82,7 @@
   </form>
 </div>
 
+{% if perms.billing.add_invoice or perms.billing.add_billingsnapshot or perms.sms.add_smslog %}
 <form method="post" action="/billing/queue/?date={{ selected_date|date:'Y-m-d' }}&event={{ event_filter }}&billing_type={{ billing_type }}&q={{ q|urlencode }}">
   {% csrf_token %}
   <div class="bg-white rounded-xl shadow-sm border border-gray-100 mb-4">
@@ -92,10 +93,16 @@
       </div>
       <div class="flex flex-col gap-2 sm:flex-row">
         <select name="bulk_action" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% if perms.billing.add_invoice %}
           <option value="generate_invoices">Generate selected invoices</option>
+          {% endif %}
+          {% if perms.billing.add_billingsnapshot %}
           <option value="generate_snapshots">Generate selected statements</option>
+          {% endif %}
+          {% if perms.sms.add_smslog %}
           <option value="send_sms">Send selected billing SMS</option>
           <option value="retry_failed_sms">Retry selected failed SMS</option>
+          {% endif %}
         </select>
         <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
           Run Selected
@@ -103,6 +110,7 @@
       </div>
     </div>
   </div>
+{% endif %}
 
 <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
   <div class="overflow-x-auto">
@@ -126,7 +134,7 @@
         {% for row in page_obj %}
         <tr class="hover:bg-gray-50">
           <td class="px-4 py-3">
-            {% if row.can_bulk_generate or row.can_send_sms or row.can_retry_sms %}
+            {% if perms.billing.add_invoice and row.can_bulk_generate or perms.billing.add_billingsnapshot and row.can_bulk_generate or perms.sms.add_smslog and row.can_send_sms or perms.sms.add_smslog and row.can_retry_sms %}
             <input type="checkbox" name="subscriber_ids" value="{{ row.subscriber.pk }}"
               class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
             {% else %}
@@ -227,5 +235,7 @@
   </div>
   {% endif %}
 </div>
+{% if perms.billing.add_invoice or perms.billing.add_billingsnapshot or perms.sms.add_smslog %}
 </form>
+{% endif %}
 {% endblock %}

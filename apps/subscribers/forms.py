@@ -1,6 +1,6 @@
 from datetime import date
 from django import forms
-from apps.subscribers.models import Subscriber, Plan
+from apps.subscribers.models import Subscriber, Plan, normalize_phone_digits
 
 
 class SubscriberBillingFieldsMixin:
@@ -178,7 +178,15 @@ class DeceasedForm(forms.Form):
 
 
 class OTPRequestForm(forms.Form):
-    phone = forms.CharField(max_length=20, label='Phone Number')
+    phone = forms.CharField(max_length=30, label='Phone Number')
+
+    def clean_phone(self):
+        phone = (self.cleaned_data.get('phone') or '').strip()
+        normalized_phone = normalize_phone_digits(phone)
+        if not normalized_phone or len(normalized_phone) < 10:
+            raise forms.ValidationError('Enter a valid phone number.')
+        self.normalized_phone = normalized_phone
+        return phone
 
 
 class OTPVerifyForm(forms.Form):

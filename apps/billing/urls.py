@@ -14,6 +14,7 @@ urlpatterns = [
     path('snapshots/<int:pk>/pdf/view/', views.snapshot_pdf_inline, name='snapshot-pdf-inline'),
     path('snapshots/<int:pk>/pdf/download/', views.snapshot_pdf_download, name='snapshot-pdf-download'),
     path('pay/<int:subscriber_pk>/', views.record_payment, name='billing-record-payment'),
+    path('credit-adjustments/<int:pk>/complete-refund/', views.complete_refund, name='billing-complete-refund'),
     path('generate-snapshot/<int:subscriber_pk>/', views.generate_snapshot, name='generate-snapshot'),
     path('view/<str:token>/', views.billing_public_view, name='billing-public-view'),
 ]

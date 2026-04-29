@@ -25,6 +25,42 @@ class PaymentForm(forms.Form):
         return self.cleaned_data.get('paid_at') or timezone.now()
 
 
+class RefundCompletionForm(forms.Form):
+    reference = forms.CharField(
+        max_length=255,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+            'placeholder': 'GCash, bank transfer, voucher, or OR reference',
+        }),
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={
+            'rows': 3,
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+        }),
+    )
+    paid_at = forms.DateTimeField(
+        required=False,
+        widget=forms.DateTimeInput(attrs={
+            'type': 'datetime-local',
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+        }),
+    )
+    create_expense = forms.BooleanField(
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={
+            'class': 'mt-0.5 w-4 h-4 rounded border-gray-300 text-orange-600',
+        }),
+        help_text='Create a matching accounting expense record.',
+    )
+
+    def clean_paid_at(self):
+        return self.cleaned_data.get('paid_at') or timezone.now()
+
+
 class RateChangeForm(forms.Form):
     APPLY_MODE_CHOICES = [
         ('next_only', 'Next Invoice Only (safe, no surprises)'),

@@ -4,7 +4,14 @@ import calendar
 from django.utils import timezone
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
-from apps.billing.models import Invoice, Payment, PaymentAllocation, BillingSnapshot, BillingSnapshotItem
+from apps.billing.models import (
+    AccountCreditAdjustment,
+    Invoice,
+    Payment,
+    PaymentAllocation,
+    BillingSnapshot,
+    BillingSnapshotItem,
+)
 from apps.settings_app.models import BillingSettings
 
 
@@ -151,7 +158,40 @@ def get_account_credit_for_subscriber(subscriber):
     ).aggregate(
         total=Sum('amount_allocated')
     )['total'] or Decimal('0.00')
-    return max(payment_total - allocated_total, Decimal('0.00'))
+    adjusted_total = AccountCreditAdjustment.objects.filter(
+        subscriber=subscriber,
+        status__in=['pending', 'completed'],
+    ).aggregate(
+        total=Sum('amount')
+    )['total'] or Decimal('0.00')
+    return max(payment_total - allocated_total - adjusted_total, Decimal('0.00'))
+
+
+def get_account_credit_summary_for_subscriber(subscriber):
+    payment_total = Payment.objects.filter(subscriber=subscriber).aggregate(
+        total=Sum('amount')
+    )['total'] or Decimal('0.00')
+    allocated_total = PaymentAllocation.objects.filter(
+        payment__subscriber=subscriber
+    ).aggregate(
+        total=Sum('amount_allocated')
+    )['total'] or Decimal('0.00')
+    adjusted_total = AccountCreditAdjustment.objects.filter(
+        subscriber=subscriber,
+        status__in=['pending', 'completed'],
+    ).aggregate(
+        total=Sum('amount')
+    )['total'] or Decimal('0.00')
+    raw_unallocated = max(payment_total - allocated_total, Decimal('0.00'))
+    available_credit = max(raw_unallocated - adjusted_total, Decimal('0.00'))
+
+    return {
+        'payment_total': payment_total,
+        'allocated_total': allocated_total,
+        'raw_unallocated': raw_unallocated,
+        'adjusted_total': adjusted_total,
+        'available_credit': available_credit,
+    }
 
 
 def _apply_payment_status(invoice):
@@ -174,17 +214,21 @@ def apply_unallocated_payments_to_invoice(invoice):
         return Decimal('0.00')
 
     applied = Decimal('0.00')
+    remaining_available_credit = get_account_credit_for_subscriber(invoice.subscriber)
+    if remaining_available_credit <= Decimal('0.00'):
+        return applied
+
     payments = Payment.objects.filter(
         subscriber=invoice.subscriber,
     ).order_by('paid_at', 'created_at', 'pk')
 
     for payment in payments:
-        if invoice.remaining_balance <= Decimal('0.00'):
+        if invoice.remaining_balance <= Decimal('0.00') or remaining_available_credit <= Decimal('0.00'):
             break
         if PaymentAllocation.objects.filter(payment=payment, invoice=invoice).exists():
             continue
 
-        available = payment.unallocated_amount
+        available = min(payment.unallocated_amount, remaining_available_credit)
         if available <= Decimal('0.00'):
             continue
 
@@ -198,11 +242,267 @@ def apply_unallocated_payments_to_invoice(invoice):
             amount_allocated=allocate,
         )
         invoice.amount_paid += allocate
+        remaining_available_credit -= allocate
         applied += allocate
         _apply_payment_status(invoice)
         invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])
 
     return applied
+
+
+def get_open_invoice_balance_for_subscriber(subscriber):
+    open_invoices = Invoice.objects.filter(
+        subscriber=subscriber,
+        status__in=['open', 'partial', 'overdue'],
+    )
+    return sum((invoice.remaining_balance for invoice in open_invoices), Decimal('0.00'))
+
+
+def maybe_auto_reconnect_after_full_payment(subscriber, triggered_by='system'):
+    from apps.settings_app.models import SubscriberSettings
+    from apps.subscribers.services import transition_subscriber_status
+
+    result = {
+        'attempted': False,
+        'reconnected': False,
+        'warning': '',
+        'error': '',
+        'message': '',
+        'remaining_balance': Decimal('0.00'),
+    }
+
+    settings = SubscriberSettings.get_settings()
+    if not settings.auto_reconnect_after_full_payment:
+        result['message'] = 'Auto-reconnect after full payment is disabled.'
+        return result
+
+    subscriber.refresh_from_db()
+    if subscriber.status != 'suspended':
+        result['message'] = f"Subscriber status is {subscriber.get_status_display()}."
+        return result
+
+    balance = get_open_invoice_balance_for_subscriber(subscriber)
+    result['remaining_balance'] = balance
+    if balance > Decimal('0.00'):
+        result['message'] = f"Remaining open balance is {balance}."
+        return result
+
+    result['attempted'] = True
+    ok, err = transition_subscriber_status(
+        subscriber,
+        'active',
+        changed_by=triggered_by,
+        reason='Full payment received',
+    )
+    subscriber.refresh_from_db()
+
+    if subscriber.status == 'active':
+        result['reconnected'] = True
+        result['message'] = 'Subscriber auto-reconnected after full payment.'
+        if err:
+            result['warning'] = err
+        return result
+
+    result['error'] = err or 'Subscriber was not reconnected.'
+    result['message'] = result['error']
+    result['attempted_ok'] = ok
+    return result
+
+
+def apply_disconnected_billing_policy(subscriber, policy=None, disconnected_by='admin',
+                                      reference_date=None):
+    from apps.settings_app.models import SubscriberSettings
+
+    settings = SubscriberSettings.get_settings()
+    policy = policy or settings.disconnected_billing_policy
+    today = reference_date or date.today()
+    result = {
+        'policy': policy,
+        'final_invoice': None,
+        'final_invoice_created': False,
+        'waived_count': 0,
+        'errors': [],
+        'message': '',
+    }
+
+    if policy == 'preserve_balance':
+        result['message'] = 'Existing balances preserved.'
+        return result
+
+    if policy == 'final_invoice':
+        invoice, err = generate_invoice_for_subscriber(
+            subscriber,
+            reference_date=today,
+        )
+        if invoice:
+            result['final_invoice'] = invoice
+            result['final_invoice_created'] = err is None
+            if err and 'already exists' not in err:
+                result['errors'].append(err)
+            result['message'] = (
+                f"Final invoice {invoice.invoice_number} created."
+                if err is None
+                else f"Final invoice already exists: {invoice.invoice_number}."
+            )
+        elif err:
+            result['errors'].append(err)
+            result['message'] = 'Final invoice was not created.'
+        return result
+
+    if policy == 'waive_open_balances':
+        updated = Invoice.objects.filter(
+            subscriber=subscriber,
+            status__in=['open', 'partial', 'overdue'],
+        ).update(
+            status='waived',
+            void_reason='admin_adjustment',
+            void_note='Auto-waived: subscriber marked disconnected',
+            voided_at=timezone.now(),
+            voided_by=disconnected_by,
+        )
+        result['waived_count'] = updated
+        result['message'] = f"Waived {updated} open invoice(s)."
+        return result
+
+    result['errors'].append(f"Unsupported disconnected billing policy: {policy}.")
+    result['message'] = result['errors'][0]
+    return result
+
+
+@transaction.atomic
+def create_account_credit_adjustment(subscriber, amount, adjustment_type, status='pending',
+                                     reason='', reference='', recorded_by='system'):
+    amount = Decimal(str(amount))
+    if amount <= Decimal('0.00'):
+        raise ValueError('Credit adjustment amount must be greater than zero.')
+
+    allowed_types = {choice[0] for choice in AccountCreditAdjustment.ADJUSTMENT_TYPE_CHOICES}
+    if adjustment_type not in allowed_types:
+        raise ValueError(f"Unsupported credit adjustment type: {adjustment_type}.")
+
+    allowed_statuses = {choice[0] for choice in AccountCreditAdjustment.STATUS_CHOICES}
+    if status not in allowed_statuses:
+        raise ValueError(f"Unsupported credit adjustment status: {status}.")
+
+    available_credit = get_account_credit_for_subscriber(subscriber)
+    if amount > available_credit:
+        raise ValueError(f"Credit adjustment exceeds available credit of {available_credit}.")
+
+    return AccountCreditAdjustment.objects.create(
+        subscriber=subscriber,
+        adjustment_type=adjustment_type,
+        status=status,
+        amount=amount,
+        reason=reason,
+        reference=reference,
+        recorded_by=recorded_by,
+        effective_at=timezone.now(),
+    )
+
+
+@transaction.atomic
+def apply_disconnected_credit_policy(subscriber, policy=None, disconnected_by='admin'):
+    from apps.settings_app.models import SubscriberSettings
+
+    settings = SubscriberSettings.get_settings()
+    policy = policy or settings.disconnected_credit_policy
+    available_credit = get_account_credit_for_subscriber(subscriber)
+    result = {
+        'policy': policy,
+        'available_credit': available_credit,
+        'adjustment': None,
+        'errors': [],
+        'message': '',
+    }
+
+    if available_credit <= Decimal('0.00'):
+        result['message'] = 'No remaining account credit.'
+        return result
+
+    if policy == 'preserve_credit':
+        result['message'] = f"Account credit PHP {available_credit} preserved."
+        return result
+
+    if policy == 'mark_refund_due':
+        adjustment = create_account_credit_adjustment(
+            subscriber=subscriber,
+            amount=available_credit,
+            adjustment_type='refund_due',
+            status='pending',
+            reason='Auto-marked for refund: subscriber marked disconnected',
+            recorded_by=disconnected_by,
+        )
+        result['adjustment'] = adjustment
+        result['message'] = f"Refund due recorded for PHP {available_credit}."
+        return result
+
+    if policy == 'forfeit_credit':
+        adjustment = create_account_credit_adjustment(
+            subscriber=subscriber,
+            amount=available_credit,
+            adjustment_type='forfeit',
+            status='completed',
+            reason='Auto-forfeited: subscriber marked disconnected',
+            recorded_by=disconnected_by,
+        )
+        result['adjustment'] = adjustment
+        result['message'] = f"Account credit PHP {available_credit} forfeited."
+        return result
+
+    result['errors'].append(f"Unsupported disconnected credit policy: {policy}.")
+    result['message'] = result['errors'][0]
+    return result
+
+
+@transaction.atomic
+def complete_refund_credit_adjustment(adjustment, reference='', notes='',
+                                      completed_by='admin', paid_at=None,
+                                      create_expense=True):
+    if adjustment.adjustment_type != 'refund_due' or adjustment.status != 'pending':
+        raise ValueError('Only pending refund-due credit adjustments can be completed.')
+
+    if paid_at is None:
+        paid_at = timezone.now()
+
+    expense = None
+    if create_expense:
+        from apps.accounting.models import ExpenseRecord
+
+        expense = ExpenseRecord.objects.create(
+            category='other',
+            description=f"Subscriber refund - {adjustment.subscriber.username}",
+            amount=adjustment.amount,
+            reference=reference,
+            vendor=adjustment.subscriber.display_name,
+            recorded_by=completed_by,
+            date=paid_at.date(),
+        )
+
+    note_parts = [adjustment.reason] if adjustment.reason else []
+    completion_note = f"Refund paid by {completed_by}"
+    if notes:
+        completion_note = f"{completion_note}: {notes}"
+    note_parts.append(completion_note)
+
+    adjustment.adjustment_type = 'refund_paid'
+    adjustment.status = 'completed'
+    adjustment.reference = reference
+    adjustment.reason = '\n'.join(note_parts)
+    adjustment.recorded_by = completed_by
+    adjustment.effective_at = paid_at
+    adjustment.expense_record = expense
+    adjustment.save(update_fields=[
+        'adjustment_type',
+        'status',
+        'reference',
+        'reason',
+        'recorded_by',
+        'effective_at',
+        'expense_record',
+        'updated_at',
+    ])
+
+    return adjustment, expense
 
 
 def get_billing_preview_for_subscriber(subscriber, billing_settings=None,
@@ -567,6 +867,8 @@ def record_payment_with_allocation(subscriber, amount, method='cash', reference=
 
         balance = invoice.remaining_balance
         allocate = min(remaining, balance)
+        if allocate <= Decimal('0.00'):
+            continue
 
         PaymentAllocation.objects.create(
             payment=payment,
@@ -583,6 +885,26 @@ def record_payment_with_allocation(subscriber, amount, method='cash', reference=
             invoice.status = 'partial'
 
         invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])
+
+    payment.auto_reconnect_result = None
+
+    def run_auto_reconnect():
+        try:
+            payment.auto_reconnect_result = maybe_auto_reconnect_after_full_payment(
+                subscriber,
+                triggered_by=recorded_by,
+            )
+        except Exception as exc:
+            payment.auto_reconnect_result = {
+                'attempted': False,
+                'reconnected': False,
+                'warning': '',
+                'error': str(exc),
+                'message': str(exc),
+                'remaining_balance': Decimal('0.00'),
+            }
+
+    transaction.on_commit(run_auto_reconnect)
 
     return payment, remaining
 

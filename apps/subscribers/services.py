@@ -1,4 +1,3 @@
-import re
 from datetime import date
 from django.utils import timezone
 from apps.subscribers.models import (
@@ -7,15 +6,76 @@ from apps.subscribers.models import (
     SubscriberUsageSample,
     SubscriberUsageDaily,
     SubscriberUsageCutoffSnapshot,
+    normalize_phone_digits,
 )
 from apps.routers import mikrotik
 
 
 MIKROTIK_FIELDS = ['mt_password', 'mt_profile', 'mac_address', 'ip_address', 'mt_status', 'service_type']
 
+SUBSCRIBER_BILLING_AUDIT_FIELDS = {
+    'cutoff_day',
+    'billing_effective_from',
+    'billing_type',
+    'billing_due_days',
+    'is_billable',
+    'start_date',
+    'sms_opt_out',
+}
 
-def normalize_phone_digits(phone):
-    return re.sub(r'\D+', '', phone or '')
+SUBSCRIBER_FIELD_AUDIT_LABELS = {
+    'full_name': 'Full name',
+    'phone': 'Phone',
+    'address': 'Address',
+    'email': 'Email',
+    'latitude': 'Latitude',
+    'longitude': 'Longitude',
+    'cutoff_day': 'Cutoff day',
+    'billing_effective_from': 'Billing effective from',
+    'billing_type': 'Billing type',
+    'billing_due_days': 'Billing due offset',
+    'is_billable': 'Billable',
+    'start_date': 'Start date',
+    'notes': 'Notes',
+    'sms_opt_out': 'SMS opt-out',
+}
+
+
+def user_has_subscriber_permission(user, permission_codename):
+    if not user or not user.is_authenticated:
+        return False
+    return user.has_perm(f"subscribers.{permission_codename}")
+
+
+def _format_audit_value(value):
+    if value in (None, ''):
+        return '-'
+    return str(value)
+
+
+def audit_subscriber_field_changes(before, after, fields, user=None):
+    from apps.core.models import AuditLog
+
+    logged = 0
+    for field in fields:
+        old_value = getattr(before, field, None)
+        new_value = getattr(after, field, None)
+        if old_value == new_value:
+            continue
+
+        label = SUBSCRIBER_FIELD_AUDIT_LABELS.get(field, field.replace('_', ' ').title())
+        AuditLog.log(
+            'update',
+            'subscribers',
+            (
+                f"{after.username} field changed: {label} "
+                f"from '{_format_audit_value(old_value)}' "
+                f"to '{_format_audit_value(new_value)}'"
+            ),
+            user=user,
+        )
+        logged += 1
+    return logged
 
 
 def get_subscriber_billing_readiness(subscriber, billing_settings=None, reference_date=None):
@@ -61,13 +121,17 @@ def get_subscriber_billing_readiness(subscriber, billing_settings=None, referenc
     if subscriber.billing_type not in ('postpaid', 'prepaid'):
         billing_issues.append('Billing type must be postpaid or prepaid.')
 
-    phone_digits = normalize_phone_digits(subscriber.phone)
+    phone_digits = subscriber.normalized_phone or normalize_phone_digits(subscriber.phone)
     if subscriber.sms_opt_out:
         sms_issues.append('Subscriber opted out of SMS.')
     if not phone_digits:
         sms_issues.append('Missing phone number.')
     elif len(phone_digits) < 10:
         sms_issues.append('Phone number looks incomplete.')
+    elif subscriber.pk and Subscriber.objects.filter(
+        normalized_phone=phone_digits,
+    ).exclude(pk=subscriber.pk).exists():
+        sms_issues.append('Phone number is shared with another subscriber.')
 
     billing_ready = not billing_issues
     sms_ready = billing_ready and not sms_issues
@@ -362,7 +426,20 @@ def transition_subscriber_status(subscriber, target_status, changed_by='admin', 
 
 
 def disconnect_subscriber(subscriber, reason='', disconnected_by='admin'):
-    suspend_on_mikrotik(subscriber)
+    from apps.billing.services import (
+        apply_disconnected_billing_policy,
+        apply_disconnected_credit_policy,
+    )
+
+    billing_result = apply_disconnected_billing_policy(
+        subscriber,
+        disconnected_by=disconnected_by,
+    )
+    credit_result = apply_disconnected_credit_policy(
+        subscriber,
+        disconnected_by=disconnected_by,
+    )
+    ok, err = suspend_on_mikrotik(subscriber)
     subscriber.status = 'disconnected'
     subscriber.disconnected_date = date.today()
     subscriber.disconnected_reason = reason
@@ -384,6 +461,8 @@ def disconnect_subscriber(subscriber, reason='', disconnected_by='admin'):
     from apps.notifications.telegram import notify_event
     notify_event('subscriber_status', 'Subscriber Disconnected',
                  f"{subscriber.display_name} ({subscriber.username}) has been disconnected. Reason: {reason}")
+
+    return ok, err, billing_result, credit_result
 
 
 def mark_deceased(subscriber, deceased_date=None, note='', marked_by='admin'):

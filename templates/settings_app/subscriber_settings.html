@@ -21,6 +21,34 @@
           <p class="text-xs text-gray-400 mt-0.5">When a subscriber is reconnected, re-enable the matching PPP secret, Hotspot user, or DHCP lease.</p>
         </div>
       </label>
+      <label class="flex items-start gap-3 p-4 rounded-xl border border-gray-100 hover:border-blue-200 cursor-pointer transition">
+        <input type="checkbox" name="auto_reconnect_after_full_payment" {% if obj.auto_reconnect_after_full_payment %}checked{% endif %}
+          class="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600">
+        <div>
+          <p class="text-sm font-medium text-gray-700">Auto-reconnect after full payment</p>
+          <p class="text-xs text-gray-400 mt-0.5">When a suspended subscriber pays all open, partial, and overdue balances, automatically set the account back to active.</p>
+        </div>
+      </label>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Disconnected billing policy</label>
+      <select name="disconnected_billing_policy"
+        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        {% for value, label in obj.DISCONNECTED_BILLING_POLICY_CHOICES %}
+        <option value="{{ value }}" {% if obj.disconnected_billing_policy == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <p class="text-xs text-gray-400 mt-1">Choose what happens to billing when an account is marked disconnected.</p>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Disconnected credit policy</label>
+      <select name="disconnected_credit_policy"
+        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        {% for value, label in obj.DISCONNECTED_CREDIT_POLICY_CHOICES %}
+        <option value="{{ value }}" {% if obj.disconnected_credit_policy == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <p class="text-xs text-gray-400 mt-1">Choose what happens to remaining account credit when an account is marked disconnected.</p>
     </div>
     <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">Auto-archive after (days)</label>

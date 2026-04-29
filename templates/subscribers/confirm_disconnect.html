@@ -7,7 +7,26 @@
     <p class="text-sm text-gray-500">{{ subscriber.display_name }}</p></div>
   </div>
   <div class="bg-orange-50 border border-orange-100 rounded-lg p-3 mb-4 text-sm text-orange-700">
-    PPP will be disabled on MikroTik. Billing stops. Data preserved for audit.
+    Service access will be disabled on MikroTik when supported. Data is preserved for audit.
+  </div>
+  <div class="bg-gray-50 border border-gray-100 rounded-lg p-3 mb-4 text-sm text-gray-600">
+    <p class="font-medium text-gray-700">Billing policy: {{ subscriber_settings.get_disconnected_billing_policy_display }}</p>
+    {% if subscriber_settings.disconnected_billing_policy == 'preserve_balance' %}
+    <p class="text-xs text-gray-500 mt-1">Existing invoices and balances stay unchanged.</p>
+    {% elif subscriber_settings.disconnected_billing_policy == 'final_invoice' %}
+    <p class="text-xs text-gray-500 mt-1">A final invoice for the current billing cycle will be generated before disconnecting.</p>
+    {% elif subscriber_settings.disconnected_billing_policy == 'waive_open_balances' %}
+    <p class="text-xs text-gray-500 mt-1">Open, partial, and overdue invoices will be marked waived.</p>
+    {% endif %}
+    <p class="font-medium text-gray-700 mt-3">Credit policy: {{ subscriber_settings.get_disconnected_credit_policy_display }}</p>
+    <p class="text-xs text-gray-500 mt-1">Available account credit: PHP {{ account_credit }}</p>
+    {% if subscriber_settings.disconnected_credit_policy == 'preserve_credit' %}
+    <p class="text-xs text-gray-500 mt-1">Remaining unallocated credit stays on the account.</p>
+    {% elif subscriber_settings.disconnected_credit_policy == 'mark_refund_due' %}
+    <p class="text-xs text-gray-500 mt-1">Remaining unallocated credit will be reserved as a pending refund.</p>
+    {% elif subscriber_settings.disconnected_credit_policy == 'forfeit_credit' %}
+    <p class="text-xs text-gray-500 mt-1">Remaining unallocated credit will be marked as forfeited.</p>
+    {% endif %}
   </div>
   <form method="post" class="space-y-4">
     {% csrf_token %}

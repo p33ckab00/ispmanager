@@ -422,6 +422,9 @@ Current behavior:
 - Any overpayment remains as unallocated payment credit.
 - Future invoices consume available unallocated credit automatically when the invoice is created or reused.
 - Billing snapshots show a credit/payment line when those payments reduce the amount due.
+- Credit adjustments reduce available account credit without rewriting the original payment record.
+- Disconnected accounts can preserve credit, reserve it as refund due, or forfeit it based on Subscriber Settings.
+- Pending refund credit can be manually completed later, with an optional matching accounting expense record.
 
 Example:
 
@@ -436,6 +439,7 @@ Recommended settings:
 | `enable_account_credit` | `true` | Formalizes unallocated payment handling. |
 | `auto_apply_credit_to_new_invoices` | `true` | Applies credit to future invoices automatically. |
 | `credit_apply_order` | `oldest_unpaid_first` | Other modes can be added later if needed. |
+| `disconnected_credit_policy` | `preserve_credit` | Implemented. Controls remaining credit when a subscriber is marked disconnected. |
 
 ### Billing ledger
 
@@ -578,9 +582,9 @@ Recommended settings:
 
 | Setting | Recommended default | Notes |
 | --- | --- | --- |
-| `enable_auto_reconnect_after_full_payment` | `false` initially | Safer to launch with manual review unless operations wants full automation. |
-| `auto_reconnect_requires_no_overdue_balance` | `true` | Prevents reconnect while other overdue invoices remain. |
-| `notify_admin_on_auto_reconnect` | `true` | Useful audit/ops signal. |
+| `auto_reconnect_after_full_payment` | `false` initially | Implemented. Safer to launch with manual review unless operations wants full automation. |
+| `auto_reconnect_requires_no_open_balance` | `true` | Implemented as fixed behavior. Reconnect only runs when all open, partial, and overdue balances are fully paid. |
+| `notify_admin_on_auto_reconnect` | `true` | Future enhancement for a dedicated admin notification beyond existing audit/UI messages. |
 
 ### Billing preview
 
@@ -1112,10 +1116,11 @@ Production gaps identified:
 - MikroTik suspend/reconnect currently targets PPP secrets and should become service-type-aware for hotspot, DHCP/IPoE, and static accounts.
 - Subscriber pages need a visible billing/SMS readiness indicator.
 - Auto-reconnect after full payment is not fully implemented yet.
-- Disconnected account billing policy still needs a final-bill/waive/preserve-balance decision.
-- Phone/OTP flow needs duplicate-phone handling and stronger phone normalization.
-- Audit logging is mostly event-level; field-level before/after history is future work.
-- Permissions are broad because most subscriber actions currently rely on `login_required`.
+- Disconnected account billing policy now supports preserve balance, final invoice, or waive open balances.
+- Disconnected account credit policy now supports preserve credit, mark refund due, or forfeit credit.
+- Phone/OTP flow now normalizes portal phone lookup and blocks duplicate-phone OTP login.
+- Subscriber profile edits now write field-level before/after audit logs.
+- Subscriber-sensitive actions now use Django permissions instead of only `login_required`.
 
 Implemented guardrail slice:
 
@@ -1162,13 +1167,119 @@ Implemented service-type-aware MikroTik access slice:
 - Static service suspension needs a defined router policy first, such as a firewall address-list and matching drop/redirect rule.
 - The subscriber status still changes in the app when MikroTik returns a warning; the UI surfaces that warning to the operator.
 
+Implemented auto-reconnect after full payment slice:
+
+- Subscriber Settings now has `Auto-reconnect after full payment`.
+- The setting defaults to off, so existing deployments keep manual reconnect behavior unless an admin enables it.
+- After a payment is recorded and allocated, the system checks the subscriber after the payment transaction commits.
+- Auto-reconnect only runs when:
+  - the setting is enabled,
+  - the subscriber is currently suspended,
+  - all open, partial, and overdue invoice balances are fully paid.
+- Partial payments do not reconnect the subscriber.
+- Overpayments still become account credit after invoices are paid.
+- The reconnect uses the same formal status transition service as manual reconnect.
+- MikroTik reconnect behavior still respects the separate `Auto-reconnect on MikroTik` setting.
+- If the app status changes but MikroTik returns a warning, the payment UI reports the warning.
+
+Implemented disconnected final-billing policy slice:
+
+- Subscriber Settings now has `Disconnected billing policy`.
+- Default policy is `Preserve existing balance`, so existing deployments keep current behavior unless changed.
+- Supported policies:
+  - `Preserve existing balance`: disconnects service and keeps invoices/balances unchanged.
+  - `Generate final invoice`: generates the current-cycle invoice before the subscriber status becomes disconnected.
+  - `Waive open balances`: marks open, partial, and overdue invoices as `waived`.
+- Paid, voided, and already-waived invoices are not changed by the waiver policy.
+- The disconnect confirmation screen shows the active billing policy before the operator confirms.
+- The disconnect workflow still disables service access through the MikroTik service-type-aware path when configured.
+- Billing policy warnings are surfaced back to the operator after disconnect.
+
+Implemented disconnected account-credit policy slice:
+
+- Subscriber Settings now has `Disconnected credit policy`.
+- Default policy is `Preserve account credit`, so existing deployments keep current account-credit behavior unless changed.
+- Supported policies:
+  - `Preserve account credit`: keeps remaining unallocated credit available on the subscriber account.
+  - `Mark refund due`: creates a pending credit adjustment for the remaining available credit, reserving it so future invoices cannot consume it.
+  - `Forfeit account credit`: creates a completed credit adjustment that removes the remaining credit from the available account balance.
+- Credit adjustments do not rewrite payment history.
+- Available account credit is now calculated as unallocated payments minus pending/completed credit adjustments.
+- Future invoice auto-credit application respects credit adjustments and will not apply credit that was reserved for refund or forfeited.
+- The disconnect confirmation screen shows available credit and the active credit policy before the operator confirms.
+- Subscriber detail now shows unallocated credit, reserved/adjusted credit, available credit, and recent credit adjustments in the Payments tab.
+
+Implemented manual refund completion slice:
+
+- Pending `Refund Due` credit adjustments can be completed from the subscriber Payments tab.
+- Only pending refund-due adjustments are eligible for this action.
+- Completing the refund changes the adjustment to `Refund Paid` and `Completed`.
+- Operators can enter a payout reference, paid-at timestamp, and notes.
+- The original payment record remains unchanged.
+- The completed adjustment remains part of the credit adjustment ledger, so available account credit stays reduced.
+- The workflow can optionally create a matching `ExpenseRecord` under Accounting > Expenses.
+- The generated expense uses category `Other`, description `Subscriber refund - <username>`, the refund amount, payout reference, subscriber display name as vendor, and the operator as recorder.
+- Refund completion is audit logged.
+
+Implemented phone normalization and duplicate-phone OTP slice:
+
+- Subscriber records now store `normalized_phone` for phone-number lookup while preserving the original display phone.
+- Phone normalization strips non-digits and canonicalizes Philippine mobile numbers:
+  - `09171234567` becomes `639171234567`.
+  - `9171234567` becomes `639171234567`.
+  - `+63 917 123 4567` becomes `639171234567`.
+- Existing subscriber and OTP rows are backfilled through migration.
+- Portal OTP request now searches by normalized phone instead of exact text match.
+- Portal OTP login blocks duplicate non-deceased/non-archived matches for the same normalized phone and tells the user to contact support.
+- OTP verification now uses the subscriber selected during the OTP request session instead of re-resolving by raw phone text.
+- Subscriber billing/SMS readiness now flags shared phone numbers as an SMS readiness issue.
+- Subscriber search also checks normalized phone values.
+
+Implemented subscriber audit and permissions slice:
+
+- `Subscriber` now defines custom Django permissions:
+  - `manage_subscriber_billing`
+  - `manage_subscriber_lifecycle`
+  - `import_subscribers`
+- Subscriber profile edits require Django's standard `change_subscriber` permission.
+- Billing-sensitive subscriber field changes require `manage_subscriber_billing`.
+- Rate changes require `manage_subscriber_billing`.
+- Lifecycle actions require `manage_subscriber_lifecycle`, including suspend, reconnect, palugit, disconnect, deceased, and archive.
+- Router sync and subscriber CSV import require `import_subscribers`.
+- Manual subscriber creation requires Django's standard `add_subscriber` permission.
+- Plan creation/editing uses Django's standard `add_plan` and `change_plan` permissions.
+- Basic node assignment now requires `change_subscriber`.
+- Pending refund completion requires `billing.change_accountcreditadjustment`; creating the optional accounting expense also requires `accounting.add_expenserecord`.
+- Subscriber edit now logs field-level before/after changes into the existing `AuditLog` table.
+- Subscriber action buttons are hidden when the current user lacks the matching permission.
+
+Implemented permission group presets slice:
+
+- The system now creates and syncs common Django auth groups after migrations:
+  - `ISP Admin`
+  - `ISP Cashier`
+  - `ISP Support`
+  - `ISP Installer`
+  - `ISP Read-only Auditor`
+- `ISP Admin` receives all permissions.
+- `ISP Cashier` receives billing collection permissions such as invoice/statement generation, payment recording, refund completion, accounting refund expense creation, and billing read access.
+- `ISP Support` receives subscriber support permissions such as subscriber edit, lifecycle actions, SMS sending, and read access to billing/router/NMS context.
+- `ISP Installer` receives subscriber onboarding/import and network assignment permissions without billing collection authority.
+- `ISP Read-only Auditor` receives only `view_*` permissions for local ISP Manager apps.
+- Preset syncing is additive by default, so custom permissions added by an admin are not removed during normal migrations.
+- A manual command is available:
+  - `python manage.py sync_role_groups`
+  - `python manage.py sync_role_groups --replace`
+- `--replace` resets preset groups to the current code-defined permission set.
+- Billing action buttons are hidden when the current user lacks the required permission.
+- Billing queue bulk actions now check permissions for invoice generation, statement generation, and SMS sending.
+- Payment recording requires `billing.add_payment`.
+- Manual SMS sending requires `sms.add_smslog`.
+
 Recommended next subscriber slices:
 
 - Optional static-subscriber firewall/address-list policy for suspend/reconnect.
-- Auto-reconnect rule after full payment, with a setting to require manual approval or allow automatic reconnect.
-- Disconnected final-billing policy with options to final bill, waive open balance, preserve balance, or refund credit.
-- Phone normalization and duplicate-phone policy for subscriber portal OTP.
-- Field-level subscriber audit trail and role-based permissions for billing-sensitive changes.
+- User/group management UI for assigning these roles without using Django Admin.
 
 ## Implementation Gap and Future Work
 

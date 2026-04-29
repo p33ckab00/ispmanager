@@ -7,6 +7,9 @@ class CoreConfig(AppConfig):
     label = 'core'
 
     def ready(self):
+        from apps.core.role_presets import connect_role_preset_sync
+        connect_role_preset_sync()
+
         import os
         if os.environ.get('RUN_MAIN') != 'true':
             return

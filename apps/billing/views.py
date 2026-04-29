@@ -12,12 +12,13 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.db import OperationalError
 from django.db.models import Q
-from apps.billing.models import Invoice, Payment, BillingSnapshot, BillingSnapshotItem
-from apps.billing.forms import PaymentForm, RateChangeForm
+from apps.billing.models import AccountCreditAdjustment, Invoice, Payment, BillingSnapshot, BillingSnapshotItem
+from apps.billing.forms import PaymentForm, RateChangeForm, RefundCompletionForm
 from apps.billing.services import (
     generate_invoices_for_all, generate_invoice_for_subscriber,
     record_payment_with_allocation, generate_snapshot_for_subscriber,
     get_billing_previews, mark_overdue_invoices,
+    complete_refund_credit_adjustment,
 )
 from apps.subscribers.models import Subscriber
 from apps.settings_app.models import BillingSettings, SMSSettings
@@ -37,6 +38,13 @@ SMS_SKIP_LABELS = {
     'outside_sms_window': 'Outside SMS window',
 }
 SMS_SKIP_REASONS = set(SMS_SKIP_LABELS.keys())
+
+
+def _require_billing_perm(request, permission, redirect_to='billing-list'):
+    if request.user.has_perm(permission):
+        return True
+    messages.error(request, 'You do not have permission to perform that billing action.')
+    return redirect(redirect_to)
 
 
 def _queue_events_for_preview(preview, target_date):
@@ -180,6 +188,15 @@ def _run_queue_generation_action(request, selected_date, billing_settings,
     if action not in ('generate_invoices', 'generate_snapshots', 'send_sms', 'retry_failed_sms'):
         messages.error(request, 'Unknown billing queue action.')
         return redirect(redirect_url)
+    required_permission = {
+        'generate_invoices': 'billing.add_invoice',
+        'generate_snapshots': 'billing.add_billingsnapshot',
+        'send_sms': 'sms.add_smslog',
+        'retry_failed_sms': 'sms.add_smslog',
+    }[action]
+    permission_check = _require_billing_perm(request, required_permission, redirect_url)
+    if permission_check is not True:
+        return permission_check
     if not selected_ids:
         messages.warning(request, 'Select at least one eligible subscriber.')
         return redirect(redirect_url)
@@ -480,6 +497,10 @@ def invoice_detail(request, pk):
 
 @login_required
 def generate_invoices(request):
+    permission_check = _require_billing_perm(request, 'billing.add_invoice', 'invoice-list')
+    if permission_check is not True:
+        return permission_check
+
     if request.method == 'POST':
         sub_id = request.POST.get('subscriber_id', '').strip()
         if sub_id:
@@ -507,6 +528,14 @@ def generate_invoices(request):
 
 @login_required
 def record_payment(request, subscriber_pk):
+    permission_check = _require_billing_perm(
+        request,
+        'billing.add_payment',
+        f'/subscribers/{subscriber_pk}/',
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=subscriber_pk)
     open_invoices = Invoice.objects.filter(
         subscriber=subscriber,
@@ -535,6 +564,14 @@ def record_payment(request, subscriber_pk):
             if unallocated > 0:
                 msg += f" PHP {unallocated} unallocated (credit)."
             messages.success(request, msg)
+            reconnect_result = getattr(payment, 'auto_reconnect_result', None)
+            if reconnect_result:
+                if reconnect_result.get('reconnected'):
+                    messages.success(request, 'Subscriber auto-reconnected after full payment.')
+                    if reconnect_result.get('warning'):
+                        messages.warning(request, f"MikroTik reconnect warning: {reconnect_result['warning']}")
+                elif reconnect_result.get('error'):
+                    messages.warning(request, f"Auto-reconnect did not complete: {reconnect_result['error']}")
             return redirect('subscriber-detail', pk=subscriber_pk)
     else:
         form = PaymentForm(initial={'amount': open_balance})
@@ -543,6 +580,61 @@ def record_payment(request, subscriber_pk):
         'subscriber': subscriber,
         'form': form,
         'open_invoices': open_invoices,
+    })
+
+
+@login_required
+def complete_refund(request, pk):
+    adjustment = get_object_or_404(
+        AccountCreditAdjustment.objects.select_related('subscriber', 'expense_record'),
+        pk=pk,
+    )
+    subscriber = adjustment.subscriber
+    if not request.user.has_perm('billing.change_accountcreditadjustment'):
+        messages.error(request, 'You do not have permission to complete refund adjustments.')
+        return redirect('subscriber-detail', pk=subscriber.pk)
+
+    if adjustment.adjustment_type != 'refund_due' or adjustment.status != 'pending':
+        messages.error(request, 'Only pending refund-due adjustments can be completed.')
+        return redirect('subscriber-detail', pk=subscriber.pk)
+
+    if request.method == 'POST':
+        form = RefundCompletionForm(request.POST)
+        if form.is_valid():
+            if form.cleaned_data['create_expense'] and not request.user.has_perm('accounting.add_expenserecord'):
+                messages.error(request, 'You do not have permission to create accounting expense records.')
+                return redirect('subscriber-detail', pk=subscriber.pk)
+            try:
+                completed, expense = complete_refund_credit_adjustment(
+                    adjustment,
+                    reference=form.cleaned_data['reference'],
+                    notes=form.cleaned_data['notes'],
+                    completed_by=request.user.username,
+                    paid_at=form.cleaned_data['paid_at'],
+                    create_expense=form.cleaned_data['create_expense'],
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect('subscriber-detail', pk=subscriber.pk)
+
+            AuditLog.log(
+                'update',
+                'billing',
+                f"Refund completed for {subscriber.username}: PHP {completed.amount}",
+                user=request.user,
+            )
+            msg = f"Refund marked paid for {subscriber.display_name}: PHP {completed.amount}."
+            if expense:
+                msg += ' Accounting expense created.'
+            messages.success(request, msg)
+            return redirect('subscriber-detail', pk=subscriber.pk)
+    else:
+        form = RefundCompletionForm(initial={'create_expense': True})
+
+    return render(request, 'billing/refund_complete.html', {
+        'form': form,
+        'adjustment': adjustment,
+        'subscriber': subscriber,
     })
 
 
@@ -569,6 +661,10 @@ def snapshot_detail(request, pk):
 
 @login_required
 def snapshot_freeze(request, pk):
+    permission_check = _require_billing_perm(request, 'billing.change_billingsnapshot', 'snapshot-list')
+    if permission_check is not True:
+        return permission_check
+
     snapshot = get_object_or_404(BillingSnapshot, pk=pk)
     if request.method == 'POST':
         snapshot.freeze(frozen_by=request.user.username)
@@ -580,6 +676,14 @@ def snapshot_freeze(request, pk):
 
 @login_required
 def generate_snapshot(request, subscriber_pk):
+    permission_check = _require_billing_perm(
+        request,
+        'billing.add_billingsnapshot',
+        f'/subscribers/{subscriber_pk}/',
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=subscriber_pk)
     if request.method == 'POST':
         try:

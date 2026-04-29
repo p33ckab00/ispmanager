@@ -13,6 +13,8 @@ from apps.subscribers.forms import (
 )
 from apps.subscribers.services import (
     sync_ppp_secrets, sync_active_sessions,
+    SUBSCRIBER_BILLING_AUDIT_FIELDS,
+    audit_subscriber_field_changes,
     transition_subscriber_status,
     disconnect_subscriber, mark_deceased, archive_subscriber,
     get_subscriber_billing_readiness, get_usage_chart_data,
@@ -23,10 +25,22 @@ from apps.nms.services import (
     has_service_attachment_table,
 )
 from apps.billing.services import apply_rate_change
-from apps.subscribers.otp import create_otp, verify_otp
+from apps.subscribers.otp import create_otp, find_portal_subscriber_by_phone, verify_otp_for_subscriber
 from apps.routers.models import Router
 from apps.core.models import AuditLog
 from apps.sms.services import send_subscriber_billing_sms
+
+
+def _require_subscriber_perm(request, permission_codename, redirect_to='subscriber-list',
+                             subscriber_pk=None):
+    permission = f"subscribers.{permission_codename}"
+    if request.user.has_perm(permission):
+        return True
+
+    messages.error(request, 'You do not have permission to perform that subscriber action.')
+    if subscriber_pk:
+        return redirect('subscriber-detail', pk=subscriber_pk)
+    return redirect(redirect_to)
 
 
 # ── Subscriber List ────────────────────────────────────────────────────────────
@@ -42,6 +56,7 @@ def subscriber_list(request):
             Q(username__icontains=q) |
             Q(full_name__icontains=q) |
             Q(phone__icontains=q) |
+            Q(normalized_phone__icontains=q) |
             Q(ip_address__icontains=q)
         )
 
@@ -77,13 +92,19 @@ def subscriber_list(request):
 def subscriber_detail(request, pk):
     subscriber = get_object_or_404(Subscriber, pk=pk)
 
-    from apps.billing.models import Invoice, BillingSnapshot, Payment
-    from apps.billing.services import mark_overdue_invoices, resolve_billing_profile
+    from apps.billing.models import AccountCreditAdjustment, Invoice, BillingSnapshot, Payment
+    from apps.billing.services import (
+        get_account_credit_summary_for_subscriber,
+        mark_overdue_invoices,
+        resolve_billing_profile,
+    )
     mark_overdue_invoices()
 
     invoices = Invoice.objects.filter(subscriber=subscriber).order_by('-period_start')
     snapshots = BillingSnapshot.objects.filter(subscriber=subscriber).order_by('-cutoff_date')
     payments = Payment.objects.filter(subscriber=subscriber).prefetch_related('allocations').order_by('-paid_at')
+    credit_adjustments = AccountCreditAdjustment.objects.filter(subscriber=subscriber)
+    credit_summary = get_account_credit_summary_for_subscriber(subscriber)
     rate_history = RateHistory.objects.filter(subscriber=subscriber).order_by('-effective_date')
     latest_snapshot = snapshots.first()
     overdue_invoice_count = invoices.filter(status='overdue').count()
@@ -111,6 +132,8 @@ def subscriber_detail(request, pk):
         'invoices': invoices[:10],
         'snapshots': snapshots[:10],
         'payments': payments[:10],
+        'credit_adjustments': credit_adjustments[:10],
+        'credit_summary': credit_summary,
         'rate_history': rate_history[:10],
         'latest_snapshot': latest_snapshot,
         'open_balance': open_balance,
@@ -130,6 +153,9 @@ def subscriber_detail(request, pk):
 def subscriber_send_billing_sms(request, pk):
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method != 'POST':
+        return redirect('subscriber-detail', pk=pk)
+    if not request.user.has_perm('sms.add_smslog'):
+        messages.error(request, 'You do not have permission to send billing SMS.')
         return redirect('subscriber-detail', pk=pk)
 
     log, err, snapshot = send_subscriber_billing_sms(
@@ -158,17 +184,41 @@ def subscriber_send_billing_sms(request, pk):
 @login_required
 def subscriber_edit(request, pk):
     subscriber = get_object_or_404(Subscriber, pk=pk)
+    permission_check = _require_subscriber_perm(
+        request,
+        'change_subscriber',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     if request.method == 'POST':
         old_status = subscriber.status
         form = SubscriberAdminForm(request.POST, instance=subscriber)
         if form.is_valid():
             target_status = form.cleaned_data['status']
+            changed_fields = [field for field in form.changed_data if field != 'status']
+            billing_changed = bool(SUBSCRIBER_BILLING_AUDIT_FIELDS.intersection(changed_fields))
+            if billing_changed and not request.user.has_perm('subscribers.manage_subscriber_billing'):
+                messages.error(request, 'You do not have permission to change subscriber billing fields.')
+                return redirect('subscriber-detail', pk=pk)
+            if target_status != old_status and not request.user.has_perm('subscribers.manage_subscriber_lifecycle'):
+                messages.error(request, 'You do not have permission to change subscriber lifecycle status.')
+                return redirect('subscriber-detail', pk=pk)
+
+            before = Subscriber.objects.get(pk=pk)
             updated_subscriber = form.save(commit=False)
             updated_subscriber.status = old_status
             updated_subscriber.save()
+            audit_count = audit_subscriber_field_changes(
+                before,
+                updated_subscriber,
+                changed_fields,
+                user=request.user,
+            )
 
             AuditLog.log('update', 'subscribers',
-                         f"Subscriber info updated: {subscriber.username}", user=request.user)
+                         f"Subscriber info updated: {subscriber.username} ({audit_count} field change(s))", user=request.user)
             if target_status != old_status:
                 ok, err = transition_subscriber_status(
                     updated_subscriber,
@@ -199,6 +249,14 @@ def subscriber_edit(request, pk):
 
 @login_required
 def subscriber_rate_change(request, pk):
+    permission_check = _require_subscriber_perm(
+        request,
+        'manage_subscriber_billing',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=pk)
 
     if request.method == 'POST':
@@ -264,6 +322,14 @@ def subscriber_rate_change(request, pk):
 
 @login_required
 def subscriber_suspend(request, pk):
+    permission_check = _require_subscriber_perm(
+        request,
+        'manage_subscriber_lifecycle',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
         ok, err = transition_subscriber_status(
@@ -283,6 +349,14 @@ def subscriber_suspend(request, pk):
 
 @login_required
 def subscriber_reconnect(request, pk):
+    permission_check = _require_subscriber_perm(
+        request,
+        'manage_subscriber_lifecycle',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
         old_status = subscriber.status
@@ -304,6 +378,14 @@ def subscriber_reconnect(request, pk):
 
 @login_required
 def subscriber_palugit(request, pk):
+    permission_check = _require_subscriber_perm(
+        request,
+        'manage_subscriber_lifecycle',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if subscriber.status in ['disconnected', 'deceased', 'archived']:
         messages.error(request, 'Palugit is only available for serviceable subscriber accounts.')
@@ -354,6 +436,14 @@ def subscriber_palugit(request, pk):
 
 @login_required
 def subscriber_palugit_remove(request, pk):
+    permission_check = _require_subscriber_perm(
+        request,
+        'manage_subscriber_lifecycle',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
         subscriber.suspension_hold_until = None
@@ -374,26 +464,59 @@ def subscriber_palugit_remove(request, pk):
 
 @login_required
 def subscriber_disconnect(request, pk):
+    permission_check = _require_subscriber_perm(
+        request,
+        'manage_subscriber_lifecycle',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=pk)
+    from apps.settings_app.models import SubscriberSettings
+    from apps.billing.services import get_account_credit_for_subscriber
+    subscriber_settings = SubscriberSettings.get_settings()
+    account_credit = get_account_credit_for_subscriber(subscriber)
     if request.method == 'POST':
         form = DisconnectForm(request.POST)
         if form.is_valid():
-            disconnect_subscriber(
+            ok, err, billing_result, credit_result = disconnect_subscriber(
                 subscriber,
                 reason=form.cleaned_data['reason'],
                 disconnected_by=request.user.username,
             )
             messages.success(request, f"{subscriber.display_name} marked as disconnected.")
+            if err:
+                messages.warning(request, f"MikroTik disconnect warning: {err}")
+            if billing_result.get('message'):
+                messages.info(request, billing_result['message'])
+            for billing_error in billing_result.get('errors', [])[:3]:
+                messages.warning(request, billing_error)
+            if credit_result.get('message'):
+                messages.info(request, credit_result['message'])
+            for credit_error in credit_result.get('errors', [])[:3]:
+                messages.warning(request, credit_error)
             return redirect('subscriber-detail', pk=pk)
     else:
         form = DisconnectForm()
     return render(request, 'subscribers/confirm_disconnect.html', {
-        'subscriber': subscriber, 'form': form,
+        'subscriber': subscriber,
+        'form': form,
+        'subscriber_settings': subscriber_settings,
+        'account_credit': account_credit,
     })
 
 
 @login_required
 def subscriber_deceased(request, pk):
+    permission_check = _require_subscriber_perm(
+        request,
+        'manage_subscriber_lifecycle',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
         form = DeceasedForm(request.POST)
@@ -415,6 +538,14 @@ def subscriber_deceased(request, pk):
 
 @login_required
 def subscriber_archive(request, pk):
+    permission_check = _require_subscriber_perm(
+        request,
+        'manage_subscriber_lifecycle',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
         archive_subscriber(subscriber)
@@ -437,6 +568,14 @@ def subscriber_usage_chart(request, pk):
 
 @login_required
 def subscriber_assign_node(request, pk):
+    permission_check = _require_subscriber_perm(
+        request,
+        'change_subscriber',
+        subscriber_pk=pk,
+    )
+    if permission_check is not True:
+        return permission_check
+
     subscriber = get_object_or_404(Subscriber, pk=pk)
     if request.method == 'POST':
         if get_service_attachment(subscriber):
@@ -465,6 +604,10 @@ def subscriber_assign_node(request, pk):
 
 @login_required
 def subscriber_sync(request):
+    permission_check = _require_subscriber_perm(request, 'import_subscribers')
+    if permission_check is not True:
+        return permission_check
+
     routers = Router.objects.filter(is_active=True, status='online')
     if not routers.exists():
         messages.error(request, 'No online routers. Add and sync a router first.')
@@ -497,6 +640,10 @@ def plan_list(request):
 
 @login_required
 def plan_add(request):
+    permission_check = _require_subscriber_perm(request, 'add_plan')
+    if permission_check is not True:
+        return permission_check
+
     if request.method == 'POST':
         form = PlanForm(request.POST)
         if form.is_valid():
@@ -511,6 +658,10 @@ def plan_add(request):
 
 @login_required
 def plan_edit(request, pk):
+    permission_check = _require_subscriber_perm(request, 'change_plan')
+    if permission_check is not True:
+        return permission_check
+
     plan = get_object_or_404(Plan, pk=pk)
     if request.method == 'POST':
         form = PlanForm(request.POST, instance=plan)
@@ -528,6 +679,10 @@ def plan_edit(request, pk):
 
 @login_required
 def subscriber_add(request):
+    permission_check = _require_subscriber_perm(request, 'add_subscriber')
+    if permission_check is not True:
+        return permission_check
+
     if request.method == 'POST':
         form = ManualSubscriberForm(request.POST)
         if form.is_valid():
@@ -551,10 +706,9 @@ def portal_request_otp(request):
         form = OTPRequestForm(request.POST)
         if form.is_valid():
             phone = form.cleaned_data['phone']
-            try:
-                subscriber = Subscriber.objects.get(phone=phone)
-            except Subscriber.DoesNotExist:
-                messages.error(request, 'No account found with this phone number.')
+            subscriber, error, normalized_phone = find_portal_subscriber_by_phone(phone)
+            if error:
+                messages.error(request, error)
                 return render(request, 'subscribers/portal_otp_request.html', {'form': form})
 
             if subscriber.status in ('deceased', 'archived'):
@@ -564,12 +718,14 @@ def portal_request_otp(request):
             otp = create_otp(subscriber)
             try:
                 from apps.sms.semaphore import send_sms
-                send_sms(phone, f"Your ISP Manager login code is: {otp.code}. Valid for 10 minutes.")
+                send_sms(subscriber.phone, f"Your ISP Manager login code is: {otp.code}. Valid for 10 minutes.")
             except Exception as e:
                 messages.error(request, f"OTP created but SMS delivery failed: {e}")
                 return render(request, 'subscribers/portal_otp_request.html', {'form': form})
 
-            request.session['portal_phone'] = phone
+            request.session['portal_phone'] = subscriber.phone
+            request.session['portal_normalized_phone'] = normalized_phone
+            request.session['portal_otp_subscriber_id'] = subscriber.pk
             messages.success(request, 'OTP sent to your phone.')
             return redirect('portal-verify-otp')
     else:
@@ -579,16 +735,19 @@ def portal_request_otp(request):
 
 def portal_verify_otp(request):
     phone = request.session.get('portal_phone', '')
-    if not phone:
+    subscriber_id = request.session.get('portal_otp_subscriber_id')
+    if not phone or not subscriber_id:
         return redirect('portal-request-otp')
 
     if request.method == 'POST':
         form = OTPVerifyForm(request.POST)
         if form.is_valid():
-            subscriber, error = verify_otp(phone, form.cleaned_data['code'])
+            subscriber, error = verify_otp_for_subscriber(subscriber_id, form.cleaned_data['code'])
             if subscriber:
                 request.session['portal_subscriber_id'] = subscriber.pk
                 request.session.pop('portal_phone', None)
+                request.session.pop('portal_normalized_phone', None)
+                request.session.pop('portal_otp_subscriber_id', None)
                 return redirect('portal-dashboard')
             else:
                 messages.error(request, error)
@@ -636,4 +795,6 @@ def portal_dashboard(request):
 def portal_logout(request):
     request.session.pop('portal_subscriber_id', None)
     request.session.pop('portal_phone', None)
+    request.session.pop('portal_normalized_phone', None)
+    request.session.pop('portal_otp_subscriber_id', None)
     return redirect('portal-request-otp')
