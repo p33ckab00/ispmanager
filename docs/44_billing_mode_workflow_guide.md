@@ -75,6 +75,798 @@ Example for a subscriber with cutoff day `10`:
 | April 11, 2026 | April 11-May 10, 2026 | April 10, 2026 | April 17, 2026 |
 | April 9, 2026 | March 11-April 10, 2026 | March 10, 2026 | March 17, 2026 |
 
+## Planned Billing Model
+
+This section documents the agreed target direction. It is a planning record, not a description of the current implementation.
+
+### Cutoff day 1-31 with month-end fallback
+
+Target rule:
+
+- Cutoff day should support `1-31`.
+- When the month is shorter than the configured cutoff day, use the last day of that month.
+
+Examples:
+
+| Configured cutoff | February 2026 | February 2028 | April 2026 | May 2026 |
+| --- | --- | --- | --- | --- |
+| `28` | Feb 28 | Feb 28 | Apr 28 | May 28 |
+| `30` | Feb 28 | Feb 29 | Apr 30 | May 30 |
+| `31` | Feb 28 | Feb 29 | Apr 30 | May 31 |
+
+Important implementation rule:
+
+- Billing logic must compare against the effective cutoff date for the current month, not only the raw cutoff number.
+- Example: if configured cutoff is `30`, February 28, 2026 is already the effective cutoff date even though `28 < 30`.
+
+This affects:
+
+- billing profile period calculation
+- invoice generation timing
+- billing snapshot generation timing
+- usage cutoff snapshot generation
+- scheduler filters
+- settings validation
+- subscriber validation
+- data import validation
+- UI helper text
+- documentation examples
+- tests around February, leap years, April 30, and December-January rollover
+
+The current raw-day scheduler filter is not enough for this target model. Subscribers with cutoff `30` or `31` must still be selected on February 28 or February 29 when that is the effective cutoff date.
+
+### Cycle boundaries
+
+Target cycle rule:
+
+- A cycle starts the day after the previous effective cutoff.
+- A cycle ends on the current effective cutoff.
+
+Example:
+
+| Service start | Cutoff day | Billing period |
+| --- | --- | --- |
+| Apr 29, 2026 | `28` | Apr 29-May 28, 2026 |
+
+This is calendar-cycle billing, not fixed 30-day billing.
+
+### Subscriber billing type
+
+Target rule:
+
+- Each subscriber should have a billing type.
+- `postpaid` means the subscriber uses the service first, then pays for the completed/current service cycle.
+- `prepaid` means the subscriber pays before using the next service cycle.
+
+Recommended source of truth:
+
+- subscriber-level billing type
+- optional global default later
+- optional plan-level default later
+
+Subscriber-level should win because real ISP operations often mix prepaid and postpaid accounts.
+
+### Postpaid due-date behavior
+
+For postpaid accounts:
+
+- The subscriber uses the service during the cycle.
+- Due date should normally be the cycle end date, unless a due offset is explicitly configured.
+
+Example:
+
+| Service start | Cutoff day | Billing period | Due date |
+| --- | --- | --- | --- |
+| Apr 29, 2026 | `28` | Apr 29-May 28, 2026 | May 28, 2026 |
+
+This matches the desired behavior: the client uses the plan first, then receives billing near or at the end of the covered period.
+
+### Prepaid due-date behavior
+
+For prepaid accounts:
+
+- The subscriber should pay before or at the beginning of the service cycle.
+- Recommended due date is the cycle start date.
+
+Example:
+
+| Cycle | Cutoff day | Billing period | Due date |
+| --- | --- | --- | --- |
+| Current cycle | `28` | Apr 29-May 28, 2026 | Apr 29, 2026 |
+| Next cycle | `28` | May 29-Jun 28, 2026 | May 29, 2026 |
+
+This keeps prepaid easy to explain: payment is due when the prepaid service period starts.
+
+## Planned Billing SMS Workflow
+
+The current SMS setting only supports a single "days before due" target. The target workflow needs a reminder schedule.
+
+Target SMS behavior:
+
+- Send billing SMS based on invoice or frozen billing snapshot due date.
+- Send only while the invoice still has an unpaid balance.
+- Stop reminders once paid.
+- Avoid duplicate sends for the same invoice and reminder date or reminder stage.
+
+Recommended SMS settings:
+
+| Setting | Purpose |
+| --- | --- |
+| `billing_sms_days_before_due` | First reminder lead time, for example `3` days before due date. |
+| `billing_sms_repeat_every_days` | Repeat interval, for example every `2` days. |
+| `billing_sms_send_on_due_date` | Whether to send a due-day reminder. |
+| `billing_sms_send_after_due` | Whether to keep reminding after due date. |
+| `billing_sms_stop_when_paid` | Should remain enabled by default. |
+
+Example postpaid reminder schedule:
+
+| Billing period | Due date | SMS setting | Send dates |
+| --- | --- | --- | --- |
+| Apr 29-May 28, 2026 | May 28, 2026 | 3 days before due, repeat every 2 days, send on due date | May 25, May 27, May 28 |
+
+If payment is recorded on May 26, the May 27 and May 28 reminders should not send.
+
+Important generation timing:
+
+- If SMS should send before the due date, the invoice or snapshot must already exist before the first reminder date.
+- For postpaid billing, this means the billing job should create the bill once its due date is inside the SMS lead window, not only on the cutoff date itself.
+
+Example:
+
+| Date | Desired behavior |
+| --- | --- |
+| Apr 29, 2026 | Service period starts. |
+| May 25, 2026 | Bill exists and first reminder can be sent. |
+| May 27, 2026 | Repeat reminder can be sent if unpaid. |
+| May 28, 2026 | Due-day reminder can be sent if unpaid. |
+
+### SMS eligibility after billing generation
+
+Target rule:
+
+- Send billing SMS based on the due-date reminder schedule, not just the billing generation event.
+
+Billing generation creates or freezes the bill. It should not automatically mean "send SMS immediately" unless the bill is already eligible under the reminder schedule.
+
+SMS eligibility rules:
+
+- SMS can send only after the invoice or billing snapshot exists.
+- If the bill is generated before the reminder window, wait until the configured reminder date.
+- If the bill is generated inside the reminder window, send on the next scheduled SMS run.
+- If the bill is generated on the due date, send a due-day SMS only when due-day reminders are enabled.
+- If the bill is generated after the due date, send only when after-due reminders are enabled.
+- If the invoice is fully paid before the scheduled SMS run, do not send.
+- If the invoice is partially paid, reminders may continue using the remaining balance.
+
+Example postpaid schedule:
+
+| Billing period | Due date | Bill generation date | SMS rule | Expected SMS behavior |
+| --- | --- | --- | --- | --- |
+| Apr 29-May 28, 2026 | May 28, 2026 | May 20, 2026 | 3 days before due, repeat every 2 days, send on due date | Wait until May 25, then send May 25, May 27, and May 28 if unpaid. |
+| Apr 29-May 28, 2026 | May 28, 2026 | May 25, 2026 | Same settings | Send on the next scheduled SMS run on or after May 25 if unpaid. |
+| Apr 29-May 28, 2026 | May 28, 2026 | May 28, 2026 | Due-day reminders enabled | Send on the next scheduled SMS run on May 28 if unpaid. |
+| Apr 29-May 28, 2026 | May 28, 2026 | May 29, 2026 | After-due reminders disabled | Do not send scheduled billing SMS. |
+| Apr 29-May 28, 2026 | May 28, 2026 | May 29, 2026 | After-due reminders enabled | Send according to the after-due reminder policy if unpaid. |
+
+## Planned Implementation Checklist
+
+1. Define a reusable effective cutoff date rule for any configured cutoff day `1-31`.
+2. Replace raw day comparisons with effective cutoff date comparisons.
+3. Update billing period calculation to use previous and current effective cutoffs.
+4. Update scheduler filters so cutoff `30` and `31` subscribers are selected on month-end fallback dates.
+5. Add subscriber billing type, starting with `postpaid` and `prepaid`.
+6. Define due date rules for prepaid and postpaid accounts.
+7. Update invoice and snapshot generation so billing can be created before due date when SMS reminders require it.
+8. Add SMS repeat scheduling and duplicate-send protection.
+9. Keep overdue and auto-suspend based on invoice due date plus grace period.
+10. Update settings form validation from `1-28` to `1-31` where appropriate.
+11. Update subscriber form validation from `1-28` to `1-31` where appropriate.
+12. Update data import validation for cutoff day `1-31`.
+13. Update UI helper text and docs to explain month-end fallback behavior.
+14. Add tests for cutoff `28`, `29`, `30`, and `31`, including February leap and non-leap years.
+
+## Planned Flow Against Current Codebase
+
+The current codebase already has the right major building blocks:
+
+| Current module | Future role |
+| --- | --- |
+| `apps/billing/services.py` | Main billing engine for cutoff calculation, cycle resolution, invoice generation, snapshot generation, due dates, and overdue status. |
+| `apps/core/scheduler.py` | Daily orchestration for invoice generation, snapshot generation, SMS reminders, overdue marking, and auto-suspend. |
+| `apps/sms/services.py` | Billing SMS sender and future reminder scheduler logic. |
+| `apps/billing/models.py::Invoice` | Accounting and receivable source of truth. |
+| `apps/billing/models.py::BillingSnapshot` | Client-facing billing statement. |
+| `apps/subscribers/models.py::Subscriber` | Subscriber-level billing settings, including future prepaid/postpaid type. |
+
+Current limitation:
+
+- The system is effectively cutoff-advance billing only.
+- Cutoff behavior is limited to `1-28`.
+- Due date is currently cutoff date plus due offset.
+- Invoice generation runs daily for all active or suspended billable subscribers.
+- Snapshot generation runs only when today's raw day matches the resolved cutoff day.
+- Scheduled billing SMS sends only once, based on frozen snapshots where `due_date = today + billing_sms_days_before_due`.
+- There is no subscriber-level prepaid/postpaid distinction.
+- There is no repeat billing SMS schedule or duplicate reminder tracking.
+
+Target billing flow:
+
+1. The daily billing job checks active or suspended billable subscribers.
+2. For each subscriber, the billing engine resolves the configured cutoff day.
+3. If the configured cutoff does not exist in the target month, the effective cutoff becomes the last day of that month.
+4. The billing engine calculates the cycle from the previous effective cutoff plus one day through the current effective cutoff.
+5. The subscriber billing type determines the due date:
+   - `postpaid`: due date normally equals `period_end`.
+   - `prepaid`: due date normally equals `period_start`.
+6. The billing job creates an invoice and snapshot when the due date is inside the billing or SMS lead window.
+7. The SMS job sends reminders only for unpaid invoices or snapshots.
+8. Reminder sending follows SMS settings such as first reminder lead days, repeat interval, and due-day reminder.
+9. Reminders stop once the invoice is fully paid.
+10. Overdue and auto-suspend continue to use invoice due date plus grace period.
+
+Example postpaid flow:
+
+| Date | Behavior |
+| --- | --- |
+| Apr 29, 2026 | Service period starts for Apr 29-May 28. |
+| May 25, 2026 | Invoice/snapshot should already exist so the first reminder can send 3 days before due. |
+| May 27, 2026 | Repeat SMS can send if the account is still unpaid. |
+| May 28, 2026 | Due-date SMS can send if enabled and still unpaid. |
+| After May 28, 2026 | Overdue handling starts according to grace period settings. |
+
+Example prepaid flow:
+
+| Date | Behavior |
+| --- | --- |
+| Apr 29, 2026 | Payment is due for Apr 29-May 28 service. |
+| May 26, 2026 | First reminder can send for the next May 29-Jun 28 prepaid cycle if configured as 3 days before due. |
+| May 28, 2026 | Repeat reminder can send if still unpaid. |
+| May 29, 2026 | Due-date reminder can send for the next prepaid cycle if enabled and still unpaid. |
+
+### Planned payment behavior
+
+The billing model should allow normal real-world payment timing. A subscriber billing type describes when payment is expected, but it should not prevent valid payment scenarios.
+
+Target rules:
+
+- Early payment is allowed.
+- Advance payment is allowed.
+- Partial payment is allowed.
+- Overpayment becomes account credit.
+- Account credit should auto-apply to the oldest unpaid invoice first.
+- SMS reminders should stop only when the invoice is fully paid.
+- If an invoice is partially paid, reminders may continue but should show the remaining balance.
+- Overdue status should be based on remaining balance plus due date and grace period.
+
+Postpaid early payment example:
+
+| Billing type | Billing period | Due date | Payment date | Expected behavior |
+| --- | --- | --- | --- | --- |
+| `postpaid` | Apr 29-May 28, 2026 | May 28, 2026 | May 10, 2026 | Payment is accepted. If the invoice exists, it is applied to that invoice. If fully paid, reminders stop and the invoice never becomes overdue. |
+
+If a postpaid customer pays before the invoice exists, the target system should handle this in one of two safe ways:
+
+1. Create the upcoming invoice early and apply the payment to it.
+2. Record the payment as account credit and automatically apply that credit when the future invoice is created.
+
+The preferred long-term behavior is formal account credit handling, because it also supports overpayments and other advance-payment cases.
+
+Overdue partial payment example:
+
+| Invoice amount | Current status | Payment | Remaining balance | Expected behavior |
+| --- | --- | --- | --- | --- |
+| PHP 1,000 | `overdue` | PHP 500 | PHP 500 | Payment is accepted. Invoice remains collectible. Reminder or collection flow may continue using the remaining balance. |
+
+Current-code note:
+
+- The existing payment allocation logic already accepts partial payments against `open`, `partial`, and `overdue` invoices.
+- If an overdue invoice receives a partial payment, current code can set it to `partial`.
+- The overdue job can later mark it `overdue` again if it is still past due plus grace period.
+
+Target status semantics should be explicit:
+
+| Status | Meaning |
+| --- | --- |
+| `paid` | Fully settled. |
+| `partial` | Partially paid and not yet overdue by due/grace rules. |
+| `overdue` | Has remaining balance and is past due/grace rules, even if partially paid. |
+
+Main codebase impact:
+
+- `get_next_cutoff_period()` should be replaced or refactored into a month-aware cutoff/cycle resolver.
+- `get_cutoff_day_queryset_filter()` should no longer rely only on raw day equality.
+- Invoice and snapshot jobs should generate billing based on due/reminder windows, not only today's cutoff day.
+- Subscriber records need a billing type such as `postpaid` or `prepaid`.
+- Payment allocation needs formal account credit handling for early payments and overpayments.
+- SMS settings need repeat interval, due-day reminder, and optional after-due reminder controls.
+- SMS sending needs duplicate protection by invoice or snapshot and reminder date or stage.
+- Settings, subscriber forms, import validation, and UI helper text need to support cutoff `1-31`.
+- Tests should cover cutoff `29`, `30`, and `31`, including February and leap years.
+
+## Planned Billing System Improvements
+
+These improvements are recommended after the prepaid/postpaid and cutoff `1-31` model is defined. They should be implemented in priority order so the billing truth is stable before adding more automation.
+
+### Priority roadmap
+
+1. Cutoff `1-31` with month-end fallback.
+2. Subscriber billing type: `prepaid` and `postpaid`.
+3. Due-date based invoice and snapshot generation.
+4. Billing SMS reminder engine with duplicate protection.
+5. Account credit and advance payment handling.
+6. Billing adjustments and billing ledger.
+7. Auto-reconnect after full payment.
+8. Billing preview before issue.
+9. Billing Calendar & Queue workspace.
+10. Billing health dashboard.
+11. Strong date and payment tests.
+
+### Account credit and advance payments
+
+Target behavior:
+
+- Early payments should be accepted.
+- Overpayments should become account credit.
+- Account credit should auto-apply to the oldest unpaid invoice first.
+- Future invoices should consume available credit automatically.
+
+Example:
+
+| Payment | Open invoice | Result |
+| --- | --- | --- |
+| PHP 1,500 | PHP 1,000 | PHP 1,000 applied to invoice, PHP 500 stored as account credit. |
+
+Recommended settings:
+
+| Setting | Recommended default | Notes |
+| --- | --- | --- |
+| `enable_account_credit` | `true` | Formalizes unallocated payment handling. |
+| `auto_apply_credit_to_new_invoices` | `true` | Applies credit to future invoices automatically. |
+| `credit_apply_order` | `oldest_unpaid_first` | Other modes can be added later if needed. |
+
+### Billing ledger
+
+Target behavior:
+
+- Each subscriber should have a readable billing ledger.
+- Ledger entries should show invoices, payments, credits, adjustments, waivers, voids, and remaining balance.
+
+Example ledger:
+
+| Entry | Amount effect |
+| --- | --- |
+| Invoice | +PHP 1,000 |
+| Payment | -PHP 500 |
+| Adjustment | +PHP 100 |
+| Credit applied | -PHP 200 |
+
+Recommended settings:
+
+- No user-facing setting is required for the ledger itself.
+- Ledger creation should be a fixed system behavior for auditability.
+
+### Adjustments
+
+Target behavior:
+
+- Admin can add controlled adjustments without rewriting invoice history.
+- Supported adjustment types should include discount, penalty, correction, one-time charge, installation fee, waiver, refund, and credit memo.
+
+Recommended settings:
+
+| Setting | Recommended default | Notes |
+| --- | --- | --- |
+| `enable_billing_adjustments` | `true` | Allows controlled corrections and one-time charges. |
+| `require_adjustment_reason` | `true` | Keeps audit trail clean. |
+| `require_adjustment_approval` | `false` initially | Can be enabled later for stricter finance workflow. |
+
+### Invoice lifecycle
+
+Target behavior:
+
+- Invoice state should be explicit and easy to audit.
+- Current statuses can be refined into a clearer lifecycle.
+
+Recommended lifecycle:
+
+| Status | Meaning |
+| --- | --- |
+| `draft` | Prepared but not issued. |
+| `issued` | Officially billed to subscriber. |
+| `partial` | Partially paid and not overdue by due/grace rules. |
+| `paid` | Fully settled. |
+| `overdue` | Has remaining balance and is past due/grace rules. |
+| `voided` | Cancelled for a valid audit reason. |
+| `waived` | Balance intentionally forgiven. |
+
+Recommended settings:
+
+| Setting | Recommended default | Notes |
+| --- | --- | --- |
+| `invoice_issue_mode` | `auto` | Options could be `auto`, `draft_review`, or `manual`. |
+| `allow_invoice_voiding` | `true` | Should require reason. |
+| `allow_invoice_waiving` | `true` | Should require reason. |
+
+### Payment allocation
+
+Target behavior:
+
+- Payments should allocate clearly and predictably.
+- Default should remain oldest unpaid invoice first.
+- Admin may later be allowed to choose a specific invoice during payment entry.
+
+Recommended settings:
+
+| Setting | Recommended default | Notes |
+| --- | --- | --- |
+| `payment_allocation_mode` | `oldest_unpaid_first` | Safest default for collections. |
+| `allow_manual_payment_allocation` | `false` initially | Can be enabled when UI is ready. |
+| `prevent_duplicate_payment_reference` | `false` initially | Useful if payment channels provide reliable reference numbers. |
+
+### Billing SMS reminder engine
+
+Target behavior:
+
+- SMS reminders should be due-date based.
+- Reminders should stop when fully paid.
+- Partial balances should continue reminders using remaining balance.
+- Duplicate sends should be blocked per invoice and reminder date or stage.
+
+Recommended settings:
+
+| Setting | Recommended default | Notes |
+| --- | --- | --- |
+| `enable_billing_sms` | existing setting | Master switch. |
+| `billing_sms_days_before_due` | existing setting, currently `3` | First reminder lead time. |
+| `billing_sms_repeat_every_days` | `2` | Repeat interval while unpaid. |
+| `billing_sms_send_on_due_date` | `true` | Sends due-day reminder if unpaid. |
+| `billing_sms_send_after_due` | `false` initially | Can be enabled for collections workflow. |
+| `billing_sms_after_due_every_days` | `2` if enabled | Repeat interval after due date. |
+| `billing_sms_stop_when_paid` | `true` | Should usually remain fixed true. |
+
+Template recommendations:
+
+- Current bill template.
+- Partial balance reminder template.
+- Overdue reminder template.
+- Payment received template, later if needed.
+
+### Grace period and suspension rules
+
+Target behavior:
+
+- Marking overdue and suspending service should be separate decisions.
+- Palugit should continue to skip auto-suspension.
+
+Recommended settings:
+
+| Setting | Recommended default | Notes |
+| --- | --- | --- |
+| `grace_period_days` | existing setting | Days after due date before marking overdue. |
+| `enable_auto_disconnect` | existing setting | Master switch for auto-suspend. |
+| `auto_suspend_after_overdue_days` | `0` initially | Allows delaying suspension after invoice becomes overdue. |
+| `skip_auto_suspend_with_active_palugit` | `true` | Should remain true. |
+
+Example:
+
+| Due date | Grace period | Mark overdue | Auto-suspend delay | Auto-suspend |
+| --- | --- | --- | --- | --- |
+| May 28, 2026 | 3 days | Jun 1, 2026 | 2 days | Jun 3, 2026 |
+
+### Auto-reconnect after payment
+
+Target behavior:
+
+- If a subscriber was suspended because of overdue billing, full payment can optionally trigger reconnect.
+- Reconnect should be logged and should respect router/MikroTik settings.
+
+Recommended settings:
+
+| Setting | Recommended default | Notes |
+| --- | --- | --- |
+| `enable_auto_reconnect_after_full_payment` | `false` initially | Safer to launch with manual review unless operations wants full automation. |
+| `auto_reconnect_requires_no_overdue_balance` | `true` | Prevents reconnect while other overdue invoices remain. |
+| `notify_admin_on_auto_reconnect` | `true` | Useful audit/ops signal. |
+
+### Billing preview
+
+Target behavior:
+
+- Admin can preview billing before issuing invoices or snapshots.
+- Preview should show period, due date, current charge, previous balance, credit, adjustments, total due, and SMS schedule.
+
+Recommended settings:
+
+| Setting | Recommended default | Notes |
+| --- | --- | --- |
+| `require_billing_preview_before_bulk_issue` | `false` initially | Can be enabled for stricter finance control. |
+| `show_sms_schedule_in_preview` | `true` | Helps catch wrong reminder timing before issue. |
+
+### Billing health dashboard
+
+Target behavior:
+
+- Finance/admin should see billing risk and workload at a glance.
+
+Recommended dashboard indicators:
+
+- bills due today
+- bills due in the next reminder window
+- overdue count
+- partial count
+- total receivables
+- total account credits
+- SMS pending, sent, and failed
+- subscribers without rate
+- subscribers without phone
+- subscribers with invalid billing setup
+
+Recommended settings:
+
+- No core setting required.
+- Dashboard thresholds can be added later if alerts become noisy.
+
+### Tests and safeguards
+
+Target tests:
+
+- cutoff `28`, `29`, `30`, and `31`
+- February non-leap and leap years
+- April 30 and May 31
+- December-January rollover
+- prepaid due date
+- postpaid due date
+- early payment
+- overpayment/account credit
+- overdue partial payment
+- SMS first reminder, repeat reminder, due-day reminder, and duplicate prevention
+
+Recommended settings:
+
+- No user-facing setting required.
+- These should be automated test safeguards.
+
+### Settings strategy
+
+Not every improvement should become a setting. Some rules should be fixed system behavior to keep billing reliable.
+
+Recommended configurable settings:
+
+- default cutoff day
+- default billing type
+- due offset behavior, if retained
+- invoice issue mode
+- SMS reminder lead days
+- SMS repeat interval
+- due-day SMS toggle
+- after-due SMS toggle
+- grace period days
+- auto-suspend toggle and delay
+- auto-reconnect toggle
+- adjustment approval requirement
+
+Recommended fixed system behavior:
+
+- month-end fallback for cutoff `29-31`
+- invoice duplicate protection
+- SMS duplicate protection
+- stop SMS when fully paid
+- preserve billing ledger
+- require audit reason for voids, waivers, and adjustments
+- apply payments against real invoice balances only
+
+## Planned Billing Calendar & Queue
+
+This feature should become the billing module's daily operations workspace. It answers the question: "What billing work is coming today, tomorrow, this week, or on a selected date?"
+
+Recommended feature name:
+
+- `Billing Calendar & Queue`
+
+Related terms:
+
+- `Billing Calendar` for calendar/date-based navigation.
+- `Upcoming Billing Queue` for actionable work lists.
+- `Cutoff Schedule` for subscribers whose effective cutoff falls on a date.
+- `Due Schedule` for invoices due on a date.
+- `A/R Aging` for overdue receivables grouped by age.
+
+### Feature plan
+
+The workspace should have four core views.
+
+| View | Purpose |
+| --- | --- |
+| Calendar view | Monthly calendar with badges for cutoffs, due bills, SMS reminders, overdue transitions, and auto-suspend candidates. |
+| Daily queue | Work list for a selected date, such as May 1. |
+| Upcoming queue | Range-based list for today, tomorrow, next 7 days, next 30 days, this month, or custom range. |
+| Work tabs | Focused tabs for generate, review, send SMS, collect, and exceptions. |
+
+Daily queue sections:
+
+- cutoff today
+- due today
+- SMS scheduled today
+- bills to generate
+- bills needing review
+- subscribers already paid or credit-covered
+- missing setup
+- overdue soon
+- auto-suspend risk
+
+Useful filters:
+
+- today
+- tomorrow
+- next 7 days
+- next 30 days
+- this month
+- custom date range
+- by effective cutoff date
+- by due date
+- by SMS send date
+- by billing type: `prepaid` or `postpaid`
+- by invoice status: not generated, generated, partial, paid, overdue
+- by snapshot status: missing, draft, frozen
+- by SMS status: eligible, sent, failed, skipped
+
+Smart status groups:
+
+- ready to generate
+- already generated
+- needs review
+- SMS eligible
+- paid already
+- partially paid
+- missing rate
+- missing phone
+- SMS opted out
+- has account credit
+- overdue soon
+- auto-suspend risk
+- palugit active
+- billing effective date not reached
+- duplicate invoice risk
+
+Recommended actions:
+
+- generate selected invoices
+- generate selected snapshots
+- preview billing
+- send selected SMS
+- mark reviewed
+- record payment
+- open subscriber account
+- export queue CSV
+
+Recommended columns:
+
+| Column | Purpose |
+| --- | --- |
+| Subscriber | Customer identity and account link. |
+| Billing type | Shows `prepaid` or `postpaid`. |
+| Cutoff day | Configured cutoff. |
+| Effective cutoff date | Month-aware cutoff date after fallback. |
+| Period | Service period covered by the bill. |
+| Due date | Payment due date based on billing type. |
+| Plan/rate | Billing amount source. |
+| Previous balance | Open balance before current cycle. |
+| Credit | Available account credit. |
+| Total due | Amount still payable. |
+| Invoice status | Missing, issued, partial, paid, overdue, voided, waived. |
+| Snapshot status | Missing, draft, frozen. |
+| SMS status | Eligible, sent, failed, skipped, not due. |
+| Phone | SMS destination readiness. |
+| Flags | Missing setup, palugit, credit-covered, duplicate risk, etc. |
+
+SMS awareness:
+
+- first SMS date
+- next SMS date
+- last SMS sent
+- reminder stage
+- SMS failed reason
+- whether SMS will send today
+- why SMS will not send, such as paid, no phone, opted out, not generated, or outside reminder window
+
+Billing run summary for a selected date:
+
+| Metric | Example |
+| --- | --- |
+| Total subscribers in queue | 30 |
+| Ready to bill | 25 |
+| Already generated | 10 |
+| Missing rate | 2 |
+| Missing phone | 3 |
+| SMS due today | 18 |
+| Paid or credit-covered | 4 |
+| Expected receivable | PHP 32,500 |
+
+Prepaid and postpaid handling:
+
+- A selected date can include prepaid subscribers whose next cycle starts on that date.
+- The same selected date can include postpaid subscribers whose current cycle ends on that date.
+- The same date can also include SMS reminders for bills due soon, even if their cutoff is not today.
+
+Exception queue:
+
+- no rate
+- no phone
+- invalid cutoff
+- no billing type
+- billing effective date not reached
+- duplicate invoice risk
+- snapshot missing
+- SMS failed
+- account credit larger than amount due
+- palugit active
+
+### Implementation plan
+
+Phase 1: Billing preview engine
+
+- Build a read-only billing preview service.
+- It should compute effective cutoff date, period, due date, billing type, expected invoice amount, previous balance, credit, total due, and SMS eligibility.
+- It should not create invoices, snapshots, payments, or SMS logs.
+- This preview should be the shared source for the calendar, queue, and future bulk actions.
+
+Phase 2: Read-only calendar
+
+- Add a monthly Billing Calendar view.
+- Show daily counts for effective cutoffs, due bills, SMS reminders, overdue transitions, and auto-suspend candidates.
+- Start read-only to validate date calculations before adding actions.
+
+Phase 3: Daily queue
+
+- Add a selected-date queue view.
+- Group subscribers by ready to generate, already generated, SMS eligible, paid, partial, missing setup, exceptions, and auto-suspend risk.
+- Include the billing run summary at the top.
+
+Phase 4: Safe generation actions
+
+- Add selected invoice generation.
+- Add selected snapshot generation.
+- Keep duplicate protection strict by subscriber and period.
+- Show a result summary after every bulk action.
+
+Phase 5: SMS eligibility and sending
+
+- Display first SMS date, next SMS date, last sent, reminder stage, and skip reason.
+- Add selected SMS send action only after duplicate reminder tracking exists.
+- Block SMS sends for fully paid invoices.
+
+Phase 6: Review, export, and collections tools
+
+- Add mark-reviewed state if draft review is enabled.
+- Add CSV export for the selected date or range.
+- Add quick links to record payment and subscriber detail.
+- Add collection-focused filters for partial, overdue, and auto-suspend risk.
+
+Phase 7: Dashboard integration
+
+- Feed high-level queue metrics into the billing health dashboard.
+- Highlight today's billing workload, failed SMS, missing setup, and expected receivables.
+
+Recommended settings:
+
+| Setting | Recommended default | Notes |
+| --- | --- | --- |
+| `enable_billing_calendar` | `true` | Feature visibility switch if needed. |
+| `billing_queue_default_range_days` | `7` | Default upcoming queue range. |
+| `billing_queue_show_sms_dates` | `true` | Shows reminder schedule in the queue. |
+| `billing_queue_show_credit_covered` | `true` | Helps finance separate paid/credit-covered accounts. |
+| `billing_queue_allow_bulk_generate` | `true` | Enables selected invoice/snapshot generation. |
+| `billing_queue_allow_bulk_sms` | `false` initially | Safer until duplicate SMS tracking is implemented. |
+| `billing_queue_require_preview_before_bulk_actions` | `true` | Helps prevent accidental billing blasts. |
+
+Recommended fixed system behavior:
+
+- Calendar and queue must use the same billing preview engine.
+- Queue calculations must use effective cutoff dates, not raw day equality.
+- Bulk actions must be idempotent.
+- Fully paid invoices must not receive billing reminders.
+- Exceptions should be visible before bulk actions run.
+
 ## Invoice Generation Workflow
 
 Manual bulk generation:
@@ -183,4 +975,3 @@ Suggested implementation checklist:
 - Decide whether `billing_due_offset_days` should replace or coexist with `due_days`.
 - Add tests for both modes around month boundaries and subscriber overrides.
 - Update settings copy so admins know whether they are choosing a real calculation mode or a compatibility label.
-
