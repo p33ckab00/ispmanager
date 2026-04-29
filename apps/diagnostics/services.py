@@ -125,6 +125,335 @@ def _record_incident_event(incident, event_type, message, payload=None, user=Non
     )
 
 
+def _manual_guide(title, summary, steps=None, commands=None, links=None):
+    return {
+        'title': title,
+        'summary': summary,
+        'steps': steps or [],
+        'commands': commands or [],
+        'links': links or [],
+    }
+
+
+def _self_heal_info(available=False, label='Manual review required', description='', button_label='Resolve'):
+    return {
+        'available': available,
+        'label': label,
+        'description': description,
+        'button_label': button_label,
+    }
+
+
+def _service_name_from_incident(key, payload):
+    service_name = payload.get('service_name') if payload else ''
+    if service_name:
+        return service_name
+    if key.startswith('service.'):
+        parts = key.split('.')
+        if len(parts) >= 3:
+            return parts[1]
+    return ''
+
+
+def get_incident_resolution_context(incident):
+    key = incident.key
+    payload = incident.current_payload_json or {}
+    service_name = _service_name_from_incident(key, payload)
+
+    guides = {
+        'runtime.database.failed': _manual_guide(
+            'Restore database connectivity',
+            'The app cannot trust automation until the database round-trip is healthy.',
+            steps=[
+                'Check PostgreSQL service health on the server.',
+                'Confirm POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, and POSTGRES_PASSWORD in the deployment environment.',
+                'Restart the web and scheduler services after fixing database settings.',
+            ],
+            commands=[
+                'sudo systemctl status postgresql',
+                'sudo journalctl -u postgresql -n 100 --no-pager',
+                'sudo systemctl restart ispmanager-web ispmanager-scheduler',
+            ],
+        ),
+        'runtime.migrations.pending': _manual_guide(
+            'Apply pending Django migrations',
+            'Database schema changes are waiting and should be applied during a maintenance-safe window.',
+            steps=[
+                'Take or confirm a recent database backup.',
+                'Run Django migrations from the application directory.',
+                'Restart the web and scheduler services, then refresh diagnostics.',
+            ],
+            commands=[
+                'cd /opt/ispmanager',
+                'python3 manage.py migrate --noinput',
+                'sudo systemctl restart ispmanager-web ispmanager-scheduler',
+            ],
+        ),
+        'runtime.static_root.missing': _manual_guide(
+            'Create and populate static files',
+            'Static root is missing, so production static assets may not be served correctly.',
+            steps=[
+                'Create the static root directory if it does not exist.',
+                'Run collectstatic so WhiteNoise/Nginx can serve current assets.',
+                'Refresh diagnostics to confirm the path exists.',
+            ],
+            commands=[
+                f'mkdir -p {settings.STATIC_ROOT}',
+                'cd /opt/ispmanager && python3 manage.py collectstatic --noinput',
+            ],
+        ),
+        'scheduler.service.critical': _manual_guide(
+            'Restore scheduler automation',
+            'Automation jobs are not proving that they are running recently.',
+            steps=[
+                'Open Scheduler details and identify missing, stale, or failed jobs.',
+                'If production uses a dedicated scheduler, restart and enable the scheduler service.',
+                'If embedded scheduler mode is used, restart the web service and confirm jobs are registered.',
+            ],
+            commands=[
+                'sudo systemctl status ispmanager-scheduler',
+                'sudo systemctl restart ispmanager-scheduler',
+                'sudo journalctl -u ispmanager-scheduler -n 100 --no-pager',
+            ],
+            links=[{'label': 'Scheduler details', 'href': '/diagnostics/scheduler/'}],
+        ),
+        'scheduler.service.warning': _manual_guide(
+            'Confirm scheduler state',
+            'Jobs are partially healthy, but the scheduler state still needs operator confirmation.',
+            steps=[
+                'Open Scheduler details and review stale or pending jobs.',
+                'Restart the scheduler service if recent interval jobs are missing.',
+                'Refresh diagnostics after one expected interval.',
+            ],
+            commands=[
+                'sudo systemctl status ispmanager-scheduler',
+                'sudo systemctl restart ispmanager-scheduler',
+            ],
+            links=[{'label': 'Scheduler details', 'href': '/diagnostics/scheduler/'}],
+        ),
+        'routers.offline': _manual_guide(
+            'Restore router reachability',
+            'One or more active routers are offline or unreachable from the app server.',
+            steps=[
+                'Open Routers and identify which router is offline.',
+                'Confirm host/IP, API port, username, password, firewall rules, and MikroTik API service.',
+                'Use Ping Router or Sync after credentials/network are fixed.',
+            ],
+            links=[{'label': 'Routers', 'href': '/routers/'}],
+        ),
+        'routers.telemetry.stale': _manual_guide(
+            'Refresh router telemetry',
+            'Interface traffic cache is older than the expected polling window.',
+            steps=[
+                'Confirm router status checks are running in Scheduler details.',
+                'Open each affected router and sync interfaces if needed.',
+                'Check MikroTik API access and polling interval settings.',
+            ],
+            links=[
+                {'label': 'Routers', 'href': '/routers/'},
+                {'label': 'Scheduler details', 'href': '/diagnostics/scheduler/'},
+            ],
+        ),
+        'billing.payments_without_income': _manual_guide(
+            'Sync payment income records',
+            'Some billing payments do not have their mirrored accounting income records.',
+            steps=[
+                'Run the diagnostics self-heal to create missing income records from existing payments.',
+                'Review Accounting income after the sync.',
+                'If mismatches remain, inspect the affected payments before editing ledger data manually.',
+            ],
+            links=[{'label': 'Accounting', 'href': '/accounting/'}],
+        ),
+        'billing.billable_without_rate': _manual_guide(
+            'Assign rates or plans',
+            'Billable active/suspended subscribers need either a monthly rate or a plan before billing can be trusted.',
+            steps=[
+                'Open Subscribers and filter for active or suspended billable accounts.',
+                'Assign a plan or monthly rate to each affected subscriber.',
+                'Refresh diagnostics after saving subscriber billing details.',
+            ],
+            links=[{'label': 'Subscribers', 'href': '/subscribers/'}],
+        ),
+        'billing.draft_snapshots.stale': _manual_guide(
+            'Freeze or review stale drafts',
+            'Draft billing snapshots have waited longer than the configured auto-freeze threshold.',
+            steps=[
+                'Use self-heal if the current Draft mode should auto-freeze eligible snapshots.',
+                'Otherwise open Billing Snapshots, review each stale draft, and freeze or correct it.',
+                'Confirm Billing Settings if draft review should no longer be required.',
+            ],
+            links=[{'label': 'Billing snapshots', 'href': '/billing/snapshots/'}],
+        ),
+        'messaging.sms.failed_today': _manual_guide(
+            'Investigate SMS failures',
+            'SMS delivery failed today. Diagnostics can retry non-OTP failed logs, while OTP/login code failures should be regenerated by the subscriber.',
+            steps=[
+                'Run self-heal to retry failed non-OTP SMS logs from today.',
+                'Confirm Semaphore API key, sender name, phone numbers, and account balance.',
+                'Open SMS logs and manually review any failures that remain after retry.',
+            ],
+            links=[
+                {'label': 'SMS logs', 'href': '/sms/log/'},
+                {'label': 'SMS settings', 'href': '/settings/sms/'},
+            ],
+        ),
+        'messaging.telegram.not_configured_enabled': _manual_guide(
+            'Complete Telegram settings',
+            'Telegram notifications are enabled but cannot send without both bot token and chat ID.',
+            steps=[
+                'Open Telegram settings.',
+                'Set the bot token and target chat ID.',
+                'Keep Enable Telegram Notifications on, save, then send a test Telegram message.',
+            ],
+            links=[
+                {'label': 'Telegram settings', 'href': '/settings/telegram/'},
+                {'label': 'Telegram test', 'href': '/notifications/telegram/test/'},
+            ],
+        ),
+        'messaging.telegram.failed_last_24h': _manual_guide(
+            'Fix Telegram delivery failures',
+            'Failed Telegram notifications can often be retried after credentials or chat access are corrected.',
+            steps=[
+                'Run self-heal to retry failed Telegram notifications from the last 24 hours.',
+                'If retry still fails, open Telegram settings and verify bot token, chat ID, and Enable state.',
+                'Send a Telegram test message and confirm the bot has not been blocked or removed from the chat.',
+            ],
+            links=[
+                {'label': 'Telegram settings', 'href': '/settings/telegram/'},
+                {'label': 'Telegram test', 'href': '/notifications/telegram/test/'},
+                {'label': 'Notifications', 'href': '/notifications/'},
+            ],
+        ),
+        'usage.samples.stale_or_missing': _manual_guide(
+            'Restore subscriber usage telemetry',
+            'Active or suspended subscribers do not have fresh usage or PPP telemetry samples.',
+            steps=[
+                'Confirm routers are online and PPP active sessions are visible to MikroTik API.',
+                'Check Scheduler details for the Sample Subscriber Usage job.',
+                'Run self-heal to trigger one sampling pass, then refresh after the configured interval.',
+            ],
+            links=[
+                {'label': 'Scheduler details', 'href': '/diagnostics/scheduler/'},
+                {'label': 'Usage settings', 'href': '/settings/usage/'},
+            ],
+        ),
+        'data_exchange.failed_recently': _manual_guide(
+            'Review failed import/export jobs',
+            'Recent data exchange jobs failed and may need corrected input or mapping.',
+            steps=[
+                'Open Data Exchange and inspect the latest failed job details.',
+                'Correct the source file, field mapping, or duplicate data issue.',
+                'Run a dry run before applying another import/export.',
+            ],
+            links=[{'label': 'Data Exchange', 'href': '/data-exchange/'}],
+        ),
+    }
+
+    guide = guides.get(key)
+    if not guide and service_name:
+        guide = _manual_guide(
+            f'Restore {service_name} service',
+            'A Linux service needed by production is missing, inactive, failed, or not enabled at boot.',
+            steps=[
+                'Check the service status and recent logs.',
+                'Start or restart the service after fixing the underlying error.',
+                'Enable the service at boot if it should survive server restarts.',
+            ],
+            commands=[
+                f'sudo systemctl status {service_name}',
+                f'sudo journalctl -u {service_name} -n 100 --no-pager',
+                f'sudo systemctl restart {service_name}',
+                f'sudo systemctl enable {service_name}',
+            ],
+        )
+    if not guide:
+        guide = _manual_guide(
+            'Review this diagnostics issue',
+            'Diagnostics can track this condition, but no issue-specific manual guide has been defined yet.',
+            steps=[
+                'Read the incident detail and payload context.',
+                'Open the related module from the sidebar.',
+                'Resolve the root cause, then refresh diagnostics.',
+            ],
+        )
+
+    self_heal_map = {
+        'runtime.static_root.missing': _self_heal_info(
+            True,
+            'Create missing static root directory',
+            'Creates the configured STATIC_ROOT directory so the missing-path alert can clear.',
+            'Run Self-Heal',
+        ),
+        'scheduler.service.critical': _self_heal_info(
+            True,
+            'Restart or start scheduler automation',
+            'Starts the embedded scheduler in web mode, or restarts the dedicated scheduler service when configured.',
+            'Run Self-Heal',
+        ),
+        'scheduler.service.warning': _self_heal_info(
+            True,
+            'Refresh scheduler automation',
+            'Attempts to start embedded scheduler mode or restart the dedicated scheduler service.',
+            'Run Self-Heal',
+        ),
+        'routers.offline': _self_heal_info(
+            True,
+            'Re-check router reachability',
+            'Runs the router status check now so recovered routers can be marked online.',
+            'Run Self-Heal',
+        ),
+        'routers.telemetry.stale': _self_heal_info(
+            True,
+            'Refresh router telemetry',
+            'Runs router status and traffic sampling once.',
+            'Run Self-Heal',
+        ),
+        'billing.payments_without_income': _self_heal_info(
+            True,
+            'Create missing income records',
+            'Mirrors payments without accounting income records into the income ledger.',
+            'Run Self-Heal',
+        ),
+        'billing.draft_snapshots.stale': _self_heal_info(
+            True,
+            'Auto-freeze eligible drafts',
+            'Runs the configured auto-freeze draft snapshot job once.',
+            'Run Self-Heal',
+        ),
+        'messaging.sms.failed_today': _self_heal_info(
+            True,
+            'Retry failed SMS today',
+            'Re-sends failed non-OTP SMS logs from today using the stored phone number and message.',
+            'Run Self-Heal',
+        ),
+        'messaging.telegram.failed_last_24h': _self_heal_info(
+            True,
+            'Retry failed Telegram notifications',
+            'Re-sends failed Telegram notifications from the last 24 hours and updates delivery logs.',
+            'Run Self-Heal',
+        ),
+        'usage.samples.stale_or_missing': _self_heal_info(
+            True,
+            'Run usage sampler once',
+            'Triggers one usage sampling pass for online routers.',
+            'Run Self-Heal',
+        ),
+    }
+    self_heal = self_heal_map.get(key, _self_heal_info())
+    if service_name and not self_heal['available']:
+        self_heal = _self_heal_info(
+            True,
+            f'Restart {service_name}',
+            'Uses systemctl to reset failed state, start the service, and enable it when safe.',
+            'Run Self-Heal',
+        )
+
+    return {
+        'manual_guide': guide,
+        'self_heal': self_heal,
+    }
+
+
 def _service_definitions():
     return [
         {'service_name': 'postgresql', 'display_name': 'PostgreSQL', 'optional': False},
@@ -769,8 +1098,8 @@ def _get_messaging_health(now):
                 status='failed',
                 created_at__gte=now - timedelta(hours=24),
             ).count(),
-            'recent_failed': Notification.objects.filter(status='failed').order_by('-created_at')[:5],
-            'pending_total': Notification.objects.filter(status='pending').count(),
+            'recent_failed': Notification.objects.filter(channel='telegram', status='failed').order_by('-created_at')[:5],
+            'pending_total': Notification.objects.filter(channel='telegram', status='pending').count(),
         },
     }
 
@@ -954,12 +1283,22 @@ def _build_alerts(snapshot):
             f"{messaging['sms']['today_failed']} SMS message(s) failed today.",
             source='messaging',
         ))
+    if messaging['telegram']['enabled'] and not messaging['telegram']['configured']:
+        alerts.append(_make_alert(
+            'messaging.telegram.not_configured_enabled',
+            'warning',
+            'Telegram is enabled but not configured',
+            'Telegram notifications are enabled, but bot token or chat ID is missing.',
+            href='/settings/telegram/',
+            source='messaging',
+        ))
     if messaging['telegram']['failed_last_24h'] > 0:
         alerts.append(_make_alert(
             'messaging.telegram.failed_last_24h',
             'warning',
             'Telegram delivery failures detected',
             f"{messaging['telegram']['failed_last_24h']} Telegram notification(s) failed in the last 24 hours.",
+            href='/notifications/',
             source='messaging',
         ))
     if usage['enabled'] and usage['stale_or_missing_count'] > 0:
@@ -1074,6 +1413,274 @@ def _sync_incidents(alerts, user=None):
         _record_incident_event(incident, 'resolved', incident.resolution_note, payload=incident.current_payload_json, user=user)
 
 
+def _self_heal_result(attempted, success, message, details=None):
+    return {
+        'attempted': attempted,
+        'success': success,
+        'message': message,
+        'details': details or [],
+    }
+
+
+def _heal_static_root():
+    try:
+        os.makedirs(settings.STATIC_ROOT, exist_ok=True)
+    except Exception as exc:
+        return _self_heal_result(True, False, f'Could not create STATIC_ROOT: {exc}')
+
+    if os.path.exists(settings.STATIC_ROOT):
+        return _self_heal_result(True, True, f'Created or confirmed STATIC_ROOT at {settings.STATIC_ROOT}.')
+    return _self_heal_result(True, False, f'STATIC_ROOT still does not exist at {settings.STATIC_ROOT}.')
+
+
+def _heal_scheduler_service():
+    if os.environ.get('DISABLE_SCHEDULER') == '1':
+        if platform.system() != 'Linux' or not shutil.which('systemctl'):
+            return _self_heal_result(
+                True,
+                False,
+                'Dedicated scheduler mode is enabled, but systemctl is not available to restart it.',
+            )
+        commands = [
+            ['systemctl', 'reset-failed', 'ispmanager-scheduler'],
+            ['systemctl', 'restart', 'ispmanager-scheduler'],
+            ['systemctl', 'enable', 'ispmanager-scheduler'],
+        ]
+        details = []
+        success = True
+        for command in commands:
+            result = _run_command(command, timeout=12)
+            output = (result.stderr or result.stdout or '').strip()
+            details.append(f"{' '.join(command)} -> exit {result.returncode}{': ' + output if output else ''}")
+            if result.returncode != 0:
+                success = False
+        message = (
+            'Dedicated scheduler service restart was requested.'
+            if success else
+            'Could not restart the dedicated scheduler service from the web process.'
+        )
+        return _self_heal_result(True, success, message, details)
+
+    try:
+        from apps.core.scheduler import start_scheduler
+        start_scheduler()
+    except Exception as exc:
+        return _self_heal_result(True, False, f'Could not start embedded scheduler: {exc}')
+    return _self_heal_result(True, True, 'Embedded scheduler start was requested in this web process.')
+
+
+def _heal_router_status():
+    try:
+        from apps.core.scheduler import job_sync_router_status
+        job_sync_router_status()
+    except Exception as exc:
+        return _self_heal_result(True, False, f'Router status check failed: {exc}')
+    return _self_heal_result(True, True, 'Router reachability check ran once.')
+
+
+def _heal_router_telemetry():
+    try:
+        from apps.core.scheduler import job_sync_router_status, job_sample_router_traffic
+        job_sync_router_status()
+        job_sample_router_traffic()
+    except Exception as exc:
+        return _self_heal_result(True, False, f'Router telemetry refresh failed: {exc}')
+    return _self_heal_result(True, True, 'Router status and traffic sampling ran once.')
+
+
+def _heal_payment_income_records():
+    try:
+        from apps.accounting.services import sync_payments_to_income
+        synced = sync_payments_to_income()
+    except Exception as exc:
+        return _self_heal_result(True, False, f'Payment income sync failed: {exc}')
+    return _self_heal_result(True, True, f'Created {synced} missing accounting income record(s).')
+
+
+def _heal_stale_draft_snapshots():
+    try:
+        from apps.core.scheduler import job_auto_freeze_drafts
+        job_auto_freeze_drafts()
+    except Exception as exc:
+        return _self_heal_result(True, False, f'Auto-freeze job failed: {exc}')
+    return _self_heal_result(True, True, 'Auto-freeze draft snapshot job ran once.')
+
+
+def _heal_sms_failures():
+    sms_settings = SMSSettings.get_settings()
+    if not sms_settings.semaphore_api_key:
+        return _self_heal_result(
+            True,
+            False,
+            'Semaphore API key is missing. Complete SMS settings before retrying failed messages.',
+        )
+
+    from apps.sms.semaphore import send_sms
+
+    today = timezone.localdate()
+    failed_logs = list(SMSLog.objects.filter(
+        created_at__date=today,
+        status='failed',
+    ).exclude(sms_type='otp').order_by('created_at'))
+
+    if not failed_logs:
+        return _self_heal_result(True, True, 'No retryable failed SMS logs remain today.')
+
+    sent = 0
+    failed = 0
+    details = []
+    for log in failed_logs:
+        try:
+            send_sms(log.phone, log.message)
+            sent += 1
+            log.status = 'sent'
+            log.error_message = ''
+        except Exception as exc:
+            failed += 1
+            log.status = 'failed'
+            log.error_message = str(exc)
+            if len(details) < 5:
+                details.append(f'{log.phone}: {log.error_message}')
+        log.sent_by = f'{log.sent_by}, diagnostics_retry'[:100]
+        log.save(update_fields=['status', 'error_message', 'sent_by'])
+
+    success = failed == 0
+    message = f'Retried {len(failed_logs)} SMS log(s): {sent} sent, {failed} still failed.'
+    return _self_heal_result(True, success, message, details)
+
+
+def _heal_usage_samples():
+    try:
+        from apps.core.scheduler import job_sample_usage
+        job_sample_usage()
+    except Exception as exc:
+        return _self_heal_result(True, False, f'Usage sampler failed: {exc}')
+    return _self_heal_result(True, True, 'Usage sampler ran once for online routers.')
+
+
+def _heal_telegram_failures():
+    telegram_settings = TelegramSettings.get_settings()
+    if not telegram_settings.enable_notifications:
+        return _self_heal_result(
+            True,
+            False,
+            'Telegram notifications are disabled. Enable them in Telegram settings before retrying failed deliveries.',
+        )
+    if not telegram_settings.bot_token or not telegram_settings.chat_id:
+        return _self_heal_result(
+            True,
+            False,
+            'Telegram bot token or chat ID is missing. Complete Telegram settings before retrying failed deliveries.',
+        )
+
+    from apps.notifications.telegram import send_telegram
+
+    now = timezone.now()
+    failed_notifications = list(Notification.objects.filter(
+        channel='telegram',
+        status='failed',
+        created_at__gte=now - timedelta(hours=24),
+    ).order_by('created_at'))
+
+    if not failed_notifications:
+        return _self_heal_result(True, True, 'No failed Telegram notifications remain in the last 24 hours.')
+
+    sent = 0
+    failed = 0
+    details = []
+    for notification in failed_notifications:
+        full_message = f"<b>{notification.title}</b>\n{notification.message}"
+        ok, err = send_telegram(full_message)
+        notification.retry_count = (notification.retry_count or 0) + 1
+        notification.last_attempt_at = timezone.now()
+        if ok:
+            sent += 1
+            notification.status = 'sent'
+            notification.error = ''
+            notification.delivery_state = 'delivered'
+            notification.telegram_sent = True
+        else:
+            failed += 1
+            notification.status = 'failed'
+            notification.error = err or 'Telegram retry failed.'
+            notification.delivery_state = 'failed'
+            notification.telegram_sent = False
+            if len(details) < 5:
+                details.append(f'{notification.title}: {notification.error}')
+        notification.save(update_fields=[
+            'status', 'error', 'retry_count', 'last_attempt_at',
+            'delivery_state', 'telegram_sent',
+        ])
+
+    success = failed == 0
+    message = f'Retried {len(failed_notifications)} Telegram notification(s): {sent} sent, {failed} still failed.'
+    return _self_heal_result(True, success, message, details)
+
+
+def _heal_linux_service(incident):
+    service_name = _service_name_from_incident(incident.key, incident.current_payload_json or {})
+    allowed_services = {definition['service_name'] for definition in _service_definitions()}
+    if service_name not in allowed_services:
+        return _self_heal_result(False, False, 'No automatic service repair is available for this incident.')
+    if platform.system() != 'Linux' or not shutil.which('systemctl'):
+        return _self_heal_result(True, False, 'systemctl is not available on this host.')
+
+    snapshot = DiagnosticsServiceSnapshot.objects.filter(service_name=service_name).first()
+    if snapshot and not snapshot.is_present:
+        return _self_heal_result(
+            True,
+            False,
+            f'{service_name} service unit is not installed on this host.',
+        )
+
+    commands = [['systemctl', 'reset-failed', service_name]]
+    if not snapshot or not snapshot.is_active or snapshot.status == 'critical':
+        commands.append(['systemctl', 'start', service_name])
+    if not snapshot or not snapshot.is_enabled:
+        commands.append(['systemctl', 'enable', service_name])
+
+    details = []
+    success = True
+    for command in commands:
+        result = _run_command(command, timeout=12)
+        output = (result.stderr or result.stdout or '').strip()
+        details.append(f"{' '.join(command)} -> exit {result.returncode}{': ' + output if output else ''}")
+        if result.returncode != 0:
+            success = False
+
+    message = (
+        f'{service_name} service repair commands completed.'
+        if success else
+        f'{service_name} service repair commands did not all succeed.'
+    )
+    return _self_heal_result(True, success, message, details)
+
+
+def _attempt_incident_self_heal(incident):
+    key = incident.key
+    if key == 'runtime.static_root.missing':
+        return _heal_static_root()
+    if key in {'scheduler.service.critical', 'scheduler.service.warning'}:
+        return _heal_scheduler_service()
+    if key == 'routers.offline':
+        return _heal_router_status()
+    if key == 'routers.telemetry.stale':
+        return _heal_router_telemetry()
+    if key == 'billing.payments_without_income':
+        return _heal_payment_income_records()
+    if key == 'billing.draft_snapshots.stale':
+        return _heal_stale_draft_snapshots()
+    if key == 'messaging.sms.failed_today':
+        return _heal_sms_failures()
+    if key == 'messaging.telegram.failed_last_24h':
+        return _heal_telegram_failures()
+    if key == 'usage.samples.stale_or_missing':
+        return _heal_usage_samples()
+    if key.startswith('service.'):
+        return _heal_linux_service(incident)
+    return _self_heal_result(False, False, 'No automatic self-heal action is available for this incident.')
+
+
 def acknowledge_incident(incident, user=None):
     if incident.status == 'resolved':
         return incident
@@ -1085,13 +1692,88 @@ def acknowledge_incident(incident, user=None):
     return incident
 
 
-def resolve_incident(incident, user=None, resolution_note='Resolved by operator.'):
+def resolve_incident(incident, user=None, resolution_note='Resolved by operator.', attempt_self_heal=True):
+    if attempt_self_heal:
+        try:
+            self_heal = _attempt_incident_self_heal(incident)
+        except Exception as exc:
+            self_heal = _self_heal_result(True, False, f'Self-heal failed unexpectedly: {exc}')
+        if self_heal['attempted']:
+            _record_incident_event(
+                incident,
+                'updated',
+                f"Self-heal attempted: {self_heal['message']}",
+                payload={'self_heal': self_heal, 'incident_payload': incident.current_payload_json},
+                user=user,
+            )
+            try:
+                snapshot = build_diagnostics_snapshot(
+                    sync_incidents=True,
+                    user=user,
+                    incident_status=incident.status,
+                    force_service_probe=True,
+                )
+            except Exception as exc:
+                _record_incident_event(
+                    incident,
+                    'updated',
+                    f"Self-heal verification failed: {exc}",
+                    payload={'self_heal': self_heal, 'incident_payload': incident.current_payload_json},
+                    user=user,
+                )
+                return {
+                    'incident': incident,
+                    'resolved': False,
+                    'self_heal': self_heal,
+                    'message': f"Self-heal ran, but diagnostics could not verify the result: {exc}",
+                }
+            active_keys = {alert['key'] for alert in snapshot['alerts']}
+            incident.refresh_from_db()
+
+            if incident.key not in active_keys:
+                final_note = resolution_note
+                if not final_note or final_note == 'Resolved by operator.':
+                    final_note = f"Self-heal completed. {self_heal['message']}"
+                if incident.status != 'resolved' or incident.resolution_note != final_note:
+                    incident.status = 'resolved'
+                    incident.resolved_at = timezone.now()
+                    incident.resolution_note = final_note
+                    incident.save(update_fields=['status', 'resolved_at', 'resolution_note', 'updated_at'])
+                    _record_incident_event(
+                        incident,
+                        'resolved',
+                        final_note,
+                        payload=incident.current_payload_json,
+                        user=user,
+                    )
+                return {
+                    'incident': incident,
+                    'resolved': True,
+                    'self_heal': self_heal,
+                    'message': f"Self-heal cleared the incident. {self_heal['message']}",
+                }
+
+            return {
+                'incident': incident,
+                'resolved': False,
+                'self_heal': self_heal,
+                'message': (
+                    'Self-heal ran, but diagnostics still sees the issue. '
+                    f"{self_heal['message']}"
+                ),
+            }
+
     incident.status = 'resolved'
     incident.resolved_at = timezone.now()
     incident.resolution_note = resolution_note
     incident.save(update_fields=['status', 'resolved_at', 'resolution_note', 'updated_at'])
     _record_incident_event(incident, 'manually_resolved', resolution_note, payload=incident.current_payload_json, user=user)
-    return incident
+    return {
+        'incident': incident,
+        'resolved': True,
+        'self_heal': _self_heal_result(False, False, 'Resolved manually by operator.'),
+        'message': 'Incident was marked resolved manually. Diagnostics will reopen it if the condition returns.',
+    }
 
 
 def _get_incident_health(filter_status='active'):
@@ -1107,12 +1789,15 @@ def _get_incident_health(filter_status='active'):
     )[:20]
     rows = []
     for incident in incident_rows:
+        resolution_context = get_incident_resolution_context(incident)
         rows.append({
             'incident': incident,
             'severity_classes': _badge_classes(incident.severity),
             'status_classes': _badge_classes(incident.status if incident.status != 'active' else 'critical'),
             'can_acknowledge': incident.status == 'active',
             'can_resolve': incident.status in {'active', 'acknowledged'},
+            'manual_guide': resolution_context['manual_guide'],
+            'self_heal': resolution_context['self_heal'],
         })
 
     event_rows = []

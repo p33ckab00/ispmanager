@@ -125,8 +125,11 @@ def resolve_incident_view(request, pk):
     if incident.status == 'resolved':
         messages.info(request, 'This incident is already resolved.')
     else:
-        resolve_incident(incident, user=request.user, resolution_note=resolution_note)
-        messages.success(request, f"Incident resolved: {incident.title}")
+        result = resolve_incident(incident, user=request.user, resolution_note=resolution_note)
+        if result['resolved']:
+            messages.success(request, f"{result['message']} ({incident.title})")
+        else:
+            messages.warning(request, f"{result['message']} Manual guide is shown on the incident card.")
     filter_key = request.POST.get('incident_filter', 'active')
     return redirect(f"/diagnostics/?incidents={filter_key}")
 
