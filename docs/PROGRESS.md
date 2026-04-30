@@ -56,7 +56,10 @@ physical spans and port wiring, topology-link wiring visibility,
 telemetry-aware running dash lines, and billing-health rings on client markers.
 Active fiber spans and edited/focused subscriber path vertices now animate with
 running dash styling, while online client dots and billing attention rings have
-subtle marker animation.
+subtle marker animation. The topology guide now explicitly treats topology
+links as physical span truth and premium paths as computed service renderings
+over topology links, endpoint wiring, subscriber drops, telemetry, and billing
+state.
 
 ---
 

@@ -143,6 +143,81 @@ The map should not become a separate source of truth. Dragged/clicked/manual
 vertices update the underlying span or subscriber drop geometry; the rendered
 lines and marker styles are then recalculated.
 
+### Topology Links vs Premium Paths
+
+This is a locked conceptual rule:
+
+`TopologyLink` is physical truth. A premium path is a computed service view.
+
+They must not become two competing sources of map geometry.
+
+Use these definitions when designing or reviewing NMS changes:
+
+- `TopologyLink` represents one physical span between two field locations or
+  nodes. It owns shared route geometry, cable type, fiber/cable inventory,
+  installation notes, span status, and editable vertices.
+- `TopologyLinkVertex` stores the ordered map points for that physical span.
+- `EndpointConnection` represents exact upstream-to-downstream port wiring. It
+  answers which port feeds which port. When that wiring crosses between
+  physical nodes, it should reference the `TopologyLink` and optional
+  `CableCore` used by the field cable.
+- `ServiceAttachment` represents the subscriber's NMS assignment to the final
+  access node or endpoint. It may own only the final subscriber drop geometry
+  when custom drop vertices are needed.
+- "Premium path" is a UI/service-path term. It is the ordered route computed
+  from topology links, endpoint connections, subscriber drop geometry,
+  subscriber coordinates, telemetry, and billing state.
+
+A premium path is therefore not "under" exactly one topology link. In the real
+network, one subscriber route can traverse several shared physical spans before
+the final drop.
+
+Example:
+
+`Router ether7 -> TopologyLink Router to NAP 1 -> NAP 1 input -> FBT IN -> FBT 90 output -> TopologyLink NAP 1 to NAP 2 -> NAP 2 input -> PLC IN -> PLC OUT3 -> subscriber drop -> client`
+
+In that example, the premium path uses multiple physical topology links plus
+internal endpoint wiring. The map can render it as one highlighted animated
+route, but storage should remain split by real-world responsibility.
+
+Operational rules:
+
+- Edit shared feeder, distribution, and NAP-to-NAP geometry on
+  `TopologyLink`.
+- Edit only the final subscriber drop branch on `ServiceAttachment` when the
+  subscriber needs custom drop vertices.
+- Recompute focused subscriber premium paths from the endpoint graph and
+  topology link vertices instead of saving a duplicate upstream geometry.
+- Create a topology link whenever there is a real physical span between
+  locations or nodes.
+- Create an endpoint connection whenever an operator needs to express
+  port-to-port wiring.
+- For same-node internal wiring, such as FBT input to FBT output or PLC input
+  to PLC output, use endpoint connections without forcing extra map lines.
+- For cross-node wiring, attach the endpoint connection to the physical
+  topology link and cable core it uses.
+- For direct router ethernet subscribers, the clean model is
+  `RouterInterface endpoint -> ServiceAttachment -> subscriber`; if the direct
+  cable route must be inventoried, model that physical cable as a topology link
+  or tracked drop span rather than hiding it in a separate premium-path object.
+
+Anti-patterns to avoid:
+
+- storing a second upstream vertex list on every subscriber just to draw a
+  premium-looking path
+- editing a premium path in a way that diverges from the topology link it is
+  visually following
+- treating one premium path as the parent of a topology link
+- treating one topology link as the only possible parent of a full subscriber
+  route
+- interpreting passive fiber dash animation as actual optical telemetry when
+  no optical measurement exists
+
+The UI should make this feel simple for operators: edit a physical link when
+the field cable route changes, edit the subscriber drop when the final customer
+branch changes, and let the premium highlighted path follow the modeled
+network.
+
 ## Real-World Field Workflow
 
 The implementation should follow how field work is normally done: source,

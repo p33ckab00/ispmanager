@@ -60,6 +60,9 @@ The first implementation of that slice now covers:
   IN/output ports, router ports, and subscriber drops
 - separation between physical span truth (`TopologyLink`, `Cable`, `CableCore`)
   and port wiring truth (endpoint connections)
+- explicit documentation that premium paths are computed service renderings over
+  topology links, endpoint wiring, subscriber drops, telemetry, and billing
+  state, not separate physical-link truth
 - endpoint-required subscriber assignments for new clean mappings
 - legacy node-only mappings preserved as `Needs Review`
 - shared NAP-to-NAP-to-client paths on the map
