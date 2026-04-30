@@ -36,8 +36,32 @@ The codebase now includes the current Premium NMS migration set:
 - `apps/nms/migrations/0006_internaldevice_auto_generate_fbt_outputs_and_more.py`
 - `apps/nms/migrations/0007_cablecoreassignment.py`
 - `apps/nms/migrations/0008_gpstrace_gpstracepoint.py`
+- `apps/nms/migrations/0009_expand_fbt_ratio_choices.py`
+- `apps/nms/migrations/0010_serviceattachmentvertex.py`
 
 For production rollout, the database migrations must be applied and the running web service must be reloaded so the live process picks up the current NMS model layer.
+
+### Known Remaining Gap: Port-Accurate Flow Mapping
+
+The current implementation has enough inventory to model routers, NAP nodes,
+internal devices, FBT ratios, PLC ports, cables, cores, GPS traces, topology
+links, and subscriber drop geometry. The next gap is the physical flow between
+exact inputs and outputs.
+
+The next planned slice is documented in [Premium NMS Port-Accurate Mapping Plan](46_premium_nms_port_accurate_mapping_plan.md).
+
+That slice covers:
+
+- router-origin NMS nodes for routers that already have coordinates
+- physical router ethernet ports as assignable endpoints
+- explicit endpoint-to-endpoint links for NAP inputs, FBT IN/output ports, PLC
+  IN/output ports, router ports, and subscriber drops
+- endpoint-required subscriber assignments for new clean mappings
+- legacy node-only mappings preserved as `Needs Review`
+- shared NAP-to-NAP-to-client paths on the map
+- telemetry-aware running dash lines
+- subscriber marker solid-dot online/offline state
+- subscriber marker billing-health rings
 
 ## Phase 1 Status: Implemented in Code
 
@@ -373,7 +397,7 @@ The cleanest next sequence is:
 
 1. Validate the Phase 4C, Phase 5, and Phase 6 flows in the browser using real fiber links, distribution nodes, subscriber mappings, and GPS trace data.
 2. Restart or reload the running web service so production picks up the latest NMS code.
-3. Commit and push the current Premium NMS code changes.
+3. Implement the port-accurate mapping slice documented in [Premium NMS Port-Accurate Mapping Plan](46_premium_nms_port_accurate_mapping_plan.md).
 4. Continue future refinements around richer optical path semantics and deeper field reporting.
 
 ## Practical Interpretation
