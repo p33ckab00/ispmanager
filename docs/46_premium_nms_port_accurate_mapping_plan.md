@@ -21,6 +21,12 @@ This plan keeps the current Subscriber module behavior intact. Subscribers stay
 the account and billing source of truth. Premium NMS becomes the physical
 network truth.
 
+For operator usage, see the atomic step-by-step guide in
+[Premium NMS Atomic User Manual](47_premium_nms_atomic_user_manual.md). That
+manual covers router sync, coordinate updates, router-root sync, nodes,
+topology links, distribution internals, endpoint wiring, subscriber mapping,
+cable core assignment, map verification, operations validation, and analytics.
+
 ## Implementation Status
 
 The first port-accurate implementation slice is now in code.

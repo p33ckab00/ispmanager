@@ -59,7 +59,10 @@ running dash styling, while online client dots and billing attention rings have
 subtle marker animation. The topology guide now explicitly treats topology
 links as physical span truth and premium paths as computed service renderings
 over topology links, endpoint wiring, subscriber drops, telemetry, and billing
-state.
+state. A detailed operator manual now documents the atomic Premium NMS workflow
+from router sync and coordinate updates through node/link inventory,
+distribution internals, endpoint wiring, subscriber mapping, cable core
+assignment, map verification, operations validation, and analytics.
 
 ---
 
