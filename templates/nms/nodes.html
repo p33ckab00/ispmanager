@@ -69,6 +69,10 @@
                   <a href="{% url 'nms-nodes' %}?node={{ node.pk }}" class="font-medium text-blue-600 hover:underline">Edit</a>
                   <a href="{% url 'nms-map' %}" class="font-medium text-gray-600 hover:underline">Map</a>
                   <a href="{% url 'nms-distribution-detail' node.pk %}" class="font-medium text-blue-600 hover:underline">Distribution</a>
+                  <form method="post" action="{% url 'nms-delete-node' node.pk %}" onsubmit="return confirm('Delete this node and NMS data under it? Routers and subscriber accounts will be kept.');">
+                    {% csrf_token %}
+                    <button type="submit" class="font-medium text-red-600 hover:underline">Delete</button>
+                  </form>
                 </div>
               </td>
             </tr>
@@ -149,9 +153,56 @@
           <a href="{% url 'nms-nodes' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
             Cancel Edit
           </a>
+          <form method="post" action="{% url 'nms-delete-node' selected_node.pk %}" onsubmit="return confirm('Delete this node and NMS data under it? Routers and subscriber accounts will be kept.');">
+            {% csrf_token %}
+            <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-red-50 hover:bg-red-100 text-red-700 text-sm font-semibold px-4 py-2 transition">
+              Delete Node
+            </button>
+          </form>
           {% endif %}
         </div>
       </form>
+
+      {% if selected_node and delete_impact %}
+      <div class="mt-5 rounded-xl border border-red-100 bg-red-50 px-4 py-4">
+        <h4 class="text-sm font-semibold text-red-900">Delete Impact</h4>
+        <p class="text-xs text-red-700 mt-1">Deleting this node removes only NMS data under it. Router, subscriber, billing, and account records are preserved.</p>
+        <dl class="mt-3 grid grid-cols-2 gap-3 text-xs">
+          <div>
+            <dt class="text-red-500">Mappings</dt>
+            <dd class="font-semibold text-red-900">{{ delete_impact.service_attachment_count }}</dd>
+          </div>
+          <div>
+            <dt class="text-red-500">Subscriber refs</dt>
+            <dd class="font-semibold text-red-900">{{ delete_impact.subscriber_node_count }}</dd>
+          </div>
+          <div>
+            <dt class="text-red-500">Internal devices</dt>
+            <dd class="font-semibold text-red-900">{{ delete_impact.internal_device_count }}</dd>
+          </div>
+          <div>
+            <dt class="text-red-500">Endpoints</dt>
+            <dd class="font-semibold text-red-900">{{ delete_impact.endpoint_count }}</dd>
+          </div>
+          <div>
+            <dt class="text-red-500">Topology links</dt>
+            <dd class="font-semibold text-red-900">{{ delete_impact.topology_link_count }}</dd>
+          </div>
+          <div>
+            <dt class="text-red-500">Cables</dt>
+            <dd class="font-semibold text-red-900">{{ delete_impact.cable_count }}</dd>
+          </div>
+          <div>
+            <dt class="text-red-500">Cable cores</dt>
+            <dd class="font-semibold text-red-900">{{ delete_impact.cable_core_count }}</dd>
+          </div>
+          <div>
+            <dt class="text-red-500">Core assignments</dt>
+            <dd class="font-semibold text-red-900">{{ delete_impact.core_assignment_count }}</dd>
+          </div>
+        </dl>
+      </div>
+      {% endif %}
     </aside>
   </div>
 </div>

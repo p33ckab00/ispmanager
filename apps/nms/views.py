@@ -2,6 +2,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.contrib import messages
+from django.db import transaction
 from django.db.models import Q
 from django.urls import reverse
 from django.views.decorators.http import require_POST
@@ -9,28 +10,49 @@ from apps.routers.models import Router
 from apps.subscribers.models import Subscriber, NetworkNode
 from apps.core.models import AuditLog
 from apps.nms.forms import (
+    CableCoreAssignmentForm,
     EndpointForm,
+    GpsTraceImportForm,
     InternalDeviceForm,
     NetworkNodeForm,
     ServiceAttachmentForm,
+    ServiceAttachmentGeometryForm,
     TopologyLinkForm,
     TopologyLinkGeometryForm,
 )
-from apps.nms.models import Endpoint, InternalDevice, ServiceAttachment, TopologyLink
+from apps.nms.models import CableCoreAssignment, GpsTrace, Endpoint, InternalDevice, ServiceAttachment, TopologyLink
 from apps.nms.services import (
+    apply_core_assignment,
+    build_nms_validation_report,
+    delete_node_with_descendants,
     ensure_fbt_endpoints,
     ensure_plc_endpoints,
+    get_attachment_core_assignments,
     get_attachment_review_flags,
     get_basic_node_assignment,
+    get_cable_utilization_report,
+    get_gps_trace_distance_km,
+    get_node_delete_impact,
+    get_outage_impact,
+    get_power_budget_report,
     has_cable_tables,
+    has_core_assignment_tables,
+    get_topology_route_report,
     get_service_attachment,
     get_subscriber_topology_summary,
     has_distribution_tables,
+    has_gps_trace_tables,
     has_service_attachment_table,
+    has_service_attachment_geometry_tables,
     has_topology_link_tables,
     refresh_attachment_review_state,
+    refresh_all_attachment_review_states,
+    release_core_assignment,
     serialize_network_node,
+    serialize_service_attachment,
     serialize_topology_link,
+    sync_all_core_assignment_statuses,
+    sync_all_endpoint_statuses,
     sync_basic_node_summary,
     sync_endpoint_status,
 )
@@ -53,7 +75,9 @@ def nms_map(request):
         'focus_subscriber': focus_subscriber,
         'cable_ready': has_cable_tables(),
         'service_attachment_ready': has_service_attachment_table(),
+        'service_attachment_geometry_ready': has_service_attachment_geometry_tables(),
         'topology_links_ready': has_topology_link_tables(),
+        'gps_trace_ready': has_gps_trace_tables(),
         'node_type_options': [{'value': value, 'label': label} for value, label in NetworkNode.TYPE_CHOICES],
         'router_options': list(
             Router.objects.filter(is_active=True).order_by('name').values('id', 'name')
@@ -65,9 +89,11 @@ def nms_map(request):
 def nms_map_data(request):
     focus_subscriber_id = request.GET.get('subscriber')
     service_attachment_ready = has_service_attachment_table()
+    service_attachment_geometry_ready = has_service_attachment_geometry_tables()
     topology_links_ready = has_topology_link_tables()
     distribution_ready = has_distribution_tables()
     cable_ready = has_cable_tables()
+    gps_trace_ready = has_gps_trace_tables()
     routers = Router.objects.filter(
         is_active=True,
         latitude__isnull=False,
@@ -108,6 +134,8 @@ def nms_map_data(request):
                 endpoint__internal_device__parent_node__longitude__isnull=False,
             )
         )
+        if service_attachment_geometry_ready:
+            attachments = attachments.prefetch_related('vertices')
     topology_links = []
     if topology_links_ready:
         topology_links = TopologyLink.objects.select_related(
@@ -196,21 +224,10 @@ def nms_map_data(request):
         mapped_node = attachment.node or (attachment.endpoint.root_node if attachment.endpoint_id else None)
         if mapped_node is None:
             continue
-        attachment_list.append({
-            'subscriber_id': attachment.subscriber_id,
-            'subscriber_name': attachment.subscriber.display_name,
-            'subscriber_username': attachment.subscriber.username,
-            'subscriber_detail_url': reverse('subscriber-detail', args=[attachment.subscriber_id]),
-            'workspace_url': reverse('nms-subscriber-workspace', args=[attachment.subscriber_id]),
-            'node_id': mapped_node.pk,
-            'node_name': mapped_node.name,
-            'status': attachment.status,
-            'endpoint_label': attachment.resolved_endpoint_label,
-            'subscriber_lat': attachment.subscriber.latitude,
-            'subscriber_lng': attachment.subscriber.longitude,
-            'node_lat': mapped_node.latitude,
-            'node_lng': mapped_node.longitude,
-        })
+        serialized_attachment = serialize_service_attachment(attachment)
+        if len(serialized_attachment['points']) < 2:
+            continue
+        attachment_list.append(serialized_attachment)
 
     link_list = []
     for topology_link in topology_links:
@@ -222,18 +239,178 @@ def nms_map_data(request):
             continue
         link_list.append(serialized_link)
 
+    gps_trace_list = []
+    if gps_trace_ready:
+        for trace in GpsTrace.objects.prefetch_related('points')[:25]:
+            points = [
+                [point.latitude, point.longitude]
+                for point in trace.points.all()
+            ]
+            if len(points) < 2:
+                continue
+            gps_trace_list.append({
+                'id': trace.id,
+                'name': trace.name,
+                'trace_type': trace.trace_type,
+                'trace_type_label': trace.get_trace_type_display(),
+                'source_label': trace.source_label or '',
+                'point_count': len(points),
+                'distance_km': round(get_gps_trace_distance_km(trace), 3),
+                'points': points,
+                'analytics_url': reverse('nms-analytics'),
+            })
+
     return JsonResponse({
         'routers': router_list,
         'subscribers': sub_list,
         'nodes': node_list,
         'attachments': attachment_list,
         'links': link_list,
+        'gps_traces': gps_trace_list,
         'service_attachment_ready': service_attachment_ready,
+        'service_attachment_geometry_ready': service_attachment_geometry_ready,
         'topology_links_ready': topology_links_ready,
         'distribution_ready': distribution_ready,
         'cable_ready': cable_ready,
+        'gps_trace_ready': gps_trace_ready,
         'focus_node_id': focus_node_id,
         'focus_subscriber_id': int(focus_subscriber_id) if focus_subscriber_id and focus_subscriber_id.isdigit() else None,
+    })
+
+
+@login_required
+def nms_operations(request):
+    if request.method == 'POST':
+        action = request.POST.get('action')
+
+        if action == 'refresh_review_states':
+            result = refresh_all_attachment_review_states()
+            AuditLog.log(
+                'update',
+                'nms',
+                f"Premium NMS review states refreshed: {result['updated']} mapping(s) updated",
+                user=request.user,
+            )
+            messages.success(request, f"Review states refreshed. Updated {result['updated']} mapping(s).")
+            return redirect('nms-operations')
+
+        if action == 'sync_endpoint_statuses':
+            result = sync_all_endpoint_statuses()
+            AuditLog.log(
+                'update',
+                'nms',
+                f"Premium NMS endpoint statuses synced: {result['synced']} endpoint(s)",
+                user=request.user,
+            )
+            messages.success(request, f"Endpoint statuses synced for {result['synced']} endpoint(s).")
+            return redirect('nms-operations')
+
+        if action == 'sync_core_assignments':
+            result = sync_all_core_assignment_statuses()
+            AuditLog.log(
+                'update',
+                'nms',
+                f"Premium NMS core assignment statuses synced: {result['synced']} assignment(s)",
+                user=request.user,
+            )
+            messages.success(request, f"Core assignment statuses synced for {result['synced']} assignment(s).")
+            return redirect('nms-operations')
+
+        messages.error(request, 'Unknown NMS operations action.')
+        return redirect('nms-operations')
+
+    report = build_nms_validation_report()
+    return render(request, 'nms/operations.html', {
+        'report': report,
+        'service_attachment_ready': has_service_attachment_table(),
+        'distribution_ready': has_distribution_tables(),
+        'cable_ready': has_cable_tables(),
+        'core_assignment_ready': has_core_assignment_tables(),
+        'topology_links_ready': has_topology_link_tables(),
+        'gps_trace_ready': has_gps_trace_tables(),
+    })
+
+
+@login_required
+def nms_analytics(request):
+    gps_trace_ready = has_gps_trace_tables()
+    trace_form = GpsTraceImportForm() if gps_trace_ready else None
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+
+        if action == 'import_trace':
+            if not gps_trace_ready:
+                messages.error(request, 'GPS trace database migration is not applied yet.')
+                return redirect('nms-analytics')
+
+            trace_form = GpsTraceImportForm(request.POST)
+            if trace_form.is_valid():
+                trace = trace_form.save(created_by=request.user.username)
+                AuditLog.log(
+                    'create',
+                    'nms',
+                    f"GPS trace imported: {trace.name}",
+                    user=request.user,
+                )
+                messages.success(request, f"GPS trace imported: {trace.name}.")
+                return redirect('nms-analytics')
+        elif action == 'delete_trace':
+            if not gps_trace_ready:
+                messages.error(request, 'GPS trace database migration is not applied yet.')
+                return redirect('nms-analytics')
+
+            trace = get_object_or_404(GpsTrace, pk=request.POST.get('trace_pk'))
+            trace_name = trace.name
+            trace.delete()
+            AuditLog.log(
+                'delete',
+                'nms',
+                f"GPS trace deleted: {trace_name}",
+                user=request.user,
+            )
+            messages.success(request, f"GPS trace deleted: {trace_name}.")
+            return redirect('nms-analytics')
+        else:
+            messages.error(request, 'Unknown NMS analytics action.')
+            return redirect('nms-analytics')
+
+    selected_outage_type = request.GET.get('outage_type') or ''
+    selected_outage_id = request.GET.get('outage_id') or ''
+    outage_impact = None
+    selected_outage_target = None
+    if selected_outage_id.isdigit():
+        if selected_outage_type == 'node':
+            selected_outage_target = NetworkNode.objects.filter(pk=selected_outage_id).first()
+            if selected_outage_target:
+                outage_impact = get_outage_impact(node=selected_outage_target)
+        elif selected_outage_type == 'link':
+            selected_outage_target = TopologyLink.objects.select_related('source_node', 'target_node').filter(pk=selected_outage_id).first()
+            if selected_outage_target:
+                outage_impact = get_outage_impact(link=selected_outage_target)
+
+    gps_traces = []
+    if gps_trace_ready:
+        for trace in GpsTrace.objects.prefetch_related('points')[:25]:
+            trace.distance_km = round(get_gps_trace_distance_km(trace), 3)
+            gps_traces.append(trace)
+
+    return render(request, 'nms/analytics.html', {
+        'trace_form': trace_form,
+        'gps_trace_ready': gps_trace_ready,
+        'gps_traces': gps_traces,
+        'route_report': get_topology_route_report(),
+        'cable_report': get_cable_utilization_report(),
+        'power_budget_report': get_power_budget_report(),
+        'node_options': NetworkNode.objects.filter(is_active=True).order_by('name'),
+        'link_options': TopologyLink.objects.select_related('source_node', 'target_node').order_by('name', 'id') if has_topology_link_tables() else [],
+        'selected_outage_type': selected_outage_type,
+        'selected_outage_id': selected_outage_id,
+        'selected_outage_target': selected_outage_target,
+        'outage_impact': outage_impact,
+        'topology_links_ready': has_topology_link_tables(),
+        'cable_ready': has_cable_tables(),
+        'service_attachment_ready': has_service_attachment_table(),
     })
 
 
@@ -342,12 +519,61 @@ def nms_update_link_geometry_api(request, link_pk):
 
 
 @login_required
+@require_POST
+def nms_update_attachment_geometry_api(request, attachment_pk):
+    if not has_service_attachment_table() or not has_service_attachment_geometry_tables():
+        return JsonResponse({
+            'ok': False,
+            'message': 'Subscriber mapping geometry database migration is not applied yet.',
+        }, status=503)
+
+    attachment = get_object_or_404(
+        ServiceAttachment.objects.select_related(
+            'subscriber',
+            'node',
+            'endpoint',
+            'endpoint__parent_node',
+            'endpoint__internal_device__parent_node',
+        ).prefetch_related('vertices'),
+        pk=attachment_pk,
+    )
+    form = ServiceAttachmentGeometryForm(request.POST, attachment=attachment)
+    if form.is_valid():
+        form.save()
+        attachment.refresh_from_db()
+        attachment = ServiceAttachment.objects.select_related(
+            'subscriber',
+            'node',
+            'endpoint',
+            'endpoint__parent_node',
+            'endpoint__internal_device__parent_node',
+        ).prefetch_related('vertices').get(pk=attachment.pk)
+        AuditLog.log(
+            'update',
+            'nms',
+            f"Subscriber path geometry updated for {attachment.subscriber.username}",
+            user=request.user,
+        )
+        return JsonResponse({
+            'ok': True,
+            'message': f"Subscriber path updated for {attachment.subscriber.display_name}.",
+            'attachment': serialize_service_attachment(attachment),
+        })
+
+    return JsonResponse({
+        'ok': False,
+        'errors': form.errors.get_json_data(),
+    }, status=400)
+
+
+@login_required
 def nms_links(request):
     if not has_topology_link_tables():
         messages.error(request, 'Topology link database migration is not applied yet.')
         return redirect('nms-map')
 
     cable_ready = has_cable_tables()
+    core_assignment_ready = has_core_assignment_tables()
     selected_link = None
     selected_link_id = request.GET.get('link')
     if selected_link_id and selected_link_id.isdigit():
@@ -358,6 +584,18 @@ def nms_links(request):
             selected_link_queryset.prefetch_related('vertices'),
             pk=selected_link_id,
         )
+        if cable_ready and core_assignment_ready and getattr(selected_link, 'cable', None):
+            assignments = CableCoreAssignment.objects.select_related(
+                'service_attachment',
+                'service_attachment__subscriber',
+                'core',
+            ).filter(core__cable=selected_link.cable)
+            assignment_by_core_id = {
+                assignment.core_id: assignment
+                for assignment in assignments
+            }
+            for core in selected_link.cable.cores.all():
+                core.structured_core_assignment = assignment_by_core_id.get(core.pk)
 
     if request.method == 'POST':
         is_create = selected_link is None
@@ -384,6 +622,7 @@ def nms_links(request):
         'selected_link': selected_link,
         'links': links,
         'cable_ready': cable_ready,
+        'core_assignment_ready': core_assignment_ready,
     })
 
 
@@ -414,11 +653,45 @@ def nms_nodes(request):
         form = NetworkNodeForm(instance=selected_node)
 
     nodes = NetworkNode.objects.select_related('router').order_by('name')
+    delete_impact = get_node_delete_impact(selected_node) if selected_node else None
     return render(request, 'nms/nodes.html', {
         'form': form,
         'selected_node': selected_node,
         'nodes': nodes,
+        'delete_impact': delete_impact,
     })
+
+
+@login_required
+@require_POST
+def nms_delete_node(request, node_pk):
+    node = get_object_or_404(NetworkNode, pk=node_pk)
+    node_name = node.name
+    with transaction.atomic():
+        impact = delete_node_with_descendants(node)
+        AuditLog.log(
+            'delete',
+            'nms',
+            (
+                f"Network node deleted: {node_name}. "
+                f"Removed {impact['service_attachment_count']} mapping(s), "
+                f"{impact['subscriber_node_count']} subscriber node reference(s), "
+                f"{impact['topology_link_count']} topology link(s), "
+                f"{impact['internal_device_count']} internal device(s), "
+                f"{impact['endpoint_count']} endpoint(s), "
+                f"{impact['cable_count']} cable(s), and "
+                f"{impact['cable_core_count']} cable core(s)."
+            ),
+            user=request.user,
+        )
+    messages.success(
+        request,
+        (
+            f"Deleted node {node_name}. Removed related NMS data under this node; "
+            "routers, subscribers, billing, and account records were kept."
+        ),
+    )
+    return redirect('nms-nodes')
 
 
 @login_required
@@ -451,43 +724,105 @@ def nms_subscriber_workspace(request, subscriber_pk):
     attachment = get_service_attachment(subscriber, table_ready=True)
     basic_assignment = get_basic_node_assignment(subscriber)
     distribution_ready = has_distribution_tables()
+    core_assignment_ready = has_core_assignment_tables()
     selected_node = None
     review_flags = get_attachment_review_flags(attachment) if attachment else []
+    form = None
+    core_assignment_form = None
 
     if request.method == 'POST':
-        is_create = attachment is None
-        previous_endpoint = attachment.endpoint if attachment else None
-        selected_node_id = request.POST.get('node')
-        if selected_node_id and selected_node_id.isdigit():
-            selected_node = NetworkNode.objects.filter(pk=selected_node_id, is_active=True).first()
-        form = ServiceAttachmentForm(request.POST, instance=attachment, selected_node=selected_node)
-        if form.is_valid():
-            attachment = form.save(commit=False)
-            attachment.subscriber = subscriber
-            if attachment.endpoint_id:
-                attachment.node = attachment.endpoint.root_node
-            review_flags = refresh_attachment_review_state(attachment)
-            attachment.assigned_by = request.user.username
-            attachment.save()
-            sync_basic_node_summary(subscriber, attachment.node, attachment.resolved_endpoint_label)
-            if previous_endpoint and previous_endpoint.pk != attachment.endpoint_id:
-                sync_endpoint_status(previous_endpoint)
-            sync_endpoint_status(attachment.endpoint)
+        action = request.POST.get('action') or 'save_mapping'
+
+        if action == 'assign_core':
+            if not attachment:
+                messages.error(request, 'Save the Premium NMS mapping before assigning cable cores.')
+                return redirect('nms-subscriber-workspace', subscriber_pk=subscriber.pk)
+            if not core_assignment_ready:
+                messages.error(request, 'Cable core assignment database migration is not applied yet.')
+                return redirect('nms-subscriber-workspace', subscriber_pk=subscriber.pk)
+
+            core_assignment_form = CableCoreAssignmentForm(
+                request.POST,
+                attachment=attachment,
+                prefix='core',
+            )
+            if core_assignment_form.is_valid():
+                core_assignment = core_assignment_form.save(commit=False)
+                core_assignment.assigned_by = request.user.username
+                core_assignment.save()
+                apply_core_assignment(core_assignment)
+                AuditLog.log(
+                    'create',
+                    'nms',
+                    f"Cable core assigned for {subscriber.username}: {core_assignment.core}",
+                    user=request.user,
+                )
+                messages.success(
+                    request,
+                    f"Cable core assigned: {core_assignment.core.cable.display_name} core {core_assignment.core.sequence}.",
+                )
+                return redirect('nms-subscriber-workspace', subscriber_pk=subscriber.pk)
+
+            selected_node = attachment.node or (attachment.endpoint.root_node if attachment.endpoint_id else None)
+            form = ServiceAttachmentForm(instance=attachment, selected_node=selected_node)
+        elif action == 'release_core':
+            if not attachment or not core_assignment_ready:
+                messages.error(request, 'No cable core assignment is available to release.')
+                return redirect('nms-subscriber-workspace', subscriber_pk=subscriber.pk)
+
+            core_assignment = get_object_or_404(
+                CableCoreAssignment.objects.select_related(
+                    'core',
+                    'core__cable',
+                    'service_attachment',
+                ),
+                pk=request.POST.get('assignment_pk'),
+                service_attachment=attachment,
+            )
+            core_label = f"{core_assignment.core.cable.display_name} core {core_assignment.core.sequence}"
+            release_core_assignment(core_assignment)
             AuditLog.log(
-                'create' if is_create else 'update',
+                'delete',
                 'nms',
-                f"Premium NMS mapping saved for {subscriber.username}",
+                f"Cable core released for {subscriber.username}: {core_label}",
                 user=request.user,
             )
-            if review_flags:
-                messages.warning(
-                    request,
-                    f"Premium NMS mapping saved for {subscriber.display_name}, but it still needs review.",
-                )
-            else:
-                messages.success(request, f"Premium NMS mapping saved for {subscriber.display_name}.")
+            messages.success(request, f"Cable core released: {core_label}.")
             return redirect('nms-subscriber-workspace', subscriber_pk=subscriber.pk)
-    else:
+        else:
+            is_create = attachment is None
+            previous_endpoint = attachment.endpoint if attachment else None
+            selected_node_id = request.POST.get('node')
+            if selected_node_id and selected_node_id.isdigit():
+                selected_node = NetworkNode.objects.filter(pk=selected_node_id, is_active=True).first()
+            form = ServiceAttachmentForm(request.POST, instance=attachment, selected_node=selected_node)
+            if form.is_valid():
+                attachment = form.save(commit=False)
+                attachment.subscriber = subscriber
+                if attachment.endpoint_id:
+                    attachment.node = attachment.endpoint.root_node
+                review_flags = refresh_attachment_review_state(attachment)
+                attachment.assigned_by = request.user.username
+                attachment.save()
+                sync_basic_node_summary(subscriber, attachment.node, attachment.resolved_endpoint_label)
+                if previous_endpoint and previous_endpoint.pk != attachment.endpoint_id:
+                    sync_endpoint_status(previous_endpoint)
+                sync_endpoint_status(attachment.endpoint)
+                AuditLog.log(
+                    'create' if is_create else 'update',
+                    'nms',
+                    f"Premium NMS mapping saved for {subscriber.username}",
+                    user=request.user,
+                )
+                if review_flags:
+                    messages.warning(
+                        request,
+                        f"Premium NMS mapping saved for {subscriber.display_name}, but it still needs review.",
+                    )
+                else:
+                    messages.success(request, f"Premium NMS mapping saved for {subscriber.display_name}.")
+                return redirect('nms-subscriber-workspace', subscriber_pk=subscriber.pk)
+    if form is None:
         initial = {}
         if not attachment and basic_assignment:
             initial = {
@@ -499,12 +834,24 @@ def nms_subscriber_workspace(request, subscriber_pk):
             selected_node = attachment.node or (attachment.endpoint.root_node if attachment.endpoint_id else None)
         form = ServiceAttachmentForm(instance=attachment, initial=initial, selected_node=selected_node)
 
+    if core_assignment_ready and attachment:
+        core_assignments = get_attachment_core_assignments(attachment)
+        if core_assignment_form is None:
+            core_assignment_form = CableCoreAssignmentForm(
+                attachment=attachment,
+                prefix='core',
+            )
+    else:
+        core_assignments = []
     topology_summary = get_subscriber_topology_summary(subscriber, table_ready=True)
     return render(request, 'nms/subscriber_workspace.html', {
         'subscriber': subscriber,
         'attachment': attachment,
         'basic_assignment': basic_assignment,
         'form': form,
+        'core_assignment_form': core_assignment_form,
+        'core_assignments': core_assignments,
+        'core_assignment_ready': core_assignment_ready,
         'topology_summary': topology_summary,
         'distribution_ready': distribution_ready,
         'review_flags': review_flags,
@@ -522,6 +869,9 @@ def nms_remove_service_attachment(request, subscriber_pk):
     attachment = get_service_attachment(subscriber, table_ready=True)
     if request.method == 'POST' and attachment:
         previous_endpoint = attachment.endpoint
+        core_assignments = get_attachment_core_assignments(attachment)
+        for core_assignment in core_assignments:
+            release_core_assignment(core_assignment)
         attachment.delete()
         sync_endpoint_status(previous_endpoint)
         AuditLog.log(

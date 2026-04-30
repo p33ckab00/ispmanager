@@ -119,6 +119,7 @@
 
         <form method="post" class="space-y-4">
           {% csrf_token %}
+          <input type="hidden" name="action" value="save_mapping">
           <div>
             <label for="{{ form.node.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Serving Node</label>
             {{ form.node }}
@@ -182,6 +183,124 @@
           </div>
         </form>
       </div>
+
+      {% if attachment %}
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <div class="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 class="text-lg font-semibold text-gray-800">Cable Core Assignments</h3>
+            <p class="text-sm text-gray-500 mt-1">Reserve or mark fiber cores used by this subscriber mapping.</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
+            {{ core_assignments|length }} assigned
+          </span>
+        </div>
+
+        {% if core_assignment_ready %}
+        {% if core_assignments %}
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[760px] text-sm">
+            <thead class="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Cable</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Core</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Link</th>
+                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">Status</th>
+                <th class="px-3 py-2 text-right text-xs font-medium text-gray-500">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+              {% for assignment in core_assignments %}
+              <tr>
+                <td class="px-3 py-2">
+                  <p class="text-xs font-medium text-gray-800">{{ assignment.core.cable.display_name }}</p>
+                  <p class="text-xs text-gray-400 mt-1">{{ assignment.resolved_label }}</p>
+                </td>
+                <td class="px-3 py-2 text-xs text-gray-600">
+                  Core {{ assignment.core.sequence }} · {{ assignment.core.color_name }}
+                </td>
+                <td class="px-3 py-2 text-xs text-gray-600">
+                  {{ assignment.core.cable.link.source_node.name }} -> {{ assignment.core.cable.link.target_node.name }}
+                </td>
+                <td class="px-3 py-2 text-xs">
+                  <span class="px-2 py-0.5 rounded-full {% if assignment.status == 'used' %}bg-blue-100 text-blue-700{% else %}bg-yellow-100 text-yellow-700{% endif %}">
+                    {{ assignment.get_status_display }}
+                  </span>
+                </td>
+                <td class="px-3 py-2 text-right">
+                  <form method="post" onsubmit="return confirm('Release this cable core assignment?');">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="release_core">
+                    <input type="hidden" name="assignment_pk" value="{{ assignment.pk }}">
+                    <button type="submit" class="text-xs font-medium text-red-600 hover:underline">Release</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+          No structured cable cores are assigned to this subscriber yet.
+        </div>
+        {% endif %}
+
+        <div class="mt-5 rounded-xl border border-gray-100 bg-gray-50 p-4">
+          <h4 class="text-sm font-semibold text-gray-800">Assign Available Core</h4>
+          {% if core_assignment_form.non_field_errors %}
+          <div class="mt-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {% for error in core_assignment_form.non_field_errors %}
+            <p>{{ error }}</p>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <form method="post" class="space-y-4 mt-4">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="assign_core">
+            <div>
+              <label for="{{ core_assignment_form.core.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Fiber Core</label>
+              {{ core_assignment_form.core }}
+              {% if core_assignment_form.core.errors %}
+              <p class="text-xs text-red-600 mt-1">{{ core_assignment_form.core.errors|join:", " }}</p>
+              {% endif %}
+              <p class="text-xs text-gray-400 mt-1">{{ core_assignment_form.assignable_core_count }} available core{{ core_assignment_form.assignable_core_count|pluralize }} can be assigned.</p>
+            </div>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label for="{{ core_assignment_form.status.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Core Status</label>
+                {{ core_assignment_form.status }}
+                {% if core_assignment_form.status.errors %}
+                <p class="text-xs text-red-600 mt-1">{{ core_assignment_form.status.errors|join:", " }}</p>
+                {% endif %}
+              </div>
+              <div>
+                <label for="{{ core_assignment_form.label.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Assignment Label</label>
+                {{ core_assignment_form.label }}
+                {% if core_assignment_form.label.errors %}
+                <p class="text-xs text-red-600 mt-1">{{ core_assignment_form.label.errors|join:", " }}</p>
+                {% endif %}
+              </div>
+            </div>
+            <div>
+              <label for="{{ core_assignment_form.notes.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Core Notes</label>
+              {{ core_assignment_form.notes }}
+              {% if core_assignment_form.notes.errors %}
+              <p class="text-xs text-red-600 mt-1">{{ core_assignment_form.notes.errors|join:", " }}</p>
+              {% endif %}
+            </div>
+            <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 transition">
+              Assign Core
+            </button>
+          </form>
+        </div>
+        {% else %}
+        <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Cable core assignment tables are not applied yet.
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
     </section>
 
     <aside class="space-y-6">
@@ -193,6 +312,7 @@
           <li>Saving in Premium NMS mirrors the node summary back to the subscriber page.</li>
           <li>Basic node reassignment is locked once a Premium NMS mapping exists.</li>
           <li>Only eligible endpoints are shown per selected node, and occupied endpoints are excluded from reassignment lists.</li>
+          <li>Structured cable core assignments reserve or use one core at a time and sync back to cable inventory.</li>
         </ul>
       </div>
 

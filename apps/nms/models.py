@@ -72,6 +72,24 @@ class ServiceAttachment(models.Model):
         return self.endpoint_label or ''
 
 
+class ServiceAttachmentVertex(models.Model):
+    service_attachment = models.ForeignKey(
+        ServiceAttachment,
+        on_delete=models.CASCADE,
+        related_name='vertices',
+    )
+    sequence = models.PositiveIntegerField()
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+
+    class Meta:
+        ordering = ['sequence']
+        unique_together = [('service_attachment', 'sequence')]
+
+    def __str__(self):
+        return f"{self.service_attachment_id} #{self.sequence}"
+
+
 class InternalDevice(models.Model):
     DEVICE_TYPE_CHOICES = [
         ('plc', 'PLC Splitter'),
@@ -91,9 +109,16 @@ class InternalDevice(models.Model):
 
     FBT_RATIO_CHOICES = [
         ('', 'Not an FBT'),
-        ('70/30', '70/30'),
-        ('80/20', '80/20'),
+        ('95/5', '95/5'),
         ('90/10', '90/10'),
+        ('85/15', '85/15'),
+        ('80/20', '80/20'),
+        ('75/25', '75/25'),
+        ('70/30', '70/30'),
+        ('65/35', '65/35'),
+        ('60/40', '60/40'),
+        ('55/45', '55/45'),
+        ('50/50', '50/50'),
     ]
 
     parent_node = models.ForeignKey(
@@ -423,6 +448,118 @@ class CableCore(models.Model):
 
     def __str__(self):
         return f"{self.cable.display_name} core {self.sequence}"
+
+
+class CableCoreAssignment(models.Model):
+    STATUS_CHOICES = [
+        ('reserved', 'Reserved'),
+        ('used', 'Used'),
+    ]
+
+    service_attachment = models.ForeignKey(
+        ServiceAttachment,
+        on_delete=models.CASCADE,
+        related_name='core_assignments',
+    )
+    core = models.OneToOneField(
+        CableCore,
+        on_delete=models.CASCADE,
+        related_name='structured_assignment',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='used')
+    label = models.CharField(max_length=120, blank=True)
+    notes = models.TextField(blank=True)
+    assigned_by = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['core__cable__name', 'core__sequence', 'id']
+
+    def clean(self):
+        if not self.core_id:
+            return
+
+        if self.core.cable.link.link_type != 'fiber':
+            raise ValidationError('Cable core assignments are only available on fiber links.')
+
+        if self.core.cable.status in ('inactive', 'damaged'):
+            raise ValidationError('Inactive or damaged cables cannot receive core assignments.')
+
+        if self.core.status == 'damaged':
+            raise ValidationError('Damaged cores cannot be assigned.')
+
+        existing_assignment = CableCoreAssignment.objects.filter(core=self.core)
+        if self.pk:
+            existing_assignment = existing_assignment.exclude(pk=self.pk)
+        if existing_assignment.exists():
+            raise ValidationError('This core already has a structured assignment.')
+
+        if not self.pk and self.core.status in ('reserved', 'used'):
+            raise ValidationError('Only available cores can receive a new structured assignment.')
+
+    @property
+    def resolved_label(self):
+        if self.label:
+            return self.label
+        return self.service_attachment.subscriber.display_name
+
+    def __str__(self):
+        return f"{self.core} assigned to {self.service_attachment.subscriber.username}"
+
+
+class GpsTrace(models.Model):
+    TRACE_TYPE_CHOICES = [
+        ('survey', 'Survey'),
+        ('as_built', 'As Built'),
+        ('maintenance', 'Maintenance'),
+        ('outage', 'Outage'),
+        ('other', 'Other'),
+    ]
+
+    name = models.CharField(max_length=120)
+    trace_type = models.CharField(max_length=30, choices=TRACE_TYPE_CHOICES, default='survey')
+    source_label = models.CharField(max_length=120, blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.CharField(max_length=100, blank=True)
+    captured_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at', 'name']
+
+    @property
+    def point_count(self):
+        return self.points.count()
+
+    def __str__(self):
+        return self.name
+
+
+class GpsTracePoint(models.Model):
+    trace = models.ForeignKey(
+        GpsTrace,
+        on_delete=models.CASCADE,
+        related_name='points',
+    )
+    sequence = models.PositiveIntegerField()
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    note = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        ordering = ['sequence']
+        unique_together = [('trace', 'sequence')]
+
+    def clean(self):
+        if not -90 <= self.latitude <= 90:
+            raise ValidationError('Latitude must be between -90 and 90.')
+        if not -180 <= self.longitude <= 180:
+            raise ValidationError('Longitude must be between -180 and 180.')
+
+    def __str__(self):
+        return f"{self.trace_id} #{self.sequence}"
 
 
 class TopologyLinkVertex(models.Model):

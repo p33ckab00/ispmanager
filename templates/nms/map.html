@@ -53,9 +53,20 @@
   .marker-node.connect-source { background: #16a34a; }
   .marker-node.connect-target { background: #2563eb; }
   .leaflet-popup-content { font-size: 13px; min-width: 190px; }
+  .leaflet-control-layers {
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+  }
+  .leaflet-control-layers-expanded {
+    padding: 8px 10px;
+    color: #374151;
+    font-size: 13px;
+  }
   .legend-dot { width: 12px; height: 12px; display: inline-block; border-radius: 9999px; }
   .legend-node { width: 12px; height: 12px; display: inline-block; transform: rotate(45deg); }
   .legend-line { width: 18px; height: 0; display: inline-block; border-top: 3px solid currentColor; }
+  .legend-dash { width: 18px; height: 0; display: inline-block; border-top: 3px dashed currentColor; }
   .mode-btn-active { background: #2563eb; color: white; border-color: #2563eb; }
   .mode-btn-disabled { opacity: 0.5; cursor: not-allowed; }
   .geometry-vertex {
@@ -87,6 +98,12 @@
       </a>
       <a href="{% url 'nms-links' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
         Manage Links
+      </a>
+      <a href="{% url 'nms-operations' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Operations
+      </a>
+      <a href="{% url 'nms-analytics' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Analytics
       </a>
       <button id="refresh-map-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 transition">
         <i class="fa fa-rotate mr-2"></i> Refresh
@@ -133,6 +150,9 @@
     <span class="flex items-center gap-1.5 text-violet-600">
       <span class="legend-line"></span> Wireless Link
     </span>
+    <span class="flex items-center gap-1.5 text-emerald-600">
+      <span class="legend-dash"></span> GPS Trace
+    </span>
     <span class="flex items-center gap-1.5">
       <span class="legend-dot bg-green-500"></span> Subscriber Online
     </span>
@@ -148,6 +168,7 @@
     <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5">Subscribers on map: <strong id="count-subs">0</strong></span>
     <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5 text-green-600">Online: <strong id="count-online">0</strong></span>
     <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5 text-blue-600">Premium paths: <strong id="count-mappings">0</strong></span>
+    <span class="bg-white border border-gray-100 rounded-lg px-3 py-1.5 text-emerald-600">GPS traces: <strong id="count-gps-traces">0</strong></span>
   </div>
 
   <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.8fr)_380px]">
@@ -168,7 +189,7 @@
             <button id="mode-connect-btn" type="button" class="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg transition {% if not topology_links_ready %}mode-btn-disabled{% endif %}" {% if not topology_links_ready %}disabled{% endif %}>
               Connect Nodes
             </button>
-            <button id="mode-edit-path-btn" type="button" class="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg transition {% if not topology_links_ready %}mode-btn-disabled{% endif %}" {% if not topology_links_ready %}disabled{% endif %}>
+            <button id="mode-edit-path-btn" type="button" class="border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg transition {% if not topology_links_ready and not service_attachment_geometry_ready %}mode-btn-disabled{% endif %}" {% if not topology_links_ready and not service_attachment_geometry_ready %}disabled{% endif %}>
               Edit Path
             </button>
           </div>
@@ -189,6 +210,9 @@
           </label>
           <label class="flex items-center gap-2 text-sm text-gray-600">
             <input type="checkbox" id="toggle-mappings" checked class="rounded"> Premium Paths
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" id="toggle-gps-traces" checked class="rounded"> GPS Traces
           </label>
         </div>
 
@@ -215,14 +239,15 @@
           </div>
         </div>
 
-        {% if not topology_links_ready %}
+        {% if not topology_links_ready and not service_attachment_geometry_ready %}
         <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          Topology link tables are not applied yet. View mode still works, but `Connect Nodes` and `Edit Path` stay disabled until the `nms` migrations are applied.
+          Geometry tables are not applied yet. View mode still works, but Connect Nodes and Edit Path stay disabled until the nms migrations are applied.
         </div>
         {% endif %}
       </div>
 
       <div id="nms-map" class="shadow-sm border border-gray-100"></div>
+      <div id="nms-map-error" class="hidden rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700"></div>
 
       <p class="text-xs text-gray-400">
         Router coordinates come from <a href="/routers/" class="text-blue-500 hover:underline">Routers</a>. Subscriber coordinates come from
@@ -252,11 +277,31 @@
 {{ node_type_options|json_script:"nms-node-type-options" }}
 {{ router_options|json_script:"nms-router-options" }}
 <script>
+function showMapError(message) {
+  const errorBox = document.getElementById('nms-map-error')
+  if (!errorBox) return
+  errorBox.textContent = message
+  errorBox.classList.remove('hidden')
+}
+
+function clearMapError() {
+  const errorBox = document.getElementById('nms-map-error')
+  if (!errorBox) return
+  errorBox.textContent = ''
+  errorBox.classList.add('hidden')
+}
+
+if (!window.L) {
+  showMapError('Map library did not load. Check browser access to the Leaflet CDN, then refresh this page.')
+} else {
 const focusSubscriberId = {% if focus_subscriber %}{{ focus_subscriber.pk }}{% else %}null{% endif %}
 const topologyLinksReady = {{ topology_links_ready|yesno:"true,false" }}
 const serviceAttachmentReady = {{ service_attachment_ready|yesno:"true,false" }}
+const serviceAttachmentGeometryReady = {{ service_attachment_geometry_ready|yesno:"true,false" }}
+const gpsTraceReady = {{ gps_trace_ready|yesno:"true,false" }}
 const nodeTypeOptions = JSON.parse(document.getElementById('nms-node-type-options').textContent)
 const routerOptions = JSON.parse(document.getElementById('nms-router-options').textContent)
+const maxMapZoom = 22
 const urls = {
   mapData: '{% url "nms-map-data" %}',
   createNode: '{% url "nms-create-node-api" %}',
@@ -265,19 +310,40 @@ const urls = {
   links: '{% url "nms-links" %}',
   map: '{% url "nms-map" %}',
   updateLinkGeometryTemplate: '{% url "nms-update-link-geometry-api" 0 %}',
+  updateAttachmentGeometryTemplate: '{% url "nms-update-attachment-geometry-api" 0 %}',
 }
 
-const map = L.map('nms-map').setView([12.8797, 121.7740], 6)
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+const map = L.map('nms-map', {
+  maxZoom: maxMapZoom,
+  zoomSnap: 0.25,
+  wheelPxPerZoomLevel: 80,
+}).setView([12.8797, 121.7740], 6)
+const streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  maxZoom: 19,
+  maxNativeZoom: 19,
+  maxZoom: maxMapZoom,
+})
+const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Tiles &copy; Esri',
+  maxNativeZoom: 19,
+  maxZoom: maxMapZoom,
+})
+streetLayer.addTo(map)
+L.control.layers({
+  Street: streetLayer,
+  Satellite: satelliteLayer,
+}, null, {
+  collapsed: false,
+  position: 'topright',
 }).addTo(map)
+setTimeout(() => map.invalidateSize(), 0)
 
 const routerLayer = L.layerGroup().addTo(map)
 const linkLayer = L.layerGroup().addTo(map)
 const nodeLayer = L.layerGroup().addTo(map)
 const subLayer = L.layerGroup().addTo(map)
 const mappingLayer = L.layerGroup().addTo(map)
+const gpsTraceLayer = L.layerGroup().addTo(map)
 const geometryLayer = L.layerGroup().addTo(map)
 
 const state = {
@@ -297,11 +363,13 @@ const state = {
     nodes: true,
     subscribers: true,
     mappings: true,
+    gpsTraces: true,
   },
   connectSourceNodeId: null,
   connectTargetNodeId: null,
   pendingNodeCoordinates: null,
   editingLinkId: null,
+  editingAttachmentId: null,
   editingVertices: [],
   geometryError: '',
   highlightedNodeId: null,
@@ -443,12 +511,18 @@ function getLinkGeometryUpdateUrl(linkId) {
   return urls.updateLinkGeometryTemplate.replace('/0/geometry/', `/${linkId}/geometry/`)
 }
 
+function getAttachmentGeometryUpdateUrl(attachmentId) {
+  return urls.updateAttachmentGeometryTemplate.replace('/0/geometry/', `/${attachmentId}/geometry/`)
+}
+
 function indexData(data) {
   return {
     routers: new Map(data.routers.map(item => [item.id, item])),
     nodes: new Map(data.nodes.map(item => [item.id, item])),
     subscribers: new Map(data.subscribers.map(item => [item.id, item])),
     links: new Map(data.links.map(item => [item.id, item])),
+    attachments: new Map(data.attachments.map(item => [item.id, item])),
+    gpsTraces: new Map((data.gps_traces || []).map(item => [item.id, item])),
     attachmentsBySubscriber: new Map(data.attachments.map(item => [item.subscriber_id, item])),
   }
 }
@@ -465,8 +539,16 @@ function getLink(id) {
   return state.index?.links.get(id) || null
 }
 
+function getAttachment(id) {
+  return state.index?.attachments.get(id) || null
+}
+
 function getRouter(id) {
   return state.index?.routers.get(id) || null
+}
+
+function getGpsTrace(id) {
+  return state.index?.gpsTraces.get(id) || null
 }
 
 function countConnectedLinks(nodeId) {
@@ -528,8 +610,13 @@ function updateModeButtons() {
 }
 
 function setMode(mode) {
-  if ((mode === 'connect' || mode === 'edit-path') && !topologyLinksReady) {
+  if (mode === 'connect' && !topologyLinksReady) {
     setLocalNotice('warning', 'Apply the NMS topology migrations first to unlock interactive link editing.')
+    return
+  }
+
+  if (mode === 'edit-path' && !topologyLinksReady && !serviceAttachmentGeometryReady) {
+    setLocalNotice('warning', 'Apply the NMS geometry migrations first to unlock path editing.')
     return
   }
 
@@ -547,13 +634,27 @@ function setMode(mode) {
 
   if (mode !== 'edit-path') {
     state.editingLinkId = null
+    state.editingAttachmentId = null
     state.editingVertices = []
     state.geometryError = ''
     geometryLayer.clearLayers()
   } else if (state.selectedObject?.type === 'link') {
+    if (!topologyLinksReady) {
+      setLocalNotice('warning', 'Apply the NMS topology migrations first to edit topology paths.')
+      return
+    }
     const link = getLink(state.selectedObject.id)
     if (link) {
       startGeometryEdit(link)
+    }
+  } else if (state.selectedObject?.type === 'attachment') {
+    if (!serviceAttachmentGeometryReady) {
+      setLocalNotice('warning', 'Apply the NMS subscriber path geometry migration first.')
+      return
+    }
+    const attachment = getAttachment(state.selectedObject.id)
+    if (attachment) {
+      startAttachmentGeometryEdit(attachment)
     }
   }
 
@@ -595,7 +696,17 @@ function geometryVerticesToText() {
 
 function startGeometryEdit(link) {
   state.editingLinkId = link.id
+  state.editingAttachmentId = null
   state.editingVertices = parseGeometryText(link.geometry_text || '').points
+  state.geometryError = ''
+  renderGeometryHandles()
+  renderInspector()
+}
+
+function startAttachmentGeometryEdit(attachment) {
+  state.editingAttachmentId = attachment.id
+  state.editingLinkId = null
+  state.editingVertices = parseGeometryText(attachment.geometry_text || '').points
   state.geometryError = ''
   renderGeometryHandles()
   renderInspector()
@@ -605,13 +716,49 @@ function getEditingLink() {
   return state.editingLinkId ? getLink(state.editingLinkId) : null
 }
 
-function getEditingFullPoints() {
+function getEditingAttachment() {
+  return state.editingAttachmentId ? getAttachment(state.editingAttachmentId) : null
+}
+
+function getEditingPath() {
   const link = getEditingLink()
-  if (!link) return []
+  if (link) {
+    return {
+      type: 'link',
+      id: link.id,
+      name: link.name,
+      sourceLabel: link.source_node_name,
+      targetLabel: link.target_node_name,
+      start: [link.source_node_lat, link.source_node_lng],
+      end: [link.target_node_lat, link.target_node_lng],
+      geometryText: link.geometry_text || '',
+    }
+  }
+
+  const attachment = getEditingAttachment()
+  if (attachment) {
+    return {
+      type: 'attachment',
+      id: attachment.id,
+      name: attachment.subscriber_name,
+      sourceLabel: attachment.node_name || 'Serving node',
+      targetLabel: attachment.subscriber_name,
+      start: [attachment.node_lat, attachment.node_lng],
+      end: [attachment.subscriber_lat, attachment.subscriber_lng],
+      geometryText: attachment.geometry_text || '',
+    }
+  }
+
+  return null
+}
+
+function getEditingFullPoints() {
+  const path = getEditingPath()
+  if (!path) return []
   return [
-    [link.source_node_lat, link.source_node_lng],
+    path.start,
     ...state.editingVertices,
-    [link.target_node_lat, link.target_node_lng],
+    path.end,
   ]
 }
 
@@ -619,8 +766,8 @@ function renderGeometryHandles() {
   geometryLayer.clearLayers()
   if (state.mode !== 'edit-path') return
 
-  const link = getEditingLink()
-  if (!link) return
+  const path = getEditingPath()
+  if (!path) return
 
   const fullPoints = getEditingFullPoints()
   if (fullPoints.length >= 2) {
@@ -663,6 +810,9 @@ function selectObject(type, id) {
     state.highlightedNodeId = subscriber?.mapped_node_id || state.data?.focus_node_id || null
   } else if (type === 'node') {
     state.highlightedNodeId = id
+  } else if (type === 'attachment') {
+    const attachment = getAttachment(id)
+    state.highlightedNodeId = attachment?.node_id || state.data?.focus_node_id || null
   } else {
     state.highlightedNodeId = state.data?.focus_node_id || null
   }
@@ -670,6 +820,9 @@ function selectObject(type, id) {
   if (state.mode === 'edit-path' && type === 'link') {
     const link = getLink(id)
     if (link) startGeometryEdit(link)
+  } else if (state.mode === 'edit-path' && type === 'attachment') {
+    const attachment = getAttachment(id)
+    if (attachment) startAttachmentGeometryEdit(attachment)
   }
 
   drawMap()
@@ -839,26 +992,41 @@ function renderModePanel() {
   }
 
   if (state.mode === 'edit-path') {
-    const link = state.selectedObject?.type === 'link' ? getLink(state.selectedObject.id) : null
+    const path = getEditingPath()
     let html = `
       <div class="rounded-xl border border-violet-100 bg-violet-50 px-4 py-4">
         <p class="text-sm font-semibold text-violet-900">Path Geometry Editor</p>
-        <p class="text-xs text-violet-700 mt-1">Select a topology link, then click the map to add middle vertices. Drag a handle to move it and click a handle to remove it.</p>
+        <p class="text-xs text-violet-700 mt-1">Select a topology link or subscriber path, then click the map to add middle vertices. Drag a handle to move it and click a handle to remove it.</p>
     `
-    if (!link) {
-      html += `<p class="text-sm text-violet-700 mt-3">No link selected yet. Click a topology link on the map to edit its path.</p>`
+    if (!path) {
+      html += `<p class="text-sm text-violet-700 mt-3">No path selected yet. Click a topology link or subscriber path on the map to edit its path.</p>`
     } else {
+      const gpsTraceOptionsHtml = ['<option value="">-- Select GPS trace --</option>'].concat(
+        (state.data?.gps_traces || []).map(trace => (
+          `<option value="${trace.id}">${escapeHtml(trace.name)} (${trace.point_count} pts)</option>`
+        ))
+      ).join('')
       html += `
-        <div class="mt-3 text-sm text-violet-900"><strong>Editing:</strong> ${escapeHtml(link.name)}</div>
-        <div class="mt-2 text-xs text-violet-700">${escapeHtml(link.source_node_name)} -> ${escapeHtml(link.target_node_name)}</div>
+        <div class="mt-3 text-sm text-violet-900"><strong>Editing:</strong> ${escapeHtml(path.name)}</div>
+        <div class="mt-2 text-xs text-violet-700">${escapeHtml(path.sourceLabel)} -> ${escapeHtml(path.targetLabel)}</div>
         <div class="mt-4">
           <label for="geometry-textarea" class="block text-xs font-semibold uppercase tracking-wide text-violet-700 mb-1">Middle Vertices</label>
           <textarea id="geometry-textarea" rows="6" class="w-full border border-violet-200 rounded-lg px-3 py-2 text-sm font-mono">${escapeHtml(geometryVerticesToText())}</textarea>
-          <p class="text-xs text-violet-700 mt-2">One line per `lat,lng` pair. Start and end stay attached to the link endpoints.</p>
+          <p class="text-xs text-violet-700 mt-2">One line per lat,lng pair. Start and end stay attached to the path endpoints.</p>
           <p id="geometry-error" class="text-xs text-red-600 mt-2 ${state.geometryError ? '' : 'hidden'}">${escapeHtml(state.geometryError || '')}</p>
         </div>
+        ${(state.data?.gps_traces || []).length ? `
+          <div class="mt-4">
+            <label for="gps-trace-select" class="block text-xs font-semibold uppercase tracking-wide text-violet-700 mb-1">GPS Trace</label>
+            <div class="flex gap-2">
+              <select id="gps-trace-select" class="min-w-0 flex-1 border border-violet-200 rounded-lg px-3 py-2 text-sm">${gpsTraceOptionsHtml}</select>
+              <button id="load-gps-trace-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-white hover:bg-violet-100 text-violet-700 text-sm font-medium px-4 py-2 transition">Load</button>
+            </div>
+          </div>
+        ` : ''}
         <div class="flex flex-wrap gap-2 mt-4">
           <button id="save-geometry-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 transition">Save Geometry</button>
+          <button id="add-gps-point-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-white hover:bg-violet-100 text-violet-700 text-sm font-medium px-4 py-2 transition">Add GPS Point</button>
           <button id="clear-geometry-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-white hover:bg-violet-100 text-violet-700 text-sm font-medium px-4 py-2 transition">Clear Vertices</button>
           <button id="cancel-edit-path-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-white hover:bg-violet-100 text-violet-700 text-sm font-medium px-4 py-2 transition">Exit Edit Mode</button>
         </div>
@@ -871,7 +1039,7 @@ function renderModePanel() {
   return `
     <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-4">
       <p class="text-sm font-semibold text-gray-800">View Mode</p>
-      <p class="text-xs text-gray-500 mt-1">Inspect routers, nodes, links, and subscribers without making edits. Use `Connect Nodes` or `Edit Path` only when you are ready to change topology state.</p>
+      <p class="text-xs text-gray-500 mt-1">Inspect routers, nodes, links, and subscribers without making edits. Use Connect Nodes or Edit Path only when you are ready to change topology state.</p>
     </div>
   `
 }
@@ -883,8 +1051,9 @@ function renderSelectedObjectPanel() {
         <p class="text-sm font-semibold text-gray-800">No selection yet</p>
         <p class="text-sm text-gray-500 mt-2">Try these next steps:</p>
         <ul class="mt-3 space-y-2 text-sm text-gray-600">
-          <li>Switch to `Add Node` and click the map to place a new shared network node.</li>
+          <li>Switch to Add Node and click the map to place a new shared network node.</li>
           <li>Click a subscriber to inspect the mapped node and open the premium assignment workspace.</li>
+          <li>Click a subscriber path to edit the drop route geometry.</li>
           <li>Click a node to inspect its connected links and use it in connect mode.</li>
           <li>Click a topology link to inspect its endpoints or enter path edit mode.</li>
         </ul>
@@ -942,6 +1111,34 @@ function renderSelectedObjectPanel() {
           </div>
         ` : `<div class="flex flex-wrap gap-2 mt-4"><a href="${node.edit_url}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">Manage Node</a></div>`}
         ${state.mode === 'connect' ? `<p class="text-xs text-blue-700 mt-4">Node clicks in Connect Mode select the source and target for a new topology link.</p>` : ''}
+      </div>
+    `
+	  }
+
+  if (state.selectedObject.type === 'attachment') {
+    const attachment = getAttachment(state.selectedObject.id)
+    if (!attachment) return ''
+    return `
+      <div class="rounded-xl border border-gray-100 px-4 py-4">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Subscriber Path</p>
+            <p class="text-lg font-semibold text-gray-900 mt-1">${escapeHtml(attachment.subscriber_name)}</p>
+            <p class="text-sm text-gray-500 mt-1">@${escapeHtml(attachment.subscriber_username)}</p>
+          </div>
+          <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusBadgeClass(attachment.status)}">${escapeHtml(formatLabel(attachment.status))}</span>
+        </div>
+        <dl class="mt-4 space-y-3 text-sm">
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Serving Node</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(attachment.node_name || '-')}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Endpoint</dt><dd class="font-medium text-right text-gray-800">${escapeHtml(attachment.endpoint_label || '-')}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Vertices</dt><dd class="font-medium text-right text-gray-800">${attachment.vertex_count || 0}</dd></div>
+          <div class="flex justify-between gap-4"><dt class="text-gray-400">Subscriber</dt><dd class="font-medium text-right text-gray-800">${formatCoord(attachment.subscriber_lat)}, ${formatCoord(attachment.subscriber_lng)}</dd></div>
+        </dl>
+        <div class="flex flex-wrap gap-2 mt-4">
+          <a href="${attachment.workspace_url}" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 transition">Open in NMS</a>
+          <a href="${attachment.subscriber_detail_url}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">Open Subscriber</a>
+          <button id="inspect-edit-path-btn" type="button" class="inline-flex items-center justify-center rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium px-4 py-2 transition ${!serviceAttachmentGeometryReady ? 'opacity-50 cursor-not-allowed' : ''}" ${!serviceAttachmentGeometryReady ? 'disabled' : ''}>Edit Path</button>
+        </div>
       </div>
     `
   }
@@ -1072,6 +1269,35 @@ function bindInspectorEvents() {
     })
   }
 
+  const addGpsPointButton = document.getElementById('add-gps-point-btn')
+  if (addGpsPointButton) {
+    addGpsPointButton.addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        setLocalNotice('warning', 'Browser GPS is not available here.')
+        return
+      }
+      navigator.geolocation.getCurrentPosition(
+        position => {
+          state.editingVertices.push([
+            Number(position.coords.latitude.toFixed(6)),
+            Number(position.coords.longitude.toFixed(6)),
+          ])
+          state.geometryError = ''
+          renderGeometryHandles()
+          renderInspector()
+        },
+        () => {
+          setLocalNotice('warning', 'GPS location was not allowed or could not be read.')
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0,
+        },
+      )
+    })
+  }
+
   const cancelEditPathButton = document.getElementById('cancel-edit-path-btn')
   if (cancelEditPathButton) {
     cancelEditPathButton.addEventListener('click', () => {
@@ -1082,6 +1308,25 @@ function bindInspectorEvents() {
   const saveGeometryButton = document.getElementById('save-geometry-btn')
   if (saveGeometryButton) {
     saveGeometryButton.addEventListener('click', saveGeometryFromInspector)
+  }
+
+  const loadGpsTraceButton = document.getElementById('load-gps-trace-btn')
+  if (loadGpsTraceButton) {
+    loadGpsTraceButton.addEventListener('click', () => {
+      const traceId = Number(document.getElementById('gps-trace-select')?.value || 0)
+      const trace = getGpsTrace(traceId)
+      if (!trace) {
+        setLocalNotice('warning', 'Select a GPS trace first.')
+        return
+      }
+      state.editingVertices = trace.points.map(point => [
+        Number(point[0].toFixed ? point[0].toFixed(6) : point[0]),
+        Number(point[1].toFixed ? point[1].toFixed(6) : point[1]),
+      ])
+      state.geometryError = ''
+      renderGeometryHandles()
+      renderInspector()
+    })
   }
 }
 
@@ -1182,9 +1427,9 @@ async function createLinkFromInspector() {
 }
 
 async function saveGeometryFromInspector() {
-  const link = getEditingLink()
-  if (!link) {
-    setLocalNotice('warning', 'Select a topology link first.')
+  const path = getEditingPath()
+  if (!path) {
+    setLocalNotice('warning', 'Select a topology link or subscriber path first.')
     return
   }
   if (state.geometryError) {
@@ -1194,7 +1439,10 @@ async function saveGeometryFromInspector() {
 
   const formData = new FormData()
   formData.set('geometry_text', geometryVerticesToText())
-  const response = await fetch(getLinkGeometryUpdateUrl(link.id), {
+  const updateUrl = path.type === 'attachment'
+    ? getAttachmentGeometryUpdateUrl(path.id)
+    : getLinkGeometryUpdateUrl(path.id)
+  const response = await fetch(updateUrl, {
     method: 'POST',
     headers: {
       'X-CSRFToken': getCsrfToken(),
@@ -1209,11 +1457,20 @@ async function saveGeometryFromInspector() {
     return
   }
 
-  state.data.links = state.data.links.map(item => item.id === payload.link.id ? payload.link : item)
+  if (path.type === 'attachment') {
+    state.data.attachments = state.data.attachments.map(item => item.id === payload.attachment.id ? payload.attachment : item)
+    state.selectedObject = { type: 'attachment', id: payload.attachment.id }
+    state.editingAttachmentId = payload.attachment.id
+    state.editingLinkId = null
+    state.editingVertices = parseGeometryText(payload.attachment.geometry_text || '').points
+  } else {
+    state.data.links = state.data.links.map(item => item.id === payload.link.id ? payload.link : item)
+    state.selectedObject = { type: 'link', id: payload.link.id }
+    state.editingLinkId = payload.link.id
+    state.editingAttachmentId = null
+    state.editingVertices = parseGeometryText(payload.link.geometry_text || '').points
+  }
   state.index = indexData(state.data)
-  state.selectedObject = { type: 'link', id: payload.link.id }
-  state.editingLinkId = payload.link.id
-  state.editingVertices = parseGeometryText(payload.link.geometry_text || '').points
   state.geometryError = ''
   renderGeometryHandles()
   drawMap()
@@ -1227,6 +1484,7 @@ function drawMap() {
   nodeLayer.clearLayers()
   subLayer.clearLayers()
   mappingLayer.clearLayers()
+  gpsTraceLayer.clearLayers()
 
   if (!state.data) return
 
@@ -1319,15 +1577,17 @@ function drawMap() {
 
   if (state.visibility.mappings) {
     state.data.attachments.forEach(attachment => {
+      const pathPoints = attachment.points || [
+        [attachment.node_lat, attachment.node_lng],
+        [attachment.subscriber_lat, attachment.subscriber_lng],
+      ]
       const highlightAttachment = (
         (focusSubscriberId && attachment.subscriber_id === focusSubscriberId)
         || (state.selectedObject?.type === 'subscriber' && attachment.subscriber_id === state.selectedObject.id)
+        || (state.selectedObject?.type === 'attachment' && attachment.id === state.selectedObject.id)
       )
       const polyline = L.polyline(
-        [
-          [attachment.node_lat, attachment.node_lng],
-          [attachment.subscriber_lat, attachment.subscriber_lng],
-        ],
+        pathPoints,
         {
           color: attachment.status === 'needs_review' ? '#f59e0b' : '#22c55e',
           weight: highlightAttachment ? 5 : 3,
@@ -1339,15 +1599,37 @@ function drawMap() {
         <b>${escapeHtml(attachment.subscriber_name)}</b><br>
         Node: ${escapeHtml(attachment.node_name || '-')}<br>
         Status: ${escapeHtml(formatLabel(attachment.status))}<br>
+        Vertices: ${attachment.vertex_count || 0}<br>
         ${attachment.endpoint_label ? `Endpoint: ${escapeHtml(attachment.endpoint_label)}<br>` : ''}
         <a href="${attachment.workspace_url}" style="color:#2563eb">Open NMS Workspace</a>
       `)
-      polyline.on('click', () => selectObject('subscriber', attachment.subscriber_id))
+      polyline.on('click', () => selectObject('attachment', attachment.id))
       mappingLayer.addLayer(polyline)
-      allPoints.push([attachment.node_lat, attachment.node_lng], [attachment.subscriber_lat, attachment.subscriber_lng])
+      pathPoints.forEach(point => allPoints.push(point))
       if (highlightAttachment) {
-        focusPoints.push([attachment.node_lat, attachment.node_lng], [attachment.subscriber_lat, attachment.subscriber_lng])
+        pathPoints.forEach(point => focusPoints.push(point))
       }
+    })
+  }
+
+  if (state.visibility.gpsTraces && gpsTraceReady) {
+    ;(state.data.gps_traces || []).forEach(trace => {
+      const polyline = L.polyline(trace.points, {
+        color: '#059669',
+        weight: 3,
+        opacity: 0.78,
+        dashArray: '6, 6',
+      })
+      polyline.bindPopup(`
+        <b>${escapeHtml(trace.name)}</b><br>
+        Type: ${escapeHtml(trace.trace_type_label)}<br>
+        Points: ${trace.point_count}<br>
+        Distance: ${trace.distance_km} km<br>
+        ${trace.source_label ? `Source: ${escapeHtml(trace.source_label)}<br>` : ''}
+        <a href="${trace.analytics_url}" style="color:#2563eb">Open Analytics</a>
+      `)
+      gpsTraceLayer.addLayer(polyline)
+      trace.points.forEach(point => allPoints.push(point))
     })
   }
 
@@ -1363,8 +1645,25 @@ function drawMap() {
 }
 
 async function refreshMap() {
-  const response = await fetch(getDataUrl())
-  const data = await response.json()
+  let data = null
+  try {
+    const response = await fetch(getDataUrl(), {
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    })
+    const contentType = response.headers.get('content-type') || ''
+    if (!response.ok || !contentType.includes('application/json')) {
+      throw new Error(`Map data request failed with HTTP ${response.status}.`)
+    }
+    data = await response.json()
+    clearMapError()
+  } catch (error) {
+    console.error('NMS map data failed to load', error)
+    showMapError('Map data did not load. Refresh the page or log in again if your session expired.')
+    return
+  }
+
   state.data = data
   state.index = indexData(data)
 
@@ -1381,6 +1680,8 @@ async function refreshMap() {
       state.selectedObject.type === 'subscriber' && state.index.subscribers.has(state.selectedObject.id)
     ) || (
       state.selectedObject.type === 'link' && state.index.links.has(state.selectedObject.id)
+    ) || (
+      state.selectedObject.type === 'attachment' && state.index.attachments.has(state.selectedObject.id)
     )
     if (!selectedExists) {
       state.selectedObject = null
@@ -1393,6 +1694,7 @@ async function refreshMap() {
   document.getElementById('count-nodes').textContent = data.nodes.length
   document.getElementById('count-subs').textContent = data.subscribers.length
   document.getElementById('count-mappings').textContent = data.attachments.length
+  document.getElementById('count-gps-traces').textContent = (data.gps_traces || []).length
   document.getElementById('count-online').textContent = data.subscribers.filter(item => item.mt_status === 'online').length
 
   drawMap()
@@ -1410,7 +1712,7 @@ map.on('click', event => {
     return
   }
 
-  if (state.mode !== 'edit-path' || !topologyLinksReady || !getEditingLink()) return
+  if (state.mode !== 'edit-path' || !getEditingPath()) return
   state.editingVertices.push([
     Number(event.latlng.lat.toFixed(6)),
     Number(event.latlng.lng.toFixed(6)),
@@ -1449,6 +1751,10 @@ document.getElementById('toggle-mappings').addEventListener('change', event => {
   state.visibility.mappings = event.target.checked
   drawMap()
 })
+document.getElementById('toggle-gps-traces').addEventListener('change', event => {
+  state.visibility.gpsTraces = event.target.checked
+  drawMap()
+})
 document.getElementById('filter-link-type').addEventListener('change', event => {
   state.filters.linkType = event.target.value
   drawMap()
@@ -1466,5 +1772,6 @@ setInterval(() => {
     refreshMap()
   }
 }, 60000)
+}
 </script>
 {% endblock %}

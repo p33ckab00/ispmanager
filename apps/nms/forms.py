@@ -1,16 +1,23 @@
 from django import forms
 from apps.nms.models import (
     Cable,
+    CableCoreAssignment,
     Endpoint,
+    GpsTrace,
+    GpsTracePoint,
     InternalDevice,
     ServiceAttachment,
+    ServiceAttachmentVertex,
     TopologyLink,
     TopologyLinkVertex,
 )
 from apps.nms.services import (
+    apply_core_assignment,
     get_eligible_endpoints,
+    get_assignable_cable_cores,
     has_cable_tables,
     has_distribution_tables,
+    parse_gps_trace_points,
     sync_cable_cores,
 )
 from apps.subscribers.models import NetworkNode
@@ -97,6 +104,133 @@ class ServiceAttachmentForm(forms.ModelForm):
                 raise forms.ValidationError('This endpoint is already occupied by another active subscriber mapping.')
 
         return cleaned_data
+
+
+class CableCoreAssignmentForm(forms.ModelForm):
+    class Meta:
+        model = CableCoreAssignment
+        fields = ['core', 'status', 'label', 'notes']
+        widgets = {
+            'core': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'status': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'label': forms.TextInput(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'notes': forms.Textarea(attrs={
+                'rows': 2,
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.attachment = kwargs.pop('attachment')
+        super().__init__(*args, **kwargs)
+        current_assignment = self.instance if self.instance.pk else None
+        self.fields['core'].queryset = get_assignable_cable_cores(
+            current_assignment=current_assignment,
+        )
+        self.fields['core'].empty_label = '-- Select available fiber core --'
+        self.fields['core'].label_from_instance = self._core_label
+        self.fields['label'].required = False
+        self.fields['label'].label = 'Assignment Label'
+        self.fields['notes'].required = False
+        self.assignable_core_count = self.fields['core'].queryset.count()
+
+    def _core_label(self, core):
+        link = core.cable.link
+        return (
+            f"{core.cable.display_name} core {core.sequence} ({core.color_name}) - "
+            f"{link.source_node.name} -> {link.target_node.name}"
+        )
+
+    def clean_label(self):
+        return (self.cleaned_data.get('label') or '').strip()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        core = cleaned_data.get('core')
+        if core and self.attachment is None:
+            raise forms.ValidationError('Save the Premium NMS mapping before assigning cable cores.')
+        return cleaned_data
+
+    def save(self, commit=True):
+        assignment = super().save(commit=False)
+        assignment.service_attachment = self.attachment
+        if commit:
+            assignment.save()
+            apply_core_assignment(assignment)
+        return assignment
+
+
+class GpsTraceImportForm(forms.ModelForm):
+    coordinates_text = forms.CharField(
+        label='Coordinates',
+        widget=forms.Textarea(attrs={
+            'rows': 8,
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono',
+            'placeholder': '14.59950,120.98420\n14.60010,120.98550',
+        }),
+        help_text='One point per line using lat,lng. Optional notes may follow after another comma.',
+    )
+
+    class Meta:
+        model = GpsTrace
+        fields = ['name', 'trace_type', 'source_label', 'captured_at', 'notes']
+        widgets = {
+            'name': forms.TextInput(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'trace_type': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'source_label': forms.TextInput(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'captured_at': forms.DateTimeInput(attrs={
+                'type': 'datetime-local',
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'notes': forms.Textarea(attrs={
+                'rows': 3,
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['captured_at'].required = False
+        self.fields['captured_at'].input_formats = ['%Y-%m-%dT%H:%M', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M']
+        self.fields['source_label'].required = False
+        self.fields['notes'].required = False
+
+    def clean_coordinates_text(self):
+        coordinates_text = self.cleaned_data.get('coordinates_text') or ''
+        try:
+            self._trace_points = parse_gps_trace_points(coordinates_text)
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+        return coordinates_text
+
+    def save(self, commit=True, created_by=''):
+        trace = super().save(commit=False)
+        trace.created_by = created_by
+        if commit:
+            trace.save()
+            GpsTracePoint.objects.bulk_create([
+                GpsTracePoint(
+                    trace=trace,
+                    sequence=point['sequence'],
+                    latitude=point['latitude'],
+                    longitude=point['longitude'],
+                    note=point['note'],
+                )
+                for point in getattr(self, '_trace_points', [])
+            ])
+        return trace
 
 
 class InternalDeviceForm(forms.ModelForm):
@@ -561,3 +695,52 @@ class TopologyLinkGeometryForm(forms.Form):
             for index, point in enumerate(getattr(self, '_geometry_points', []), start=1)
         ])
         return self.link
+
+
+class ServiceAttachmentGeometryForm(forms.Form):
+    geometry_text = forms.CharField(required=False)
+
+    def __init__(self, *args, **kwargs):
+        self.attachment = kwargs.pop('attachment')
+        super().__init__(*args, **kwargs)
+
+    def clean_geometry_text(self):
+        geometry_text = (self.cleaned_data.get('geometry_text') or '').strip()
+        geometry_points = []
+
+        for line_number, raw_line in enumerate(geometry_text.splitlines(), start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            parts = [part.strip() for part in line.split(',')]
+            if len(parts) != 2:
+                raise forms.ValidationError(
+                    f'Line {line_number} must be in "lat,lng" format.'
+                )
+
+            try:
+                latitude = float(parts[0])
+                longitude = float(parts[1])
+            except ValueError as exc:
+                raise forms.ValidationError(
+                    f'Line {line_number} contains invalid coordinates.'
+                ) from exc
+
+            geometry_points.append((latitude, longitude))
+
+        self._geometry_points = geometry_points
+        return geometry_text
+
+    def save(self):
+        self.attachment.vertices.all().delete()
+        ServiceAttachmentVertex.objects.bulk_create([
+            ServiceAttachmentVertex(
+                service_attachment=self.attachment,
+                sequence=index,
+                latitude=point[0],
+                longitude=point[1],
+            )
+            for index, point in enumerate(getattr(self, '_geometry_points', []), start=1)
+        ])
+        return self.attachment

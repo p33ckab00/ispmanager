@@ -316,7 +316,7 @@
               {% if topology_summary.node_is_locked %}
               Locked because this subscriber already has a Premium NMS mapping.
               {% else %}
-              Use this lightweight assignment only when Premium NMS mapping is not active yet.
+              Selecting a node here creates the first Premium NMS map entry automatically.
               {% endif %}
             </p>
             <form method="post" action="/subscribers/{{ subscriber.pk }}/assign-node/" class="space-y-3">
@@ -939,7 +939,7 @@
           {% if topology_summary.node_is_locked %}
           Locked because a Premium NMS mapping already exists.
           {% else %}
-          Lightweight node reference only. Advanced physical assignment should happen in NMS.
+          Selecting a node here creates the first Premium NMS map entry automatically.
           {% endif %}
         </p>
         <form method="post" action="/subscribers/{{ subscriber.pk }}/assign-node/" class="space-y-2">

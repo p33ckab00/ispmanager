@@ -32,6 +32,24 @@
 
 ---
 
+## Premium NMS
+
+Premium NMS now has Phase 1 through Phase 6 implemented in code.
+
+- subscriber-to-NMS assignment boundary is in place
+- subscriber basic node assignment now auto-creates the first NMS map entry
+- map workspace, topology links, and distribution internals are in place
+- PLC and FBT modeling are in place
+- cable/core inventory is in place
+- structured cable core assignment and release workflow is in place
+- validation operations center is in place
+- GPS trace import and map visibility are in place
+- route analytics, outage impact tracing, cable utilization, and initial optical power-budget estimates are in place
+
+Current rollout need: validate browser flows with real field data and reload the running web service after deployment.
+
+---
+
 ## Billing Architecture (Two-Layer)
 
 Invoice = real receivable ledger (accounting truth)

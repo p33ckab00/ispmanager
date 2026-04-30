@@ -282,7 +282,16 @@
                     {{ core.get_status_display }}
                   </span>
                 </td>
-                <td class="px-3 py-2 text-xs text-gray-500">{{ core.assignment_label|default:"-" }}</td>
+                <td class="px-3 py-2 text-xs text-gray-500">
+                  {% if core.structured_core_assignment %}
+                  <a href="{% url 'nms-subscriber-workspace' core.structured_core_assignment.service_attachment.subscriber.pk %}" class="font-medium text-blue-600 hover:underline">
+                    {{ core.structured_core_assignment.service_attachment.subscriber.display_name }}
+                  </a>
+                  <p class="text-gray-400 mt-1">{{ core.structured_core_assignment.resolved_label }}</p>
+                  {% else %}
+                  {{ core.assignment_label|default:"-" }}
+                  {% endif %}
+                </td>
               </tr>
               {% endfor %}
             </tbody>

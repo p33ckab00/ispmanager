@@ -24,6 +24,7 @@ from apps.nms.services import (
     get_subscriber_topology_summary,
     has_service_attachment_table,
 )
+from apps.nms.models import ServiceAttachment
 from apps.billing.services import apply_rate_change
 from apps.subscribers.otp import create_otp, find_portal_subscriber_by_phone, verify_otp_for_subscriber
 from apps.routers.models import Router
@@ -586,14 +587,36 @@ def subscriber_assign_node(request, pk):
             return redirect('nms-subscriber-workspace', subscriber_pk=subscriber.pk)
 
         node_id = request.POST.get('node_id')
-        port_label = request.POST.get('port_label', '')
+        port_label = (request.POST.get('port_label', '') or '').strip()
         if node_id:
             node = get_object_or_404(NetworkNode, pk=node_id)
             SubscriberNode.objects.update_or_create(
                 subscriber=subscriber,
-                defaults={'node': node, 'port_label': port_label}
+                defaults={'node': node, 'port_label': port_label[:50]}
             )
-            messages.success(request, f"Assigned to {node.name}.")
+            if has_service_attachment_table():
+                attachment, created = ServiceAttachment.objects.update_or_create(
+                    subscriber=subscriber,
+                    defaults={
+                        'node': node,
+                        'endpoint': None,
+                        'endpoint_label': port_label[:80],
+                        'status': 'active',
+                        'assigned_by': request.user.username,
+                    },
+                )
+                AuditLog.log(
+                    'create' if created else 'update',
+                    'nms',
+                    f"Subscriber assignment mirrored to Premium NMS for {subscriber.username}: {node.name}",
+                    user=request.user,
+                )
+                messages.success(
+                    request,
+                    f"Assigned to {node.name}. Premium NMS mapping is now active.",
+                )
+            else:
+                messages.success(request, f"Assigned to {node.name}.")
         else:
             SubscriberNode.objects.filter(subscriber=subscriber).delete()
             messages.success(request, 'Node assignment removed.')

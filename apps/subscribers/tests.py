@@ -8,9 +8,10 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from apps.core.models import AuditLog
+from apps.nms.models import ServiceAttachment
 from apps.settings_app.models import BillingSettings
 from apps.subscribers.forms import ManualSubscriberForm, SubscriberAdminForm
-from apps.subscribers.models import Subscriber, SubscriberOTP, normalize_phone_digits
+from apps.subscribers.models import NetworkNode, Subscriber, SubscriberNode, SubscriberOTP, normalize_phone_digits
 from apps.subscribers.otp import create_otp, find_portal_subscriber_by_phone, verify_otp_for_subscriber
 from apps.subscribers.services import audit_subscriber_field_changes, get_subscriber_billing_readiness
 from apps.subscribers.services import set_subscriber_mikrotik_access, transition_subscriber_status
@@ -217,6 +218,36 @@ class SubscriberPhoneNormalizationTests(TestCase):
         self.assertIsNone(error)
         self.assertTrue(otp.is_used)
         self.assertEqual(otp.normalized_phone, '639171234567')
+
+
+class SubscriberNodeAssignmentNmsTests(TestCase):
+    def test_basic_node_assignment_creates_first_nms_mapping(self):
+        user = User.objects.create_superuser('assign-admin', 'assign@example.test', 'pass')
+        subscriber = Subscriber.objects.create(username='assign-client', full_name='Assign Client')
+        node = NetworkNode.objects.create(name='NAP-Assign', node_type='splice_box')
+        self.client.force_login(user)
+
+        response = self.client.post(
+            f'/subscribers/{subscriber.pk}/assign-node/',
+            {
+                'node_id': str(node.pk),
+                'port_label': 'PON-1/1',
+            },
+            HTTP_HOST='localhost',
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            SubscriberNode.objects.filter(
+                subscriber=subscriber,
+                node=node,
+                port_label='PON-1/1',
+            ).exists()
+        )
+        attachment = ServiceAttachment.objects.get(subscriber=subscriber)
+        self.assertEqual(attachment.node, node)
+        self.assertEqual(attachment.endpoint_label, 'PON-1/1')
+        self.assertEqual(attachment.status, 'active')
 
 
 class SubscriberFieldAuditTests(TestCase):

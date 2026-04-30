@@ -1,0 +1,300 @@
+{% extends "base.html" %}
+{% block title %}NMS Analytics - {{ isp_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <p class="text-sm font-medium text-blue-600">Premium NMS</p>
+      <h2 class="text-2xl font-bold text-gray-800 mt-1">Field & Analytics</h2>
+      <p class="text-sm text-gray-500 mt-1">GPS traces, route distance, outage impact, cable utilization, and optical budget estimates.</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href="{% url 'nms-map' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Map
+      </a>
+      <a href="{% url 'nms-operations' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Operations
+      </a>
+    </div>
+  </div>
+
+  {% include "partials/messages.html" %}
+
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.4fr)_420px]">
+    <section class="space-y-6">
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100">
+          <h3 class="text-lg font-semibold text-gray-800">Route Analytics</h3>
+          <p class="text-sm text-gray-500 mt-1">Distances use cable inventory length when available, otherwise map geometry.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[860px] text-sm">
+            <thead class="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Link</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Path</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Distance</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Core Usage</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+              {% for item in route_report %}
+              <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3">
+                  <p class="font-medium text-gray-800">{{ item.link.display_name }}</p>
+                  <p class="text-xs text-gray-400 mt-1">{{ item.link.get_link_type_display }} · {{ item.link.get_status_display }}</p>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-600">{{ item.link.source_node.name }} -> {{ item.link.target_node.name }}</td>
+                <td class="px-4 py-3 text-xs text-gray-600">
+                  {{ item.inventory_km }} km
+                  {% if item.uses_inventory_length %}
+                  <span class="text-gray-400">(inventory)</span>
+                  {% else %}
+                  <span class="text-gray-400">(geometry)</span>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-600">{{ item.core_used }}/{{ item.core_total }} cores · {{ item.utilization_percent }}%</td>
+                <td class="px-4 py-3 text-right">
+                  <a href="{% url 'nms-links' %}?link={{ item.link.pk }}" class="text-xs font-medium text-blue-600 hover:underline">Open Link</a>
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="5" class="px-4 py-12 text-center text-sm text-gray-400">No topology links available yet.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100">
+          <h3 class="text-lg font-semibold text-gray-800">Outage Impact Trace</h3>
+          <p class="text-sm text-gray-500 mt-1">Select a node or directed link to estimate affected downstream NMS mappings.</p>
+        </div>
+        <div class="p-5">
+          <form method="get" class="grid grid-cols-1 gap-4 md:grid-cols-[160px_minmax(0,1fr)_auto]">
+            <div>
+              <label for="outage_type" class="block text-sm font-medium text-gray-700 mb-1">Target Type</label>
+              <select name="outage_type" id="outage_type" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="">Choose</option>
+                <option value="node" {% if selected_outage_type == 'node' %}selected{% endif %}>Node</option>
+                <option value="link" {% if selected_outage_type == 'link' %}selected{% endif %}>Link</option>
+              </select>
+            </div>
+            <div>
+              <label for="outage_id" class="block text-sm font-medium text-gray-700 mb-1">Target</label>
+              <select name="outage_id" id="outage_id" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="">Select a node or link</option>
+                <optgroup label="Nodes">
+                  {% for node in node_options %}
+                  <option value="{{ node.pk }}" data-type="node" {% if selected_outage_type == 'node' and selected_outage_id == node.pk|stringformat:"s" %}selected{% endif %}>{{ node.name }}</option>
+                  {% endfor %}
+                </optgroup>
+                <optgroup label="Links">
+                  {% for link in link_options %}
+                  <option value="{{ link.pk }}" data-type="link" {% if selected_outage_type == 'link' and selected_outage_id == link.pk|stringformat:"s" %}selected{% endif %}>{{ link.display_name }}</option>
+                  {% endfor %}
+                </optgroup>
+              </select>
+            </div>
+            <div class="flex items-end">
+              <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 transition">
+                Trace Impact
+              </button>
+            </div>
+          </form>
+
+          {% if outage_impact %}
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-3 mt-5">
+            <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
+              <p class="text-xs uppercase tracking-wide text-gray-400">Target</p>
+              <p class="mt-2 text-base font-semibold text-gray-800">{{ outage_impact.target_label }}</p>
+            </div>
+            <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
+              <p class="text-xs uppercase tracking-wide text-gray-400">Impacted Nodes</p>
+              <p class="mt-2 text-base font-semibold text-gray-800">{{ outage_impact.node_count }}</p>
+            </div>
+            <div class="rounded-xl border border-gray-100 bg-gray-50 p-4">
+              <p class="text-xs uppercase tracking-wide text-gray-400">Subscribers</p>
+              <p class="mt-2 text-base font-semibold text-gray-800">{{ outage_impact.subscriber_count }}</p>
+            </div>
+          </div>
+          <div class="mt-5 divide-y divide-gray-50 border border-gray-100 rounded-xl overflow-hidden">
+            {% for attachment in outage_impact.attachments %}
+            <div class="px-4 py-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p class="font-medium text-gray-800">{{ attachment.subscriber.display_name }}</p>
+                <p class="text-xs text-gray-500 mt-1">@{{ attachment.subscriber.username }}{% if attachment.resolved_endpoint_label %} · {{ attachment.resolved_endpoint_label }}{% endif %}</p>
+              </div>
+              <a href="{% url 'nms-subscriber-workspace' attachment.subscriber.pk %}" class="text-xs font-medium text-blue-600 hover:underline">Open Mapping</a>
+            </div>
+            {% empty %}
+            <div class="px-4 py-8 text-center text-sm text-gray-400">No mapped subscribers found for this impact trace.</div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100">
+          <h3 class="text-lg font-semibold text-gray-800">Optical Budget Estimates</h3>
+          <p class="text-sm text-gray-500 mt-1">Initial estimates use cable length, 0.35 dB/km fiber loss, basic connector loss, and known splitter loss.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[900px] text-sm">
+            <thead class="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Subscriber</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Cable km</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Loss</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Margin</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Notes</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+              {% for item in power_budget_report %}
+              <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3">
+                  <a href="{% url 'nms-subscriber-workspace' item.attachment.subscriber.pk %}" class="font-medium text-blue-600 hover:underline">{{ item.attachment.subscriber.display_name }}</a>
+                  <p class="text-xs text-gray-400 mt-1">@{{ item.attachment.subscriber.username }}</p>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-600">{{ item.cable_distance_km }}</td>
+                <td class="px-4 py-3 text-xs text-gray-600">{{ item.estimated_loss_db }} dB</td>
+                <td class="px-4 py-3 text-xs">
+                  <span class="px-2 py-0.5 rounded-full {% if item.margin_db >= 6 %}bg-green-100 text-green-700{% elif item.margin_db >= 3 %}bg-amber-100 text-amber-700{% else %}bg-red-100 text-red-700{% endif %}">
+                    {{ item.margin_db }} dB
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-500">
+                  {% for flag in item.flags %}
+                  <p>{{ flag }}</p>
+                  {% empty %}
+                  <span class="text-gray-400">-</span>
+                  {% endfor %}
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="5" class="px-4 py-12 text-center text-sm text-gray-400">No active premium mappings available for estimates.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <aside class="space-y-6">
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <h3 class="text-lg font-semibold text-gray-800">Import GPS Trace</h3>
+        <p class="text-sm text-gray-500 mt-1">Paste field coordinates from survey logs or handheld GPS exports.</p>
+
+        {% if gps_trace_ready %}
+        {% if trace_form.non_field_errors %}
+        <div class="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {% for error in trace_form.non_field_errors %}
+          <p>{{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <form method="post" class="space-y-4 mt-4">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="import_trace">
+          <div>
+            <label for="{{ trace_form.name.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Trace Name</label>
+            {{ trace_form.name }}
+            {% if trace_form.name.errors %}<p class="text-xs text-red-600 mt-1">{{ trace_form.name.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label for="{{ trace_form.trace_type.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+              {{ trace_form.trace_type }}
+              {% if trace_form.trace_type.errors %}<p class="text-xs text-red-600 mt-1">{{ trace_form.trace_type.errors|join:", " }}</p>{% endif %}
+            </div>
+            <div>
+              <label for="{{ trace_form.captured_at.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Captured At</label>
+              {{ trace_form.captured_at }}
+              {% if trace_form.captured_at.errors %}<p class="text-xs text-red-600 mt-1">{{ trace_form.captured_at.errors|join:", " }}</p>{% endif %}
+            </div>
+          </div>
+          <div>
+            <label for="{{ trace_form.source_label.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Source Label</label>
+            {{ trace_form.source_label }}
+            {% if trace_form.source_label.errors %}<p class="text-xs text-red-600 mt-1">{{ trace_form.source_label.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ trace_form.coordinates_text.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Coordinates</label>
+            {{ trace_form.coordinates_text }}
+            <p class="text-xs text-gray-400 mt-1">{{ trace_form.coordinates_text.help_text }}</p>
+            {% if trace_form.coordinates_text.errors %}<p class="text-xs text-red-600 mt-1">{{ trace_form.coordinates_text.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ trace_form.notes.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            {{ trace_form.notes }}
+            {% if trace_form.notes.errors %}<p class="text-xs text-red-600 mt-1">{{ trace_form.notes.errors|join:", " }}</p>{% endif %}
+          </div>
+          <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 transition">
+            Import Trace
+          </button>
+        </form>
+        {% else %}
+        <div class="mt-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          GPS trace tables are not applied yet.
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100">
+          <h3 class="text-lg font-semibold text-gray-800">Recent GPS Traces</h3>
+        </div>
+        <div class="divide-y divide-gray-50">
+          {% for trace in gps_traces %}
+          <div class="px-5 py-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <p class="font-medium text-gray-800">{{ trace.name }}</p>
+                <p class="text-xs text-gray-500 mt-1">{{ trace.get_trace_type_display }} · {{ trace.point_count }} points · {{ trace.distance_km }} km</p>
+              </div>
+              <form method="post" onsubmit="return confirm('Delete this GPS trace?');">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete_trace">
+                <input type="hidden" name="trace_pk" value="{{ trace.pk }}">
+                <button type="submit" class="text-xs font-medium text-red-600 hover:underline">Delete</button>
+              </form>
+            </div>
+            {% if trace.notes %}<p class="text-sm text-gray-500 mt-2">{{ trace.notes }}</p>{% endif %}
+          </div>
+          {% empty %}
+          <div class="px-5 py-10 text-center text-sm text-gray-400">No GPS traces imported yet.</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <h3 class="text-lg font-semibold text-gray-800">Cable Utilization</h3>
+        <div class="mt-4 space-y-3">
+          {% for item in cable_report %}
+          <div>
+            <div class="flex items-center justify-between gap-3 text-sm">
+              <span class="font-medium text-gray-800">{{ item.cable.display_name }}</span>
+              <span class="text-gray-500">{{ item.used }}/{{ item.total }}</span>
+            </div>
+            <div class="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div class="h-full bg-blue-600" style="width: {{ item.utilization_percent }}%"></div>
+            </div>
+          </div>
+          {% empty %}
+          <p class="text-sm text-gray-400">No cable inventory yet.</p>
+          {% endfor %}
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+{% endblock %}

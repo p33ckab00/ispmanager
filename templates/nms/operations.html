@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}NMS Operations - {{ isp_name }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div>
+      <p class="text-sm font-medium text-blue-600">Premium NMS</p>
+      <h2 class="text-2xl font-bold text-gray-800 mt-1">Operations Center</h2>
+      <p class="text-sm text-gray-500 mt-1">Validation, review states, occupancy sync, and topology repair entry points.</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href="{% url 'nms-map' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Map
+      </a>
+      <a href="{% url 'nms-analytics' %}" class="inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+        Analytics
+      </a>
+    </div>
+  </div>
+
+  {% include "partials/messages.html" %}
+
+  <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+      <p class="text-xs uppercase tracking-wide text-gray-400">Total Issues</p>
+      <p class="mt-2 text-xl font-bold text-gray-800">{{ report.total_count }}</p>
+    </div>
+    <div class="bg-white rounded-xl border border-red-100 shadow-sm p-4">
+      <p class="text-xs uppercase tracking-wide text-red-400">Critical</p>
+      <p class="mt-2 text-xl font-bold text-red-700">{{ report.critical_count }}</p>
+    </div>
+    <div class="bg-white rounded-xl border border-amber-100 shadow-sm p-4">
+      <p class="text-xs uppercase tracking-wide text-amber-500">Warnings</p>
+      <p class="mt-2 text-xl font-bold text-amber-700">{{ report.warning_count }}</p>
+    </div>
+    <div class="bg-white rounded-xl border border-blue-100 shadow-sm p-4">
+      <p class="text-xs uppercase tracking-wide text-blue-500">Info</p>
+      <p class="mt-2 text-xl font-bold text-blue-700">{{ report.info_count }}</p>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.4fr)_380px]">
+    <section class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-100">
+        <h3 class="text-lg font-semibold text-gray-800">Validation Issues</h3>
+        <p class="text-sm text-gray-500 mt-1">Each issue links back to the workspace where the topology data should be fixed.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[860px] text-sm">
+          <thead class="bg-gray-50 border-b border-gray-100">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Severity</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Category</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Object</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Issue</th>
+              <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-50">
+            {% for issue in report.issues %}
+            <tr class="hover:bg-gray-50">
+              <td class="px-4 py-3 text-xs">
+                <span class="px-2 py-0.5 rounded-full font-semibold
+                  {% if issue.severity == 'critical' %}bg-red-100 text-red-700
+                  {% elif issue.severity == 'warning' %}bg-amber-100 text-amber-700
+                  {% else %}bg-blue-50 text-blue-700{% endif %}">
+                  {{ issue.severity|title }}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-xs text-gray-500">{{ issue.category }}</td>
+              <td class="px-4 py-3 text-sm font-medium text-gray-800">{{ issue.title }}</td>
+              <td class="px-4 py-3 text-sm text-gray-600">{{ issue.message }}</td>
+              <td class="px-4 py-3 text-right">
+                {% if issue.action_url %}
+                <a href="{{ issue.action_url }}" class="text-xs font-medium text-blue-600 hover:underline">{{ issue.action_label }}</a>
+                {% else %}
+                <span class="text-xs text-gray-400">No action</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="5" class="px-4 py-12 text-center text-sm text-gray-400">
+                No NMS validation issues found.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="space-y-6">
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <h3 class="text-lg font-semibold text-gray-800">Repair Actions</h3>
+        <p class="text-sm text-gray-500 mt-1">These actions sync derived state from the current topology records.</p>
+        <div class="space-y-3 mt-4">
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="refresh_review_states">
+            <button type="submit" class="w-full inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 transition">
+              Refresh Review States
+            </button>
+          </form>
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="sync_endpoint_statuses">
+            <button type="submit" class="w-full inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+              Sync Endpoint Occupancy
+            </button>
+          </form>
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="sync_core_assignments">
+            <button type="submit" class="w-full inline-flex items-center justify-center rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 transition">
+              Sync Core Assignment Status
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Readiness</h3>
+        <dl class="mt-3 space-y-3 text-sm">
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-gray-500">Service mappings</dt>
+            <dd class="{% if service_attachment_ready %}text-green-700{% else %}text-amber-700{% endif %} font-medium">{% if service_attachment_ready %}Ready{% else %}Pending{% endif %}</dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-gray-500">Distribution endpoints</dt>
+            <dd class="{% if distribution_ready %}text-green-700{% else %}text-amber-700{% endif %} font-medium">{% if distribution_ready %}Ready{% else %}Pending{% endif %}</dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-gray-500">Cable inventory</dt>
+            <dd class="{% if cable_ready %}text-green-700{% else %}text-amber-700{% endif %} font-medium">{% if cable_ready %}Ready{% else %}Pending{% endif %}</dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-gray-500">Core assignment</dt>
+            <dd class="{% if core_assignment_ready %}text-green-700{% else %}text-amber-700{% endif %} font-medium">{% if core_assignment_ready %}Ready{% else %}Pending{% endif %}</dd>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <dt class="text-gray-500">GPS traces</dt>
+            <dd class="{% if gps_trace_ready %}text-green-700{% else %}text-amber-700{% endif %} font-medium">{% if gps_trace_ready %}Ready{% else %}Pending{% endif %}</dd>
+          </div>
+        </dl>
+      </div>
+    </aside>
+  </div>
+</div>
+{% endblock %}

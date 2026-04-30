@@ -19,10 +19,10 @@ This is a status guide, not a replacement for the phased roadmap.
 
 - `Phase 1`: implemented in code
 - `Phase 2`: implemented in code
-- `Phase 3`: partially started
-- `Phase 4`: partially started
-- `Phase 5`: not started
-- `Phase 6`: not started
+- `Phase 3`: implemented in code
+- `Phase 4`: implemented in code
+- `Phase 5`: implemented in code
+- `Phase 6`: implemented in code as a practical field and analytics foundation
 
 ### Important Rollout Note
 
@@ -34,6 +34,8 @@ The codebase now includes the current Premium NMS migration set:
 - `apps/nms/migrations/0004_internaldevice_auto_generate_plc_outputs_and_more.py`
 - `apps/nms/migrations/0005_cable_cablecore.py`
 - `apps/nms/migrations/0006_internaldevice_auto_generate_fbt_outputs_and_more.py`
+- `apps/nms/migrations/0007_cablecoreassignment.py`
+- `apps/nms/migrations/0008_gpstrace_gpstracepoint.py`
 
 For production rollout, the database migrations must be applied and the running web service must be reloaded so the live process picks up the current NMS model layer.
 
@@ -126,6 +128,12 @@ This allows:
 - subscriber pages to continue showing simple node summary
 - older UI surfaces to remain readable
 - the system to transition gradually from basic node association toward premium topology workflow
+
+#### 7. Subscriber Assignment Auto-Mapping
+
+The existing Subscriber detail page `Basic Node Assignment` form now creates the first Premium NMS mapping automatically when a node is selected and no premium mapping exists yet.
+
+This keeps the Subscriber module workflow familiar while making the subscriber immediately visible in the NMS map as a basic node-level service attachment. Detailed endpoint, PLC, FBT, fiber, cable, and core inventory work still belongs inside Premium NMS.
 
 ### What Phase 1 Currently Delivers
 
@@ -260,11 +268,11 @@ So the correct status is:
 - `Phase 3B PLC modeling`: implemented in code
 - `Phase 3C eligibility and review rules`: implemented in code
 
-## Phase 4 Status: Partially Started
+## Phase 4 Status: Implemented in Code
 
 ### What Has Started
 
-Phase 4A cable and core foundation is now implemented in code, and Phase 4B FBT modeling is now implemented in code.
+Phase 4A cable and core foundation is now implemented in code, Phase 4B FBT modeling is now implemented in code, and Phase 4C structured core assignment rules are now implemented in code.
 
 This includes:
 
@@ -276,6 +284,11 @@ This includes:
 - FBT ratio-aware internal device settings
 - auto-generated FBT input, primary pass-through, and secondary split outputs
 - subscriber-assignment guardrails that keep FBT pass-through outputs out of normal endpoint eligibility
+- `CableCoreAssignment` model for structured subscriber-to-core allocation
+- assignment and release workflow from the subscriber Premium NMS workspace
+- automatic sync from structured assignment state back into `CableCore.status` and `CableCore.assignment_label`
+- link inventory visibility for structured core assignments
+- review flags for inactive or damaged cable/core assignment problems and status mismatches
 
 Implemented files:
 
@@ -283,54 +296,85 @@ Implemented files:
 - `apps/nms/forms.py`
 - `apps/nms/services.py`
 - `apps/nms/views.py`
+- `apps/core/role_presets.py`
 - `templates/nms/links.html`
 - `templates/nms/map.html`
 - `templates/nms/distribution_detail.html`
+- `templates/nms/subscriber_workspace.html`
 - `apps/nms/migrations/0005_cable_cablecore.py`
 - `apps/nms/migrations/0006_internaldevice_auto_generate_fbt_outputs_and_more.py`
+- `apps/nms/migrations/0007_cablecoreassignment.py`
+- `apps/nms/tests.py`
 
-### What Is Still Missing In Phase 4
+### Follow-On Refinement Areas
 
-The following Phase 4 items are still pending:
+The following items are now better treated as future refinement rather than blockers for the Phase 4 implementation:
 
-- per-core allocation workflows
 - richer optical route structure
 - deeper optical behavior beyond the initial FBT pass-through/split modeling
+- multi-segment optical path semantics beyond the current per-core allocation records
 
 So the correct status is:
 
 - `Phase 4A cable and core foundation`: implemented in code
 - `Phase 4B FBT modeling`: implemented in code
-- `Phase 4C core assignment rules`: not started
+- `Phase 4C core assignment rules`: implemented in code
 
-## Phase 5 Status: Not Started
+## Phase 5 Status: Implemented in Code
 
-Not yet implemented:
+Phase 5 validation and operations support is now implemented in code.
+
+This includes:
 
 - dedicated validation center
 - duplicate-assignment conflict workflows
 - broken topology issue workflows
 - advanced `Needs Review` operations dashboard
+- endpoint occupancy sync action
+- core assignment status sync action
+- review-state refresh action
+- validation issue links back to the correct NMS repair workspace
 
-The `Needs Review` status exists in Phase 1, but the broader validation and operations layer does not yet exist.
+Implemented files:
 
-## Phase 6 Status: Not Started
+- `apps/nms/services.py`
+- `apps/nms/views.py`
+- `apps/nms/urls.py`
+- `templates/nms/operations.html`
+- `templates/partials/sidebar.html`
 
-Not yet implemented:
+## Phase 6 Status: Implemented in Code
+
+Phase 6 field and analytics foundation is now implemented in code.
+
+This includes:
 
 - GPS trace import
 - route analytics
 - outage impact tracing
 - power-budget estimation
+- cable utilization reporting
+- GPS trace visibility on the Premium NMS map
+
+Implemented files:
+
+- `apps/nms/models.py`
+- `apps/nms/forms.py`
+- `apps/nms/services.py`
+- `apps/nms/views.py`
+- `apps/nms/urls.py`
+- `templates/nms/analytics.html`
+- `templates/nms/map.html`
+- `apps/nms/migrations/0008_gpstrace_gpstracepoint.py`
 
 ## Recommended Next Steps
 
 The cleanest next sequence is:
 
-1. Validate the new Phase 4A and 4B flows in the browser using real fiber links and distribution nodes.
-2. Commit and push the current Premium NMS code changes.
-3. Continue with `Phase 4C: core assignment rules`.
-4. Then follow with `Phase 5: validation and operations layer`.
+1. Validate the Phase 4C, Phase 5, and Phase 6 flows in the browser using real fiber links, distribution nodes, subscriber mappings, and GPS trace data.
+2. Restart or reload the running web service so production picks up the latest NMS code.
+3. Commit and push the current Premium NMS code changes.
+4. Continue future refinements around richer optical path semantics and deeper field reporting.
 
 ## Practical Interpretation
 
@@ -339,8 +383,9 @@ If someone asks, “What is already finished?” the best short answer is:
 - Premium NMS Phase 1 is implemented in code.
 - Premium NMS Phase 2 map workspace is implemented in code.
 - Premium NMS Phase 3 endpoint foundation, PLC modeling, and review rules are implemented in code.
-- Premium NMS Phase 4A cable/core foundation and Phase 4B FBT modeling are implemented in code.
-- The deeper core-allocation and operations phases are still pending.
+- Premium NMS Phase 4A cable/core foundation, Phase 4B FBT modeling, and Phase 4C core assignment rules are implemented in code.
+- Premium NMS Phase 5 validation and operations workflows are implemented in code.
+- Premium NMS Phase 6 field and analytics foundation is implemented in code.
 
 If someone asks, “What is already live-ready?” the safer answer is:
 
