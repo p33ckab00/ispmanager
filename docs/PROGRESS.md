@@ -48,11 +48,12 @@ Premium NMS now has Phase 1 through Phase 6 implemented in code.
 
 Current rollout need: validate browser flows with real field data and reload the running web service after deployment.
 
-Next Premium NMS implementation target: port-accurate mapping. The documented
-plan covers router-origin NMS nodes, physical router ethernet endpoints,
-explicit NAP/FBT/PLC input-output wiring, endpoint-required subscriber
-assignments, shared map paths, telemetry-aware running dash lines, and
-billing-health rings on client markers.
+Premium NMS port-accurate mapping foundation is now implemented in code. It adds
+router-origin NMS nodes, physical router ethernet endpoints, endpoint-to-endpoint
+NAP/FBT/PLC/router-port wiring, node-only mappings marked as Needs Review, the
+source-to-feeder-to-distribution-to-drop workflow, clearer separation between
+physical spans and port wiring, topology-link wiring visibility,
+telemetry-aware running dash lines, and billing-health rings on client markers.
 
 ---
 

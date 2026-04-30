@@ -601,7 +601,7 @@ def subscriber_assign_node(request, pk):
                         'node': node,
                         'endpoint': None,
                         'endpoint_label': port_label[:80],
-                        'status': 'active',
+                        'status': 'needs_review',
                         'assigned_by': request.user.username,
                     },
                 )
@@ -613,7 +613,7 @@ def subscriber_assign_node(request, pk):
                 )
                 messages.success(
                     request,
-                    f"Assigned to {node.name}. Premium NMS mapping is now active.",
+                    f"Assigned to {node.name}. Premium NMS mapping is visible and marked Needs Review until an exact endpoint is selected.",
                 )
             else:
                 messages.success(request, f"Assigned to {node.name}.")

@@ -337,6 +337,7 @@ class SubscriberUsageCutoffSnapshot(models.Model):
 class NetworkNode(models.Model):
     """Physical distribution point: OLT, Cabinet, AP, Splice Box, etc."""
     TYPE_CHOICES = [
+        ('router_site', 'Router Site'),
         ('olt', 'OLT'),
         ('cabinet', 'Distribution Cabinet'),
         ('access_point', 'Access Point'),
@@ -345,9 +346,16 @@ class NetworkNode(models.Model):
         ('other', 'Other'),
     ]
 
+    SYSTEM_ROLE_CHOICES = [
+        ('', 'Manual Field Node'),
+        ('router_root', 'Router Root'),
+    ]
+
     router = models.ForeignKey(Router, on_delete=models.SET_NULL, null=True, blank=True, related_name='network_nodes')
     name = models.CharField(max_length=100)
     node_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='other')
+    system_role = models.CharField(max_length=30, choices=SYSTEM_ROLE_CHOICES, blank=True)
+    is_system = models.BooleanField(default=False)
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)
     port_count = models.IntegerField(default=0, help_text='Max subscriber ports')
@@ -357,6 +365,13 @@ class NetworkNode(models.Model):
 
     class Meta:
         ordering = ['name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['router', 'system_role'],
+                condition=models.Q(system_role='router_root'),
+                name='uniq_nms_router_root_node',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.get_node_type_display()})"

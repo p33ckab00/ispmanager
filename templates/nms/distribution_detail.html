@@ -76,6 +76,8 @@
                 <td class="px-4 py-3 text-xs text-gray-600">
                   {% if endpoint.internal_device %}
                   {{ endpoint.internal_device.display_name }}
+                  {% elif endpoint.router_interface %}
+                  Router {{ endpoint.router_interface.router.name }}
                   {% else %}
                   Direct on {{ node.name }}
                   {% endif %}
@@ -111,6 +113,77 @@
               <tr>
                 <td colspan="6" class="px-4 py-12 text-center text-sm text-gray-400">
                   No endpoints exist yet for this node. Create the first endpoint from the form beside this table.
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100">
+          <h3 class="text-lg font-semibold text-gray-800">Endpoint Wiring</h3>
+          <p class="text-sm text-gray-500 mt-1">Port-to-port wiring for router ports, NAP inputs, FBT outputs, PLC inputs, and downstream feeds.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[920px] text-sm">
+            <thead class="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Upstream</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Downstream</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Role</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Physical Span</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Action</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+              {% for connection in endpoint_connections %}
+              <tr class="hover:bg-gray-50">
+                <td class="px-4 py-3">
+                  <p class="font-medium text-gray-800">{{ connection.upstream_endpoint.display_name }}</p>
+                  <p class="text-xs text-gray-400 mt-1">{{ connection.upstream_endpoint.root_node.name|default:"Unknown node" }}</p>
+                </td>
+                <td class="px-4 py-3">
+                  <p class="font-medium text-gray-800">{{ connection.downstream_endpoint.display_name }}</p>
+                  <p class="text-xs text-gray-400 mt-1">{{ connection.downstream_endpoint.root_node.name|default:"Unknown node" }}</p>
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-600">
+                  {{ connection.get_role_display }} · {{ connection.get_connection_type_display }}
+                  {% if connection.cable_core %}
+                  <p class="text-gray-400 mt-1">{{ connection.cable_core.cable.display_name }} core {{ connection.cable_core.sequence }}</p>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-xs text-gray-600">
+                  {% if connection.topology_link %}
+                  <a href="{% url 'nms-links' %}?link={{ connection.topology_link.pk }}" class="font-medium text-blue-600 hover:underline">{{ connection.topology_link.display_name }}</a>
+                  {% else %}
+                  <span class="text-gray-400">Internal or unlinked</span>
+                  {% endif %}
+                </td>
+                <td class="px-4 py-3 text-xs">
+                  <span class="px-2 py-0.5 rounded-full
+                    {% if connection.status == 'active' %}bg-green-100 text-green-700
+                    {% elif connection.status == 'planned' %}bg-amber-100 text-amber-700
+                    {% elif connection.status == 'inactive' %}bg-gray-100 text-gray-500
+                    {% else %}bg-red-100 text-red-600{% endif %}">
+                    {{ connection.get_status_display }}
+                  </span>
+                </td>
+                <td class="px-4 py-3 text-right">
+                  <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete_endpoint_connection">
+                    <input type="hidden" name="connection_pk" value="{{ connection.pk }}">
+                    <button type="submit" class="text-xs font-medium text-red-600 hover:text-red-700">Remove</button>
+                  </form>
+                </td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="6" class="px-4 py-12 text-center text-sm text-gray-400">
+                  No endpoint wiring yet. Use the wiring form to connect source ports, NAP inputs, FBT outputs, PLC inputs, and downstream endpoints.
                 </td>
               </tr>
               {% endfor %}
@@ -409,13 +482,77 @@
       </div>
 
       <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-        <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Phase 3B Notes</h3>
+        <h3 class="text-lg font-semibold text-gray-800">Wire Endpoints</h3>
+        <p class="text-sm text-gray-500 mt-1">Connect the upstream port that feeds the downstream port. Use topology link and cable core when the wiring crosses nodes.</p>
+
+        {% if endpoint_connection_form.non_field_errors %}
+        <div class="mt-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {% for error in endpoint_connection_form.non_field_errors %}
+          <p>{{ error }}</p>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <form method="post" class="space-y-4 mt-4">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="create_endpoint_connection">
+          <div>
+            <label for="{{ endpoint_connection_form.upstream_endpoint.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Upstream Endpoint</label>
+            {{ endpoint_connection_form.upstream_endpoint }}
+            {% if endpoint_connection_form.upstream_endpoint.errors %}<p class="text-xs text-red-600 mt-1">{{ endpoint_connection_form.upstream_endpoint.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ endpoint_connection_form.downstream_endpoint.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Downstream Endpoint</label>
+            {{ endpoint_connection_form.downstream_endpoint }}
+            {% if endpoint_connection_form.downstream_endpoint.errors %}<p class="text-xs text-red-600 mt-1">{{ endpoint_connection_form.downstream_endpoint.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label for="{{ endpoint_connection_form.connection_type.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Connection Type</label>
+              {{ endpoint_connection_form.connection_type }}
+              {% if endpoint_connection_form.connection_type.errors %}<p class="text-xs text-red-600 mt-1">{{ endpoint_connection_form.connection_type.errors|join:", " }}</p>{% endif %}
+            </div>
+            <div>
+              <label for="{{ endpoint_connection_form.role.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+              {{ endpoint_connection_form.role }}
+              {% if endpoint_connection_form.role.errors %}<p class="text-xs text-red-600 mt-1">{{ endpoint_connection_form.role.errors|join:", " }}</p>{% endif %}
+            </div>
+          </div>
+          <div>
+            <label for="{{ endpoint_connection_form.topology_link.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Physical Span</label>
+            {{ endpoint_connection_form.topology_link }}
+            {% if endpoint_connection_form.topology_link.errors %}<p class="text-xs text-red-600 mt-1">{{ endpoint_connection_form.topology_link.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ endpoint_connection_form.cable_core.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Cable Core</label>
+            {{ endpoint_connection_form.cable_core }}
+            {% if endpoint_connection_form.cable_core.errors %}<p class="text-xs text-red-600 mt-1">{{ endpoint_connection_form.cable_core.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ endpoint_connection_form.status.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            {{ endpoint_connection_form.status }}
+            {% if endpoint_connection_form.status.errors %}<p class="text-xs text-red-600 mt-1">{{ endpoint_connection_form.status.errors|join:", " }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ endpoint_connection_form.notes.id_for_label }}" class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+            {{ endpoint_connection_form.notes }}
+            {% if endpoint_connection_form.notes.errors %}<p class="text-xs text-red-600 mt-1">{{ endpoint_connection_form.notes.errors|join:", " }}</p>{% endif %}
+          </div>
+          <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 transition" {% if not endpoint_connection_ready %}disabled{% endif %}>
+            Add Wiring
+          </button>
+        </form>
+      </div>
+
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <h3 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Port-Accurate Notes</h3>
         <ul class="mt-3 space-y-2 text-sm text-gray-600">
           <li>Endpoints can now belong directly to the node or to internal devices inside the node.</li>
           <li>Premium subscriber mappings can point to an endpoint instead of only storing a manual text label.</li>
           <li>Active endpoint occupancy is synchronized automatically when a subscriber mapping is saved or removed.</li>
           <li>PLC devices can now declare a model and auto-generate input and split-output ports.</li>
           <li>FBT devices can now declare a ratio and auto-generate one input, one primary pass-through output, and one secondary split output.</li>
+          <li>Endpoint wiring stores exact upstream-to-downstream port flow while topology links remain the physical map span.</li>
         </ul>
       </div>
     </aside>

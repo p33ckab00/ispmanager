@@ -247,7 +247,7 @@ class SubscriberNodeAssignmentNmsTests(TestCase):
         attachment = ServiceAttachment.objects.get(subscriber=subscriber)
         self.assertEqual(attachment.node, node)
         self.assertEqual(attachment.endpoint_label, 'PON-1/1')
-        self.assertEqual(attachment.status, 'active')
+        self.assertEqual(attachment.status, 'needs_review')
 
 
 class SubscriberFieldAuditTests(TestCase):

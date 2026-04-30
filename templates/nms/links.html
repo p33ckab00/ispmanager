@@ -299,6 +299,26 @@
         </div>
       </div>
       {% endif %}
+
+      {% if selected_link and endpoint_connection_ready %}
+      <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <h3 class="text-lg font-semibold text-gray-800">Port Wiring On This Span</h3>
+        <p class="text-sm text-gray-500 mt-1">These endpoint connections use this topology link as the physical route.</p>
+        <div class="mt-4 space-y-3">
+          {% for connection in selected_link_endpoint_connections %}
+          <div class="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+            <p class="text-sm font-medium text-gray-800">{{ connection.upstream_endpoint.display_name }} -> {{ connection.downstream_endpoint.display_name }}</p>
+            <p class="text-xs text-gray-500 mt-1">
+              {{ connection.get_role_display }} · {{ connection.get_connection_type_display }}
+              {% if connection.cable_core %}· {{ connection.cable_core.cable.display_name }} core {{ connection.cable_core.sequence }}{% endif %}
+            </p>
+          </div>
+          {% empty %}
+          <p class="text-sm text-gray-400">No port wiring references this physical span yet.</p>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
     </aside>
   </div>
 </div>

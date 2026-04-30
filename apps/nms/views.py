@@ -11,6 +11,7 @@ from apps.subscribers.models import Subscriber, NetworkNode
 from apps.core.models import AuditLog
 from apps.nms.forms import (
     CableCoreAssignmentForm,
+    EndpointConnectionForm,
     EndpointForm,
     GpsTraceImportForm,
     InternalDeviceForm,
@@ -20,7 +21,7 @@ from apps.nms.forms import (
     TopologyLinkForm,
     TopologyLinkGeometryForm,
 )
-from apps.nms.models import CableCoreAssignment, GpsTrace, Endpoint, InternalDevice, ServiceAttachment, TopologyLink
+from apps.nms.models import CableCoreAssignment, EndpointConnection, GpsTrace, Endpoint, InternalDevice, ServiceAttachment, TopologyLink
 from apps.nms.services import (
     apply_core_assignment,
     build_nms_validation_report,
@@ -39,8 +40,10 @@ from apps.nms.services import (
     has_core_assignment_tables,
     get_topology_route_report,
     get_service_attachment,
+    get_subscriber_billing_state,
     get_subscriber_topology_summary,
     has_distribution_tables,
+    has_endpoint_connection_tables,
     has_gps_trace_tables,
     has_service_attachment_table,
     has_service_attachment_geometry_tables,
@@ -55,6 +58,7 @@ from apps.nms.services import (
     sync_all_endpoint_statuses,
     sync_basic_node_summary,
     sync_endpoint_status,
+    sync_router_roots_and_interface_endpoints,
 )
 
 
@@ -88,6 +92,7 @@ def nms_map(request):
 @login_required
 def nms_map_data(request):
     focus_subscriber_id = request.GET.get('subscriber')
+    sync_router_roots_and_interface_endpoints()
     service_attachment_ready = has_service_attachment_table()
     service_attachment_geometry_ready = has_service_attachment_geometry_tables()
     topology_links_ready = has_topology_link_tables()
@@ -103,10 +108,7 @@ def nms_map_data(request):
     subscribers = Subscriber.objects.filter(
         latitude__isnull=False,
         longitude__isnull=False,
-    ).select_related('plan').values(
-        'id', 'username', 'full_name', 'status', 'mt_status',
-        'latitude', 'longitude', 'ip_address', 'plan__name',
-    )
+    ).select_related('plan')
     nodes = NetworkNode.objects.select_related('router').filter(
         is_active=True,
         latitude__isnull=False,
@@ -120,6 +122,8 @@ def nms_map_data(request):
             'endpoint',
             'endpoint__internal_device',
             'endpoint__parent_node',
+            'endpoint__router_interface',
+            'endpoint__router_interface__traffic_cache',
         ).filter(
             subscriber__latitude__isnull=False,
             subscriber__longitude__isnull=False,
@@ -158,6 +162,7 @@ def nms_map_data(request):
             'endpoint',
             'endpoint__parent_node',
             'endpoint__internal_device__parent_node',
+            'endpoint__router_interface',
         ).filter(subscriber_id=focus_subscriber_id).first()
         if focus_attachment:
             focus_node = focus_attachment.node or (
@@ -169,8 +174,15 @@ def nms_map_data(request):
     for attachment in attachments:
         attachment_by_subscriber_id[attachment.subscriber_id] = attachment
 
+    router_root_by_router_id = {
+        node.router_id: node
+        for node in nodes
+        if getattr(node, 'system_role', '') == 'router_root' and node.router_id
+    }
+
     router_list = []
     for r in routers:
+        root_node = router_root_by_router_id.get(r['id'])
         router_list.append({
             'type': 'router',
             'id': r['id'],
@@ -180,11 +192,12 @@ def nms_map_data(request):
             'lat': r['latitude'],
             'lng': r['longitude'],
             'location': r['location'] or '',
+            'root_node_id': root_node.pk if root_node else None,
         })
 
     sub_list = []
     for s in subscribers:
-        attachment = attachment_by_subscriber_id.get(s['id'])
+        attachment = attachment_by_subscriber_id.get(s.id)
         mapped_node = None
         mapped_endpoint_name = ''
         distribution_url = ''
@@ -195,21 +208,23 @@ def nms_map_data(request):
                 distribution_url = reverse('nms-distribution-detail', args=[mapped_node.pk])
         sub_list.append({
             'type': 'subscriber',
-            'id': s['id'],
-            'username': s['username'],
-            'name': s['full_name'] or s['username'],
-            'status': s['status'],
-            'mt_status': s['mt_status'],
-            'lat': s['latitude'],
-            'lng': s['longitude'],
-            'ip': s['ip_address'] or '',
-            'plan': s['plan__name'] or '',
+            'id': s.id,
+            'username': s.username,
+            'name': s.full_name or s.username,
+            'status': s.status,
+            'mt_status': s.mt_status,
+            'network_state': 'online' if s.mt_status == 'online' else 'offline' if s.mt_status == 'offline' else 'unknown',
+            'billing_state': get_subscriber_billing_state(s),
+            'lat': s.latitude,
+            'lng': s.longitude,
+            'ip': s.ip_address or '',
+            'plan': s.plan.name if s.plan_id else '',
             'topology_status': attachment.status if attachment else 'unassigned',
             'mapped_node_id': mapped_node.pk if mapped_node else None,
             'mapped_node_name': mapped_node.name if mapped_node else '',
             'mapped_endpoint_name': mapped_endpoint_name,
-            'workspace_url': reverse('nms-subscriber-workspace', args=[s['id']]),
-            'detail_url': reverse('subscriber-detail', args=[s['id']]),
+            'workspace_url': reverse('nms-subscriber-workspace', args=[s.id]),
+            'detail_url': reverse('subscriber-detail', args=[s.id]),
             'distribution_url': distribution_url,
         })
 
@@ -227,6 +242,8 @@ def nms_map_data(request):
         serialized_attachment = serialize_service_attachment(attachment)
         if len(serialized_attachment['points']) < 2:
             continue
+        if focus_subscriber_id and str(attachment.subscriber_id) == str(focus_subscriber_id):
+            serialized_attachment['points'] = serialized_attachment.get('full_points') or serialized_attachment['points']
         attachment_list.append(serialized_attachment)
 
     link_list = []
@@ -303,6 +320,26 @@ def nms_operations(request):
                 user=request.user,
             )
             messages.success(request, f"Endpoint statuses synced for {result['synced']} endpoint(s).")
+            return redirect('nms-operations')
+
+        if action == 'sync_router_roots':
+            result = sync_router_roots_and_interface_endpoints()
+            AuditLog.log(
+                'update',
+                'nms',
+                (
+                    f"Premium NMS router roots synced: {result['router_nodes']} root node(s), "
+                    f"{result['router_endpoints']} router endpoint(s)"
+                ),
+                user=request.user,
+            )
+            messages.success(
+                request,
+                (
+                    f"Router roots synced. Added {result['router_nodes']} root node(s) and "
+                    f"{result['router_endpoints']} router ethernet endpoint(s)."
+                ),
+            )
             return redirect('nms-operations')
 
         if action == 'sync_core_assignments':
@@ -534,6 +571,7 @@ def nms_update_attachment_geometry_api(request, attachment_pk):
             'endpoint',
             'endpoint__parent_node',
             'endpoint__internal_device__parent_node',
+            'endpoint__router_interface',
         ).prefetch_related('vertices'),
         pk=attachment_pk,
     )
@@ -547,6 +585,8 @@ def nms_update_attachment_geometry_api(request, attachment_pk):
             'endpoint',
             'endpoint__parent_node',
             'endpoint__internal_device__parent_node',
+            'endpoint__router_interface',
+            'endpoint__router_interface__traffic_cache',
         ).prefetch_related('vertices').get(pk=attachment.pk)
         AuditLog.log(
             'update',
@@ -574,7 +614,9 @@ def nms_links(request):
 
     cable_ready = has_cable_tables()
     core_assignment_ready = has_core_assignment_tables()
+    endpoint_connection_ready = has_endpoint_connection_tables()
     selected_link = None
+    selected_link_endpoint_connections = []
     selected_link_id = request.GET.get('link')
     if selected_link_id and selected_link_id.isdigit():
         selected_link_queryset = TopologyLink.objects.select_related('source_node', 'target_node')
@@ -596,6 +638,19 @@ def nms_links(request):
             }
             for core in selected_link.cable.cores.all():
                 core.structured_core_assignment = assignment_by_core_id.get(core.pk)
+        if endpoint_connection_ready:
+            selected_link_endpoint_connections = EndpointConnection.objects.select_related(
+                'upstream_endpoint',
+                'upstream_endpoint__parent_node',
+                'upstream_endpoint__internal_device__parent_node',
+                'upstream_endpoint__router_interface',
+                'downstream_endpoint',
+                'downstream_endpoint__parent_node',
+                'downstream_endpoint__internal_device__parent_node',
+                'downstream_endpoint__router_interface',
+                'cable_core',
+                'cable_core__cable',
+            ).filter(topology_link=selected_link).order_by('upstream_endpoint__label', 'downstream_endpoint__label')
 
     if request.method == 'POST':
         is_create = selected_link is None
@@ -623,6 +678,8 @@ def nms_links(request):
         'links': links,
         'cable_ready': cable_ready,
         'core_assignment_ready': core_assignment_ready,
+        'endpoint_connection_ready': endpoint_connection_ready,
+        'selected_link_endpoint_connections': selected_link_endpoint_connections,
     })
 
 
@@ -900,6 +957,7 @@ def nms_distribution_detail(request, node_pk):
 
     device_form = InternalDeviceForm(prefix='device')
     endpoint_form = EndpointForm(parent_node=node, prefix='endpoint')
+    endpoint_connection_form = EndpointConnectionForm(parent_node=node, prefix='connection')
 
     if request.method == 'POST':
         action = request.POST.get('action')
@@ -945,6 +1003,36 @@ def nms_distribution_detail(request, node_pk):
                 )
                 messages.success(request, f"Endpoint added: {endpoint.display_name}.")
                 return redirect('nms-distribution-detail', node_pk=node.pk)
+        elif action == 'create_endpoint_connection':
+            endpoint_connection_form = EndpointConnectionForm(request.POST, parent_node=node, prefix='connection')
+            if endpoint_connection_form.is_valid():
+                endpoint_connection = endpoint_connection_form.save()
+                AuditLog.log(
+                    'create',
+                    'nms',
+                    f"Endpoint wiring added for {node.name}: {endpoint_connection.display_name}",
+                    user=request.user,
+                )
+                messages.success(request, f"Endpoint wiring added: {endpoint_connection.display_name}.")
+                return redirect('nms-distribution-detail', node_pk=node.pk)
+        elif action == 'delete_endpoint_connection':
+            if not has_endpoint_connection_tables():
+                messages.error(request, 'Endpoint connection database migration is not applied yet.')
+                return redirect('nms-distribution-detail', node_pk=node.pk)
+            endpoint_connection = get_object_or_404(
+                EndpointConnection,
+                pk=request.POST.get('connection_pk'),
+            )
+            connection_name = endpoint_connection.display_name
+            endpoint_connection.delete()
+            AuditLog.log(
+                'delete',
+                'nms',
+                f"Endpoint wiring removed for {node.name}: {connection_name}",
+                user=request.user,
+            )
+            messages.success(request, f"Endpoint wiring removed: {connection_name}.")
+            return redirect('nms-distribution-detail', node_pk=node.pk)
         elif action == 'sync_plc_outputs':
             internal_device = get_object_or_404(
                 InternalDevice.objects.filter(parent_node=node),
@@ -1034,14 +1122,41 @@ def nms_distribution_detail(request, node_pk):
     for endpoint in all_endpoints:
         endpoint.active_attachment = attachment_by_endpoint_id.get(endpoint.id)
 
+    endpoint_connections = []
+    if has_endpoint_connection_tables():
+        endpoint_ids = [endpoint.pk for endpoint in all_endpoints]
+        endpoint_connections = EndpointConnection.objects.select_related(
+            'upstream_endpoint',
+            'upstream_endpoint__parent_node',
+            'upstream_endpoint__internal_device',
+            'upstream_endpoint__internal_device__parent_node',
+            'upstream_endpoint__router_interface',
+            'downstream_endpoint',
+            'downstream_endpoint__parent_node',
+            'downstream_endpoint__internal_device',
+            'downstream_endpoint__internal_device__parent_node',
+            'downstream_endpoint__router_interface',
+            'topology_link',
+            'topology_link__source_node',
+            'topology_link__target_node',
+            'cable_core',
+            'cable_core__cable',
+        ).filter(
+            Q(upstream_endpoint_id__in=endpoint_ids)
+            | Q(downstream_endpoint_id__in=endpoint_ids)
+        ).order_by('upstream_endpoint__label', 'downstream_endpoint__label', 'id')
+
     return render(request, 'nms/distribution_detail.html', {
         'node': node,
         'device_form': device_form,
         'endpoint_form': endpoint_form,
+        'endpoint_connection_form': endpoint_connection_form,
+        'endpoint_connections': endpoint_connections,
         'internal_devices': internal_devices,
         'direct_endpoints': direct_endpoints,
         'all_endpoints': all_endpoints,
         'active_attachments': active_attachments,
         'review_attachments': review_attachments,
         'service_attachment_ready': has_service_attachment_table(),
+        'endpoint_connection_ready': has_endpoint_connection_tables(),
     })

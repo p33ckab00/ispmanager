@@ -1,14 +1,17 @@
 import math
+from datetime import date
 
 from django.db import DatabaseError, connection
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Count, F, Q
 from django.urls import reverse
+from apps.billing.models import Invoice
 from apps.nms.models import (
     Cable,
     CableCoreAssignment,
     CableCore,
     Endpoint,
+    EndpointConnection,
     GpsTrace,
     GpsTracePoint,
     InternalDevice,
@@ -17,6 +20,7 @@ from apps.nms.models import (
     TopologyLink,
     TopologyLinkVertex,
 )
+from apps.routers.models import Router, RouterInterface
 from apps.subscribers.models import NetworkNode, SubscriberNode
 
 
@@ -91,7 +95,11 @@ def has_topology_link_tables():
 
 
 def has_distribution_tables():
-    return has_model_table(InternalDevice) and has_model_table(Endpoint)
+    return has_model_columns(Endpoint, ['id', 'router_interface_id']) and has_model_table(InternalDevice)
+
+
+def has_endpoint_connection_tables():
+    return has_model_table(EndpointConnection)
 
 
 def has_cable_tables():
@@ -106,6 +114,10 @@ def has_gps_trace_tables():
     return has_model_table(GpsTrace) and has_model_table(GpsTracePoint)
 
 
+def has_router_root_node_fields():
+    return has_model_columns(NetworkNode, ['is_system', 'system_role'])
+
+
 def get_service_attachment(subscriber, table_ready=None):
     if table_ready is None:
         table_ready = has_service_attachment_table()
@@ -118,6 +130,8 @@ def get_service_attachment(subscriber, table_ready=None):
             'endpoint',
             'endpoint__internal_device',
             'endpoint__parent_node',
+            'endpoint__router_interface',
+            'endpoint__router_interface__traffic_cache',
         ).get(subscriber=subscriber)
     except ObjectDoesNotExist:
         return None
@@ -163,6 +177,133 @@ def sync_endpoint_status(endpoint):
     if endpoint.status != new_status:
         endpoint.status = new_status
         endpoint.save(update_fields=['status', 'updated_at'])
+
+
+def ensure_router_root_node(router):
+    if (
+        router is None
+        or not has_router_root_node_fields()
+        or router.latitude is None
+        or router.longitude is None
+        or not router.is_active
+    ):
+        return None, False
+
+    defaults = {
+        'name': f"{router.name} Root",
+        'node_type': 'router_site',
+        'latitude': router.latitude,
+        'longitude': router.longitude,
+        'notes': 'Auto-managed Premium NMS router root node.',
+        'is_active': True,
+        'is_system': True,
+    }
+    node, created = NetworkNode.objects.update_or_create(
+        router=router,
+        system_role='router_root',
+        defaults=defaults,
+    )
+    return node, created
+
+
+def is_router_interface_assignable(interface):
+    return bool(
+        interface
+        and interface.router_id
+        and interface.router.is_active
+        and interface.iface_type == 'ether'
+        and not interface.is_dynamic
+        and not interface.is_slave
+    )
+
+
+def get_router_interface_sequence(interface):
+    digits = ''.join(character for character in (interface.name or '') if character.isdigit())
+    if digits:
+        try:
+            return max(int(digits), 1)
+        except ValueError:
+            return interface.pk or 1
+    return interface.pk or 1
+
+
+def sync_router_interface_endpoint(interface):
+    if not has_distribution_tables() or not is_router_interface_assignable(interface):
+        return None, False
+
+    root_node, _ = ensure_router_root_node(interface.router)
+    if root_node is None:
+        return None, False
+
+    endpoint_type = 'access' if interface.role == 'client' else 'uplink'
+    defaults = {
+        'parent_node': root_node,
+        'internal_device': None,
+        'label': interface.display_name[:80],
+        'endpoint_type': endpoint_type,
+        'sequence': get_router_interface_sequence(interface),
+        'notes': 'Auto-managed router physical ethernet endpoint.',
+    }
+    endpoint, created = Endpoint.objects.update_or_create(
+        router_interface=interface,
+        defaults=defaults,
+    )
+    if endpoint.status not in ('inactive', 'damaged'):
+        sync_endpoint_status(endpoint)
+    return endpoint, created
+
+
+def sync_router_roots_and_interface_endpoints():
+    if not has_router_root_node_fields():
+        return {'router_nodes': 0, 'router_endpoints': 0}
+
+    router_nodes = 0
+    router_endpoints = 0
+    routers = Router.objects.filter(
+        is_active=True,
+        latitude__isnull=False,
+        longitude__isnull=False,
+    )
+    for router in routers:
+        _, node_created = ensure_router_root_node(router)
+        if node_created:
+            router_nodes += 1
+
+    if has_distribution_tables():
+        interfaces = RouterInterface.objects.select_related('router').filter(
+            router__is_active=True,
+            router__latitude__isnull=False,
+            router__longitude__isnull=False,
+            iface_type='ether',
+            is_dynamic=False,
+            is_slave=False,
+        )
+        for interface in interfaces:
+            _, endpoint_created = sync_router_interface_endpoint(interface)
+            if endpoint_created:
+                router_endpoints += 1
+
+    return {
+        'router_nodes': router_nodes,
+        'router_endpoints': router_endpoints,
+    }
+
+
+def ensure_endpoint_connection(upstream_endpoint, downstream_endpoint, *, connection_type='internal', role='other', notes=''):
+    if not has_endpoint_connection_tables() or upstream_endpoint is None or downstream_endpoint is None:
+        return None, False
+
+    connection, created = EndpointConnection.objects.update_or_create(
+        upstream_endpoint=upstream_endpoint,
+        downstream_endpoint=downstream_endpoint,
+        defaults={
+            'connection_type': connection_type,
+            'role': role,
+            'status': 'active',
+            'notes': notes,
+        },
+    )
+    return connection, created
 
 
 def ensure_plc_endpoints(internal_device):
@@ -215,6 +356,22 @@ def ensure_plc_endpoints(internal_device):
             notes='Auto-generated PLC output port.',
         )
         created_outputs += 1
+
+    if has_endpoint_connection_tables():
+        input_endpoint = internal_device.endpoints.filter(
+            endpoint_type='uplink',
+        ).order_by('sequence', 'id').first()
+        if input_endpoint:
+            for output_endpoint in internal_device.endpoints.filter(
+                endpoint_type='split_output',
+            ).order_by('sequence', 'id'):
+                ensure_endpoint_connection(
+                    input_endpoint,
+                    output_endpoint,
+                    connection_type='internal',
+                    role='splitter_output',
+                    notes='Auto-managed PLC internal split path.',
+                )
 
     return {
         'created_inputs': created_inputs,
@@ -301,6 +458,36 @@ def ensure_fbt_endpoints(internal_device):
             update_fields.append('notes')
         if update_fields:
             endpoint.save(update_fields=update_fields + ['updated_at'])
+
+    if has_endpoint_connection_tables():
+        input_endpoint = internal_device.endpoints.filter(
+            endpoint_type='uplink',
+            sequence=1,
+        ).order_by('id').first()
+        primary_endpoint = internal_device.endpoints.filter(
+            endpoint_type='distribution',
+            sequence=1,
+        ).order_by('id').first()
+        secondary_endpoint = internal_device.endpoints.filter(
+            endpoint_type='split_output',
+            sequence=2,
+        ).order_by('id').first()
+        if input_endpoint and primary_endpoint:
+            ensure_endpoint_connection(
+                input_endpoint,
+                primary_endpoint,
+                connection_type='internal',
+                role='passthrough',
+                notes='Auto-managed FBT primary pass-through path.',
+            )
+        if input_endpoint and secondary_endpoint:
+            ensure_endpoint_connection(
+                input_endpoint,
+                secondary_endpoint,
+                connection_type='internal',
+                role='splitter_output',
+                notes='Auto-managed FBT secondary split path.',
+            )
 
     return {
         'created_inputs': created_inputs,
@@ -442,6 +629,8 @@ def get_eligible_endpoints(*, selected_node=None, current_attachment=None):
         'parent_node',
         'internal_device',
         'internal_device__parent_node',
+        'router_interface',
+        'router_interface__router',
     ).filter(
         Q(parent_node__is_active=True) | Q(internal_device__parent_node__is_active=True)
     ).exclude(
@@ -484,6 +673,8 @@ def get_eligible_endpoints(*, selected_node=None, current_attachment=None):
         'parent_node',
         'internal_device',
         'internal_device__parent_node',
+        'router_interface',
+        'router_interface__router',
     ).filter(pk__in=eligible_ids).order_by(
         'parent_node__name',
         'internal_device__parent_node__name',
@@ -491,6 +682,129 @@ def get_eligible_endpoints(*, selected_node=None, current_attachment=None):
         'sequence',
         'label',
     )
+
+
+def is_source_endpoint(endpoint):
+    if endpoint is None:
+        return False
+    if getattr(endpoint, 'router_interface_id', None):
+        return True
+    root_node = endpoint.root_node
+    return bool(root_node and getattr(root_node, 'system_role', '') == 'router_root')
+
+
+def get_active_upstream_connection(endpoint):
+    if endpoint is None or not has_endpoint_connection_tables():
+        return None
+    return EndpointConnection.objects.select_related(
+        'upstream_endpoint',
+        'upstream_endpoint__parent_node',
+        'upstream_endpoint__internal_device',
+        'upstream_endpoint__internal_device__parent_node',
+        'upstream_endpoint__router_interface',
+        'downstream_endpoint',
+        'downstream_endpoint__parent_node',
+        'downstream_endpoint__internal_device',
+        'downstream_endpoint__internal_device__parent_node',
+        'topology_link',
+        'topology_link__source_node',
+        'topology_link__target_node',
+        'cable_core',
+        'cable_core__cable',
+    ).filter(
+        downstream_endpoint=endpoint,
+        status='active',
+    ).first()
+
+
+def endpoint_has_upstream_path(endpoint):
+    if endpoint is None:
+        return False
+    if is_source_endpoint(endpoint):
+        return True
+    if not has_endpoint_connection_tables():
+        return False
+
+    visited = set()
+    current = endpoint
+    while current and current.pk not in visited:
+        visited.add(current.pk)
+        connection = get_active_upstream_connection(current)
+        if connection is None:
+            return False
+        current = connection.upstream_endpoint
+        if is_source_endpoint(current):
+            return True
+    return False
+
+
+def _append_unique_point(points, point):
+    if point is None:
+        return
+    if not points or points[-1] != point:
+        points.append(point)
+
+
+def _node_point(node):
+    if node and node.latitude is not None and node.longitude is not None:
+        return [node.latitude, node.longitude]
+    return None
+
+
+def build_endpoint_upstream_points(endpoint):
+    if endpoint is None or not has_endpoint_connection_tables():
+        return []
+
+    chain = []
+    visited = set()
+    current = endpoint
+    while current and current.pk not in visited and not is_source_endpoint(current):
+        visited.add(current.pk)
+        connection = get_active_upstream_connection(current)
+        if connection is None:
+            break
+        chain.append(connection)
+        current = connection.upstream_endpoint
+
+    points = []
+    for connection in reversed(chain):
+        if connection.topology_link_id:
+            for point in build_topology_link_points(connection.topology_link):
+                _append_unique_point(points, point)
+            continue
+
+        upstream_node = connection.upstream_endpoint.root_node
+        downstream_node = connection.downstream_endpoint.root_node
+        if upstream_node and downstream_node and upstream_node.pk != downstream_node.pk:
+            _append_unique_point(points, _node_point(upstream_node))
+            _append_unique_point(points, _node_point(downstream_node))
+        else:
+            _append_unique_point(points, _node_point(downstream_node or upstream_node))
+
+    if not points:
+        _append_unique_point(points, _node_point(endpoint.root_node))
+    return points
+
+
+def build_service_attachment_full_points(attachment):
+    points = []
+    if attachment.endpoint_id:
+        for point in build_endpoint_upstream_points(attachment.endpoint):
+            _append_unique_point(points, point)
+
+    if not points:
+        serving_node = get_attachment_serving_node(attachment)
+        _append_unique_point(points, _node_point(serving_node))
+
+    if has_service_attachment_geometry_tables():
+        for vertex in attachment.vertices.all():
+            _append_unique_point(points, [vertex.latitude, vertex.longitude])
+
+    subscriber = attachment.subscriber
+    if subscriber.latitude is not None and subscriber.longitude is not None:
+        _append_unique_point(points, [subscriber.latitude, subscriber.longitude])
+
+    return points
 
 
 def get_attachment_review_flags(attachment):
@@ -541,8 +855,12 @@ def get_attachment_review_flags(attachment):
             conflicting_attachment = conflicting_attachment.exclude(pk=attachment.pk)
         if conflicting_attachment.exists():
             add_flag('endpoint_occupied', 'The selected endpoint is already occupied by another active subscriber mapping.')
-    elif attachment.status == 'needs_review':
-        add_flag('manual_review', 'This mapping is still marked as needing review.')
+        if not endpoint_has_upstream_path(endpoint):
+            add_flag('incomplete_upstream_path', 'The selected endpoint has no complete upstream path back to a router source.')
+    else:
+        add_flag('missing_exact_endpoint', 'This mapping is still node-only and needs an exact endpoint or router port.')
+        if attachment.status == 'needs_review':
+            add_flag('manual_review', 'This mapping is still marked as needing review.')
 
     if getattr(attachment, 'pk', None) and has_core_assignment_tables():
         for assignment in get_attachment_core_assignments(attachment):
@@ -736,9 +1054,50 @@ def build_service_attachment_geometry_text(attachment):
     )
 
 
+def get_subscriber_billing_state(subscriber):
+    if not getattr(subscriber, 'is_billable', True):
+        return 'non_billable'
+
+    open_invoices = Invoice.objects.filter(
+        subscriber=subscriber,
+        status__in=['open', 'partial', 'overdue'],
+    )
+    if open_invoices.filter(Q(status='overdue') | Q(due_date__lt=date.today())).exists():
+        return 'overdue'
+    if any(invoice.remaining_balance > 0 for invoice in open_invoices):
+        return 'open'
+    return 'clear'
+
+
+def get_attachment_line_state(attachment):
+    endpoint = attachment.endpoint
+    if endpoint and endpoint.router_interface_id:
+        try:
+            cache = endpoint.router_interface.traffic_cache
+        except ObjectDoesNotExist:
+            cache = None
+        if cache:
+            if cache.activity_state == 'active':
+                return 'active'
+            if cache.activity_state in ('down', 'error'):
+                return 'down'
+            if cache.activity_state == 'idle':
+                return 'idle'
+
+    if attachment.subscriber.mt_status == 'online':
+        return 'active'
+    if attachment.subscriber.mt_status == 'offline':
+        return 'down'
+    if attachment.status == 'needs_review':
+        return 'review'
+    return 'unknown'
+
+
 def serialize_service_attachment(attachment):
     serving_node = get_attachment_serving_node(attachment)
     vertices = list(attachment.vertices.all()) if has_service_attachment_geometry_tables() else []
+    upstream_complete = endpoint_has_upstream_path(attachment.endpoint) if attachment.endpoint_id else False
+    full_points = build_service_attachment_full_points(attachment)
     return {
         'id': attachment.id,
         'subscriber_id': attachment.subscriber_id,
@@ -759,6 +1118,10 @@ def serialize_service_attachment(attachment):
             f"{vertex.latitude},{vertex.longitude}" for vertex in vertices
         ),
         'points': build_service_attachment_points(attachment),
+        'full_points': full_points,
+        'upstream_complete': upstream_complete,
+        'line_state': get_attachment_line_state(attachment),
+        'billing_state': get_subscriber_billing_state(attachment.subscriber),
     }
 
 
@@ -813,6 +1176,8 @@ def serialize_network_node(node):
         'port_count': node.port_count,
         'notes': node.notes or '',
         'is_active': node.is_active,
+        'is_system': getattr(node, 'is_system', False),
+        'system_role': getattr(node, 'system_role', ''),
         'router_id': node.router_id,
         'router_name': node.router.name if node.router_id else '',
         'distribution_url': reverse('nms-distribution-detail', args=[node.id]) if has_distribution_tables() else '',
@@ -1198,11 +1563,46 @@ def build_nms_validation_report():
                 action_label='Open Map',
             )
 
+    if has_router_root_node_fields():
+        for router in Router.objects.filter(is_active=True, latitude__isnull=False, longitude__isnull=False):
+            root_nodes = NetworkNode.objects.filter(router=router, system_role='router_root')
+            if not root_nodes.exists():
+                add_issue(
+                    'warning',
+                    'Router Root',
+                    router.name,
+                    'Router has coordinates but no Premium NMS router root node yet.',
+                    action_url=reverse('nms-operations'),
+                    action_label='Sync Router Roots',
+                )
+            elif root_nodes.count() > 1:
+                add_issue(
+                    'critical',
+                    'Router Root',
+                    router.name,
+                    'Router has more than one root NMS node.',
+                    action_url=reverse('nms-nodes'),
+                    action_label='Review Nodes',
+                )
+            else:
+                root_node = root_nodes.first()
+                if root_node.latitude != router.latitude or root_node.longitude != router.longitude:
+                    add_issue(
+                        'warning',
+                        'Router Root',
+                        router.name,
+                        'Router root node coordinates do not match the router coordinates.',
+                        action_url=f"{reverse('nms-nodes')}?node={root_node.pk}",
+                        action_label='Open Node',
+                    )
+
     if has_distribution_tables() and has_service_attachment_table():
         endpoints = Endpoint.objects.select_related(
             'parent_node',
             'internal_device',
             'internal_device__parent_node',
+            'router_interface',
+            'router_interface__router',
         )
         for endpoint in endpoints:
             if endpoint.status in ('inactive', 'damaged'):
@@ -1220,6 +1620,54 @@ def build_nms_validation_report():
                     endpoint.display_name,
                     f"Endpoint inventory says {endpoint.get_status_display()}, but active mappings imply {expected_status}.",
                     action_url=reverse('nms-distribution-detail', args=[root_node.pk]) if root_node else reverse('nms-map'),
+                    action_label='Open Distribution',
+                )
+            if not is_source_endpoint(endpoint) and not endpoint_has_upstream_path(endpoint):
+                root_node = endpoint.root_node
+                add_issue(
+                    'info',
+                    'Endpoint Wiring',
+                    endpoint.display_name,
+                    'Endpoint has no active upstream path back to a router source.',
+                    action_url=reverse('nms-distribution-detail', args=[root_node.pk]) if root_node else reverse('nms-map'),
+                    action_label='Open Distribution',
+                )
+
+    if has_endpoint_connection_tables():
+        for connection in EndpointConnection.objects.select_related(
+            'upstream_endpoint',
+            'upstream_endpoint__parent_node',
+            'upstream_endpoint__internal_device__parent_node',
+            'downstream_endpoint',
+            'downstream_endpoint__parent_node',
+            'downstream_endpoint__internal_device__parent_node',
+            'topology_link',
+            'cable_core',
+            'cable_core__cable',
+        ):
+            upstream_node = connection.upstream_endpoint.root_node
+            downstream_node = connection.downstream_endpoint.root_node
+            if (
+                upstream_node
+                and downstream_node
+                and upstream_node.pk != downstream_node.pk
+                and not connection.topology_link_id
+            ):
+                add_issue(
+                    'warning',
+                    'Endpoint Wiring',
+                    connection.display_name,
+                    'Cross-node endpoint wiring should reference the physical topology link it uses.',
+                    action_url=reverse('nms-distribution-detail', args=[downstream_node.pk]),
+                    action_label='Open Distribution',
+                )
+            if connection.cable_core_id and connection.topology_link_id and connection.cable_core.cable.link_id != connection.topology_link_id:
+                add_issue(
+                    'critical',
+                    'Endpoint Wiring',
+                    connection.display_name,
+                    'Endpoint wiring references a cable core from a different topology link.',
+                    action_url=reverse('nms-distribution-detail', args=[downstream_node.pk]) if downstream_node else reverse('nms-map'),
                     action_label='Open Distribution',
                 )
 
@@ -1389,6 +1837,19 @@ def get_node_delete_impact(node):
 
 def delete_node_with_descendants(node):
     impact = get_node_delete_impact(node)
-    _node_attachment_queryset(node).delete()
+    attachments = list(_node_attachment_queryset(node).prefetch_related('vertices'))
+    if has_core_assignment_tables():
+        for assignment in CableCoreAssignment.objects.select_related(
+            'core',
+        ).filter(service_attachment__in=attachments):
+            release_core_assignment(assignment)
+    for attachment in attachments:
+        if has_service_attachment_geometry_tables():
+            attachment.vertices.all().delete()
+        attachment.node = None
+        attachment.endpoint = None
+        attachment.endpoint_label = f"Removed with node {node.name}"[:80]
+        attachment.status = 'needs_review'
+        attachment.save(update_fields=['node', 'endpoint', 'endpoint_label', 'status', 'updated_at'])
     node.delete()
     return impact

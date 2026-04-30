@@ -262,6 +262,13 @@ class Endpoint(models.Model):
         blank=True,
         related_name='endpoints',
     )
+    router_interface = models.OneToOneField(
+        'routers.RouterInterface',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='nms_endpoint',
+    )
     label = models.CharField(max_length=80)
     endpoint_type = models.CharField(max_length=30, choices=ENDPOINT_TYPE_CHOICES, default='access')
     sequence = models.PositiveIntegerField(default=1)
@@ -276,6 +283,13 @@ class Endpoint(models.Model):
     def clean(self):
         if bool(self.parent_node_id) == bool(self.internal_device_id):
             raise ValidationError('Endpoint must belong either to a node or to an internal device.')
+        if self.router_interface_id:
+            if self.internal_device_id:
+                raise ValidationError('Router interface endpoints must belong directly to a router root node.')
+            if not self.parent_node_id:
+                raise ValidationError('Router interface endpoints need a router root node.')
+            if self.parent_node.router_id != self.router_interface.router_id:
+                raise ValidationError('Router interface endpoint node must belong to the same router.')
 
     @property
     def root_node(self):
@@ -295,6 +309,8 @@ class Endpoint(models.Model):
 
     @property
     def display_name(self):
+        if self.router_interface_id:
+            return f"Router Port / {self.router_interface.display_name}"
         if self.internal_device_id:
             return f"{self.internal_device.display_name} / {self.label}"
         return self.label
@@ -302,6 +318,136 @@ class Endpoint(models.Model):
     def __str__(self):
         root_node = self.root_node.name if self.root_node else 'Unassigned'
         return f"{root_node} / {self.display_name}"
+
+
+class EndpointConnection(models.Model):
+    CONNECTION_TYPE_CHOICES = [
+        ('fiber', 'Fiber'),
+        ('ethernet', 'Ethernet'),
+        ('patch', 'Patch Cord'),
+        ('splice', 'Splice'),
+        ('internal', 'Internal Wiring'),
+        ('other', 'Other'),
+    ]
+
+    ROLE_CHOICES = [
+        ('feeder', 'Feeder'),
+        ('passthrough', 'Pass-through'),
+        ('splitter_input', 'Splitter Input'),
+        ('splitter_output', 'Splitter Output'),
+        ('drop', 'Drop'),
+        ('direct_client', 'Direct Client'),
+        ('other', 'Other'),
+    ]
+
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('planned', 'Planned'),
+        ('inactive', 'Inactive'),
+        ('damaged', 'Damaged'),
+    ]
+
+    upstream_endpoint = models.ForeignKey(
+        Endpoint,
+        on_delete=models.CASCADE,
+        related_name='downstream_connections',
+    )
+    downstream_endpoint = models.ForeignKey(
+        Endpoint,
+        on_delete=models.CASCADE,
+        related_name='upstream_connections',
+    )
+    connection_type = models.CharField(max_length=20, choices=CONNECTION_TYPE_CHOICES, default='fiber')
+    role = models.CharField(max_length=30, choices=ROLE_CHOICES, default='feeder')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    topology_link = models.ForeignKey(
+        'TopologyLink',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='endpoint_connections',
+    )
+    cable_core = models.ForeignKey(
+        'CableCore',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='endpoint_connections',
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['upstream_endpoint__label', 'downstream_endpoint__label', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['upstream_endpoint', 'downstream_endpoint'],
+                name='uniq_nms_endpoint_connection_pair',
+            ),
+            models.UniqueConstraint(
+                fields=['downstream_endpoint'],
+                condition=Q(status='active'),
+                name='uniq_nms_active_upstream_per_downstream_endpoint',
+            ),
+        ]
+
+    def clean(self):
+        if self.upstream_endpoint_id and self.upstream_endpoint_id == self.downstream_endpoint_id:
+            raise ValidationError('Endpoint connection cannot connect an endpoint to itself.')
+
+        if self.cable_core_id and self.topology_link_id and self.cable_core.cable.link_id != self.topology_link_id:
+            raise ValidationError('Selected cable core does not belong to the selected topology link.')
+
+        if self.topology_link_id and self.upstream_endpoint_id and self.downstream_endpoint_id:
+            upstream_node_id = self.upstream_endpoint.root_node_id
+            downstream_node_id = self.downstream_endpoint.root_node_id
+            if upstream_node_id and downstream_node_id and upstream_node_id != downstream_node_id:
+                if (
+                    self.topology_link.source_node_id != upstream_node_id
+                    or self.topology_link.target_node_id != downstream_node_id
+                ):
+                    raise ValidationError('Topology link direction must match the upstream and downstream endpoint nodes.')
+
+        if self._creates_loop():
+            raise ValidationError('Endpoint connection would create a loop in the port graph.')
+
+    def _creates_loop(self):
+        if not self.upstream_endpoint_id or not self.downstream_endpoint_id:
+            return False
+
+        visited = set()
+        queue = [self.downstream_endpoint_id]
+        while queue:
+            endpoint_id = queue.pop(0)
+            if endpoint_id == self.upstream_endpoint_id:
+                return True
+            if endpoint_id in visited:
+                continue
+            visited.add(endpoint_id)
+            queryset = EndpointConnection.objects.filter(
+                upstream_endpoint_id=endpoint_id,
+                status__in=['active', 'planned'],
+            )
+            if self.pk:
+                queryset = queryset.exclude(pk=self.pk)
+            queue.extend(queryset.values_list('downstream_endpoint_id', flat=True))
+        return False
+
+    @property
+    def display_name(self):
+        return f"{self.upstream_endpoint.display_name} -> {self.downstream_endpoint.display_name}"
+
+    @property
+    def source_node(self):
+        return self.upstream_endpoint.root_node
+
+    @property
+    def target_node(self):
+        return self.downstream_endpoint.root_node
+
+    def __str__(self):
+        return self.display_name
 
 
 class TopologyLink(models.Model):

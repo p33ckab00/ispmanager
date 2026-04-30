@@ -38,6 +38,8 @@ The codebase now includes the current Premium NMS migration set:
 - `apps/nms/migrations/0008_gpstrace_gpstracepoint.py`
 - `apps/nms/migrations/0009_expand_fbt_ratio_choices.py`
 - `apps/nms/migrations/0010_serviceattachmentvertex.py`
+- `apps/nms/migrations/0011_endpoint_router_interface_endpointconnection_and_more.py`
+- `apps/subscribers/migrations/0008_networknode_is_system_networknode_system_role_and_more.py`
 
 For production rollout, the database migrations must be applied and the running web service must be reloaded so the live process picks up the current NMS model layer.
 
@@ -48,20 +50,34 @@ internal devices, FBT ratios, PLC ports, cables, cores, GPS traces, topology
 links, and subscriber drop geometry. The next gap is the physical flow between
 exact inputs and outputs.
 
-The next planned slice is documented in [Premium NMS Port-Accurate Mapping Plan](46_premium_nms_port_accurate_mapping_plan.md).
+The port-accurate mapping slice is documented in [Premium NMS Port-Accurate Mapping Plan](46_premium_nms_port_accurate_mapping_plan.md).
 
-That slice covers:
+The first implementation of that slice now covers:
 
 - router-origin NMS nodes for routers that already have coordinates
 - physical router ethernet ports as assignable endpoints
 - explicit endpoint-to-endpoint links for NAP inputs, FBT IN/output ports, PLC
   IN/output ports, router ports, and subscriber drops
+- separation between physical span truth (`TopologyLink`, `Cable`, `CableCore`)
+  and port wiring truth (endpoint connections)
 - endpoint-required subscriber assignments for new clean mappings
 - legacy node-only mappings preserved as `Needs Review`
 - shared NAP-to-NAP-to-client paths on the map
 - telemetry-aware running dash lines
 - subscriber marker solid-dot online/offline state
 - subscriber marker billing-health rings
+
+The current implementation adds the model and UI foundation for this workflow:
+
+- `NetworkNode` can now mark system-managed router root nodes.
+- `Endpoint` can now reference a physical `RouterInterface`.
+- `EndpointConnection` stores upstream-to-downstream port wiring.
+- Router sync and NMS map refresh can create router root nodes and physical
+  ethernet endpoints.
+- Distribution detail now includes endpoint wiring management.
+- Topology link detail now shows port wiring that uses the selected physical
+  span.
+- Subscriber map rendering now separates live/network state from billing state.
 
 ## Phase 1 Status: Implemented in Code
 
@@ -397,7 +413,7 @@ The cleanest next sequence is:
 
 1. Validate the Phase 4C, Phase 5, and Phase 6 flows in the browser using real fiber links, distribution nodes, subscriber mappings, and GPS trace data.
 2. Restart or reload the running web service so production picks up the latest NMS code.
-3. Implement the port-accurate mapping slice documented in [Premium NMS Port-Accurate Mapping Plan](46_premium_nms_port_accurate_mapping_plan.md).
+3. Continue field validation of the new port-accurate mapping slice documented in [Premium NMS Port-Accurate Mapping Plan](46_premium_nms_port_accurate_mapping_plan.md).
 4. Continue future refinements around richer optical path semantics and deeper field reporting.
 
 ## Practical Interpretation

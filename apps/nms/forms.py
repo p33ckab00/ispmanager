@@ -1,8 +1,11 @@
 from django import forms
+from django.db.models import Q
 from apps.nms.models import (
     Cable,
+    CableCore,
     CableCoreAssignment,
     Endpoint,
+    EndpointConnection,
     GpsTrace,
     GpsTracePoint,
     InternalDevice,
@@ -17,6 +20,7 @@ from apps.nms.services import (
     get_assignable_cable_cores,
     has_cable_tables,
     has_distribution_tables,
+    has_endpoint_connection_tables,
     parse_gps_trace_points,
     sync_cable_cores,
 )
@@ -341,6 +345,120 @@ class EndpointForm(forms.ModelForm):
         if commit:
             endpoint.save()
         return endpoint
+
+
+class EndpointConnectionForm(forms.ModelForm):
+    class Meta:
+        model = EndpointConnection
+        fields = [
+            'upstream_endpoint',
+            'downstream_endpoint',
+            'connection_type',
+            'role',
+            'topology_link',
+            'cable_core',
+            'status',
+            'notes',
+        ]
+        widgets = {
+            'upstream_endpoint': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'downstream_endpoint': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'connection_type': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'role': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'topology_link': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'cable_core': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'status': forms.Select(attrs={
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+            'notes': forms.Textarea(attrs={
+                'rows': 2,
+                'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm',
+            }),
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.parent_node = kwargs.pop('parent_node')
+        super().__init__(*args, **kwargs)
+        endpoint_queryset = Endpoint.objects.select_related(
+            'parent_node',
+            'internal_device',
+            'internal_device__parent_node',
+            'router_interface',
+            'router_interface__router',
+        ).filter(
+            Q(parent_node__is_active=True) | Q(internal_device__parent_node__is_active=True)
+        ).exclude(status__in=['inactive', 'damaged']).order_by(
+            'parent_node__name',
+            'internal_device__parent_node__name',
+            'internal_device__name',
+            'sequence',
+            'label',
+        )
+        self.fields['upstream_endpoint'].queryset = endpoint_queryset
+        self.fields['downstream_endpoint'].queryset = endpoint_queryset
+        self.fields['upstream_endpoint'].label_from_instance = self._endpoint_label
+        self.fields['downstream_endpoint'].label_from_instance = self._endpoint_label
+        self.fields['topology_link'].queryset = TopologyLink.objects.select_related(
+            'source_node',
+            'target_node',
+        ).order_by('name', 'id')
+        self.fields['topology_link'].required = False
+        self.fields['topology_link'].empty_label = '-- Same-box/internal or no span --'
+        self.fields['cable_core'].required = False
+        self.fields['cable_core'].empty_label = '-- No cable core --'
+        if has_cable_tables():
+            self.fields['cable_core'].queryset = CableCore.objects.select_related(
+                'cable',
+                'cable__link',
+            ).exclude(status='damaged').order_by('cable__name', 'sequence')
+        else:
+            self.fields['cable_core'].queryset = CableCore.objects.none()
+            self.fields['cable_core'].disabled = True
+        if not has_endpoint_connection_tables():
+            for field in self.fields.values():
+                field.disabled = True
+
+    def _endpoint_label(self, endpoint):
+        root_node = endpoint.root_node
+        root_label = root_node.name if root_node else 'Unknown'
+        return f"{root_label} / {endpoint.display_name} [{endpoint.get_status_display()}]"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        upstream_endpoint = cleaned_data.get('upstream_endpoint')
+        downstream_endpoint = cleaned_data.get('downstream_endpoint')
+        topology_link = cleaned_data.get('topology_link')
+        cable_core = cleaned_data.get('cable_core')
+
+        if cable_core and topology_link is None:
+            cleaned_data['topology_link'] = cable_core.cable.link
+            topology_link = cleaned_data['topology_link']
+
+        if cable_core and topology_link and cable_core.cable.link_id != topology_link.pk:
+            raise forms.ValidationError('Selected cable core does not belong to the selected topology link.')
+
+        if upstream_endpoint and downstream_endpoint:
+            current_node_ids = {
+                endpoint.root_node_id
+                for endpoint in [upstream_endpoint, downstream_endpoint]
+                if endpoint.root_node_id
+            }
+            if self.parent_node.pk not in current_node_ids:
+                raise forms.ValidationError('At least one endpoint in the wiring must belong to this node.')
+
+        return cleaned_data
 
 
 class NetworkNodeForm(forms.ModelForm):

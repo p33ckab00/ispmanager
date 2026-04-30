@@ -22,21 +22,45 @@
   .marker-router.selected { box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18); }
   .marker-sub {
     border-radius: 50%;
-    width: 12px;
-    height: 12px;
-    border: 2px solid #fff;
+    width: 18px;
+    height: 18px;
+    border: 2px dashed #9ca3af;
+    background: rgba(255, 255, 255, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .marker-sub.focused,
   .marker-sub.selected {
-    width: 16px;
-    height: 16px;
+    width: 22px;
+    height: 22px;
     border-width: 3px;
   }
   .marker-sub.selected { box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.18); }
-  .marker-sub.online { background: #22c55e; }
-  .marker-sub.offline { background: #9ca3af; }
-  .marker-sub.suspended { background: #f59e0b; }
-  .marker-sub.disconnected { background: #ef4444; }
+  .marker-sub .marker-sub-core {
+    width: 9px;
+    height: 9px;
+    border-radius: 9999px;
+    background: #9ca3af;
+  }
+  .marker-sub.focused .marker-sub-core,
+  .marker-sub.selected .marker-sub-core {
+    width: 11px;
+    height: 11px;
+  }
+  .marker-sub.online .marker-sub-core { background: #22c55e; }
+  .marker-sub.offline .marker-sub-core { background: #ef4444; }
+  .marker-sub.unknown .marker-sub-core { background: #9ca3af; }
+  .marker-sub.suspended .marker-sub-core { background: #f59e0b; }
+  .marker-sub.disconnected .marker-sub-core { background: #64748b; }
+  .marker-sub.billing-overdue { border-color: #ef4444; }
+  .marker-sub.billing-open { border-color: #f59e0b; }
+  .marker-sub.billing-clear { border-color: #22c55e; }
+  .marker-sub.billing-non_billable,
+  .marker-sub.billing-unknown { border-color: #9ca3af; }
+  @keyframes nms-dash-flow { to { stroke-dashoffset: -24; } }
+  .nms-line-active { animation: nms-dash-flow 1.2s linear infinite; }
+  .nms-line-idle { animation: nms-dash-flow 2.8s linear infinite; }
   .marker-node {
     width: 15px;
     height: 15px;
@@ -45,6 +69,11 @@
     background: #fb923c;
   }
   .marker-node.olt { background: #f97316; }
+  .marker-node.router_site {
+    background: #2563eb;
+    border-radius: 50%;
+    transform: none;
+  }
   .marker-node.cabinet { background: #0ea5e9; }
   .marker-node.access_point { background: #8b5cf6; }
   .marker-node.splice_box { background: #14b8a6; }
@@ -442,22 +471,27 @@ function makeNodeIcon(node) {
 }
 
 function makeSubscriberIcon(subscriber) {
-  let cls = 'offline'
+  let cls = 'unknown'
   if (subscriber.mt_status === 'online') cls = 'online'
+  else if (subscriber.mt_status === 'offline') cls = 'offline'
   else if (subscriber.status === 'suspended') cls = 'suspended'
   else if (subscriber.status === 'disconnected') cls = 'disconnected'
+  const billingClass = `billing-${subscriber.billing_state || 'unknown'}`
   const classes = [
     'marker-sub',
     cls,
+    billingClass,
     focusSubscriberId === subscriber.id ? 'focused' : '',
     state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 'selected' : '',
   ].filter(Boolean).join(' ')
+  const selected = state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id
+  const size = selected ? 22 : focusSubscriberId === subscriber.id ? 22 : 18
   return L.divIcon({
     className: '',
-    html: `<div class="${classes}"></div>`,
-    iconSize: [state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 16 : 12, state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 16 : 12],
-    iconAnchor: [state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 8 : 6, state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? 8 : 6],
-    popupAnchor: [0, state.selectedObject?.type === 'subscriber' && state.selectedObject.id === subscriber.id ? -12 : -8],
+    html: `<div class="${classes}"><span class="marker-sub-core"></span></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -12],
   })
 }
 
@@ -497,6 +531,29 @@ function getTopologyLinkStyle(link) {
   }
 
   return style
+}
+
+function getAttachmentStyle(attachment, highlighted) {
+  const stateStyles = {
+    active: { color: '#22c55e', dashArray: '8, 8', className: 'nms-line-active' },
+    idle: { color: '#84cc16', dashArray: '8, 10', className: 'nms-line-idle' },
+    down: { color: '#ef4444', dashArray: '5, 7', className: '' },
+    review: { color: '#f59e0b', dashArray: '8, 8', className: '' },
+    unknown: { color: '#94a3b8', dashArray: '6, 8', className: '' },
+  }
+  const style = { ...(stateStyles[attachment.line_state] || stateStyles.unknown) }
+  if (attachment.status === 'needs_review' || !attachment.upstream_complete) {
+    style.color = '#f59e0b'
+    style.dashArray = style.dashArray || '8, 8'
+    style.className = ''
+  }
+  return {
+    color: style.color,
+    weight: highlighted ? 5 : 3,
+    opacity: highlighted ? 0.95 : 0.82,
+    dashArray: style.dashArray,
+    className: style.className,
+  }
 }
 
 function getDataUrl() {
@@ -1493,6 +1550,7 @@ function drawMap() {
 
   if (state.visibility.routers) {
     state.data.routers.forEach(router => {
+      if (router.root_node_id) return
       const marker = L.marker([router.lat, router.lng], { icon: makeRouterIcon(router) })
       marker.bindPopup(`
         <b><i class="fa fa-router"></i> ${escapeHtml(router.name)}</b><br>
@@ -1562,6 +1620,8 @@ function drawMap() {
         <span class="text-gray-400 font-mono text-xs">${escapeHtml(subscriber.username)}</span><br>
         Plan: ${escapeHtml(subscriber.plan || '-')}<br>
         IP: ${escapeHtml(subscriber.ip || '-')}<br>
+        Network: ${escapeHtml(formatLabel(subscriber.network_state || subscriber.mt_status))}<br>
+        Billing: ${escapeHtml(formatLabel(subscriber.billing_state || 'unknown'))}<br>
         Mapped Node: ${escapeHtml(subscriber.mapped_node_name || '-')}<br>
         ${subscriber.mapped_endpoint_name ? `Endpoint: ${escapeHtml(subscriber.mapped_endpoint_name)}<br>` : ''}
         <a href="${subscriber.detail_url}" style="color:#2563eb">View Subscriber</a>
@@ -1588,17 +1648,15 @@ function drawMap() {
       )
       const polyline = L.polyline(
         pathPoints,
-        {
-          color: attachment.status === 'needs_review' ? '#f59e0b' : '#22c55e',
-          weight: highlightAttachment ? 5 : 3,
-          opacity: 0.85,
-          dashArray: attachment.status === 'needs_review' ? '8, 8' : null,
-        }
+        getAttachmentStyle(attachment, highlightAttachment)
       )
       polyline.bindPopup(`
         <b>${escapeHtml(attachment.subscriber_name)}</b><br>
         Node: ${escapeHtml(attachment.node_name || '-')}<br>
         Status: ${escapeHtml(formatLabel(attachment.status))}<br>
+        Path: ${attachment.upstream_complete ? 'Upstream complete' : 'Needs upstream review'}<br>
+        Live: ${escapeHtml(formatLabel(attachment.line_state || 'unknown'))}<br>
+        Billing: ${escapeHtml(formatLabel(attachment.billing_state || 'unknown'))}<br>
         Vertices: ${attachment.vertex_count || 0}<br>
         ${attachment.endpoint_label ? `Endpoint: ${escapeHtml(attachment.endpoint_label)}<br>` : ''}
         <a href="${attachment.workspace_url}" style="color:#2563eb">Open NMS Workspace</a>

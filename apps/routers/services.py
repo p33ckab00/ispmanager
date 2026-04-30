@@ -74,6 +74,12 @@ def sync_interfaces(router):
     router.last_seen = timezone.now()
     router.save(update_fields=['status', 'last_seen'])
 
+    try:
+        from apps.nms.services import sync_router_roots_and_interface_endpoints
+        sync_router_roots_and_interface_endpoints()
+    except Exception:
+        pass
+
     return True, f"Synced {len(synced_names)} interfaces."
 
 

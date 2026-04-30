@@ -7,6 +7,7 @@ from apps.nms.models import (
     Cable,
     CableCoreAssignment,
     Endpoint,
+    EndpointConnection,
     GpsTrace,
     GpsTracePoint,
     InternalDevice,
@@ -18,14 +19,16 @@ from apps.nms.services import (
     apply_core_assignment,
     build_nms_validation_report,
     delete_node_with_descendants,
+    endpoint_has_upstream_path,
     get_outage_impact,
     get_gps_trace_distance_km,
     get_assignable_cable_cores,
     parse_gps_trace_points,
     release_core_assignment,
     sync_cable_cores,
+    sync_router_roots_and_interface_endpoints,
 )
-from apps.routers.models import Router
+from apps.routers.models import Router, RouterInterface
 from apps.subscribers.models import NetworkNode, Subscriber, SubscriberNode
 
 
@@ -142,7 +145,7 @@ class CableCoreAssignmentTests(TestCase):
 
         messages = [issue['message'] for issue in report['issues']]
         self.assertIn(
-            'This mapping is active but still uses only a serving node or manual endpoint label.',
+            'This mapping is still node-only and needs an exact endpoint or router port.',
             messages,
         )
 
@@ -173,6 +176,85 @@ class CableCoreAssignmentTests(TestCase):
         self.assertIn(self.attachment, impact['attachments'])
         self.assertIn(downstream_attachment, impact['attachments'])
         self.assertEqual(impact['subscriber_count'], 2)
+
+
+class RouterRootEndpointConnectionTests(TestCase):
+    def test_sync_router_roots_creates_router_node_and_physical_endpoint(self):
+        router = Router.objects.create(
+            name='Core Router',
+            host='192.0.2.1',
+            username='admin',
+            password='secret',
+            latitude=14.5901,
+            longitude=120.9811,
+            is_active=True,
+        )
+        interface = RouterInterface.objects.create(
+            router=router,
+            name='ether7',
+            iface_type='ether',
+            role='client',
+            is_dynamic=False,
+            is_slave=False,
+        )
+
+        result = sync_router_roots_and_interface_endpoints()
+
+        root_node = NetworkNode.objects.get(router=router, system_role='router_root')
+        endpoint = Endpoint.objects.get(router_interface=interface)
+        self.assertEqual(result['router_nodes'], 1)
+        self.assertEqual(result['router_endpoints'], 1)
+        self.assertEqual(root_node.node_type, 'router_site')
+        self.assertTrue(root_node.is_system)
+        self.assertEqual(endpoint.parent_node, root_node)
+        self.assertEqual(endpoint.endpoint_type, 'access')
+
+    def test_endpoint_connection_completes_upstream_path_to_router_source(self):
+        router = Router.objects.create(
+            name='Core Router',
+            host='192.0.2.1',
+            username='admin',
+            password='secret',
+            latitude=14.5901,
+            longitude=120.9811,
+            is_active=True,
+        )
+        RouterInterface.objects.create(
+            router=router,
+            name='ether1',
+            iface_type='ether',
+            role='olt',
+            is_dynamic=False,
+            is_slave=False,
+        )
+        sync_router_roots_and_interface_endpoints()
+        router_endpoint = Endpoint.objects.get(router_interface__name='ether1')
+        nap = NetworkNode.objects.create(
+            name='NAP-Path',
+            node_type='splice_box',
+            latitude=14.5911,
+            longitude=120.9821,
+        )
+        nap_input = Endpoint.objects.create(
+            parent_node=nap,
+            label='IN',
+            endpoint_type='uplink',
+        )
+        link = TopologyLink.objects.create(
+            source_node=router_endpoint.root_node,
+            target_node=nap,
+            link_type='fiber',
+            status='active',
+        )
+        EndpointConnection.objects.create(
+            upstream_endpoint=router_endpoint,
+            downstream_endpoint=nap_input,
+            connection_type='fiber',
+            role='feeder',
+            topology_link=link,
+        )
+
+        self.assertTrue(endpoint_has_upstream_path(nap_input))
 
 
 class GpsTraceAnalyticsTests(TestCase):
@@ -332,6 +414,9 @@ class NetworkNodeDeleteTests(TestCase):
         self.assertTrue(Subscriber.objects.filter(pk=subscriber.pk).exists())
         self.assertTrue(NetworkNode.objects.filter(pk=source_node.pk).exists())
         self.assertFalse(NetworkNode.objects.filter(pk=node.pk).exists())
-        self.assertFalse(ServiceAttachment.objects.filter(pk=attachment.pk).exists())
+        attachment.refresh_from_db()
+        self.assertIsNone(attachment.node)
+        self.assertIsNone(attachment.endpoint)
+        self.assertEqual(attachment.status, 'needs_review')
         self.assertFalse(SubscriberNode.objects.filter(subscriber=subscriber).exists())
         self.assertFalse(TopologyLink.objects.filter(pk=link.pk).exists())
