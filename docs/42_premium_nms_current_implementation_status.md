@@ -77,7 +77,10 @@ The current implementation adds the model and UI foundation for this workflow:
 - Distribution detail now includes endpoint wiring management.
 - Topology link detail now shows port wiring that uses the selected physical
   span.
-- Subscriber map rendering now separates live/network state from billing state.
+- Active fiber spans and edited path vertices now use animated running dash
+  styling for a premium map feel.
+- Subscriber map rendering now separates live/network state from billing state
+  with animated solid dots and dashed billing rings.
 
 ## Phase 1 Status: Implemented in Code
 

@@ -54,6 +54,9 @@ NAP/FBT/PLC/router-port wiring, node-only mappings marked as Needs Review, the
 source-to-feeder-to-distribution-to-drop workflow, clearer separation between
 physical spans and port wiring, topology-link wiring visibility,
 telemetry-aware running dash lines, and billing-health rings on client markers.
+Active fiber spans and edited/focused subscriber path vertices now animate with
+running dash styling, while online client dots and billing attention rings have
+subtle marker animation.
 
 ---
 

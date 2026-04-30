@@ -466,6 +466,8 @@ The map should render:
 - editable vertices for both node-to-node links and subscriber drops
 - focused full-path highlight for one selected subscriber instead of drawing
   every subscriber's full upstream path all the time
+- animated running dash styling for active fiber spans and focused subscriber
+  paths, including paths with manually edited vertices
 
 If a subscriber path has no custom vertices yet, it should default to:
 
@@ -498,6 +500,9 @@ Subscriber markers should show two different states:
 
 - solid inner dot: live status from router or subscriber telemetry
 - dashed outer ring: billing health
+- online solid dots may pulse lightly
+- overdue or open-balance billing rings may rotate subtly so billing attention
+  is visible without confusing it with live network state
 
 Solid dot defaults:
 

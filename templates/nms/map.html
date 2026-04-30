@@ -58,9 +58,20 @@
   .marker-sub.billing-clear { border-color: #22c55e; }
   .marker-sub.billing-non_billable,
   .marker-sub.billing-unknown { border-color: #9ca3af; }
-  @keyframes nms-dash-flow { to { stroke-dashoffset: -24; } }
+  @keyframes nms-dash-flow { to { stroke-dashoffset: -28; } }
+  @keyframes nms-ring-spin { to { transform: rotate(360deg); } }
+  @keyframes nms-dot-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.18); opacity: 0.82; }
+  }
   .nms-line-active { animation: nms-dash-flow 1.2s linear infinite; }
   .nms-line-idle { animation: nms-dash-flow 2.8s linear infinite; }
+  .nms-line-fiber { animation: nms-dash-flow 1.8s linear infinite; }
+  .marker-sub.online .marker-sub-core { animation: nms-dot-pulse 1.7s ease-in-out infinite; }
+  .marker-sub.billing-overdue,
+  .marker-sub.billing-open {
+    animation: nms-ring-spin 7s linear infinite;
+  }
   .marker-node {
     width: 15px;
     height: 15px;
@@ -506,7 +517,7 @@ function makeGeometryVertexIcon(index) {
 
 function getTopologyLinkStyle(link) {
   const baseStyles = {
-    fiber: { color: '#2563eb', weight: 4, opacity: 0.85, dashArray: null },
+    fiber: { color: '#2563eb', weight: 4, opacity: 0.85, dashArray: '10, 10', className: 'nms-line-fiber' },
     ethernet: { color: '#0f766e', weight: 4, opacity: 0.85, dashArray: null },
     wireless: { color: '#7c3aed', weight: 3, opacity: 0.8, dashArray: '10, 8' },
     power: { color: '#ea580c', weight: 3, opacity: 0.8, dashArray: null },
@@ -517,10 +528,12 @@ function getTopologyLinkStyle(link) {
   if (link.status === 'planned') {
     style.dashArray = style.dashArray || '8, 8'
     style.opacity = 0.7
+    style.className = ''
   } else if (link.status === 'inactive') {
     style.color = '#94a3b8'
     style.dashArray = '5, 7'
     style.opacity = 0.65
+    style.className = ''
   }
 
   const isSelected = state.selectedObject?.type === 'link' && state.selectedObject.id === link.id
@@ -833,6 +846,7 @@ function renderGeometryHandles() {
       weight: 5,
       opacity: 0.7,
       dashArray: '8, 8',
+      className: 'nms-line-idle',
     }).addTo(geometryLayer)
   }
 
@@ -1637,15 +1651,19 @@ function drawMap() {
 
   if (state.visibility.mappings) {
     state.data.attachments.forEach(attachment => {
-      const pathPoints = attachment.points || [
-        [attachment.node_lat, attachment.node_lng],
-        [attachment.subscriber_lat, attachment.subscriber_lng],
-      ]
       const highlightAttachment = (
         (focusSubscriberId && attachment.subscriber_id === focusSubscriberId)
         || (state.selectedObject?.type === 'subscriber' && attachment.subscriber_id === state.selectedObject.id)
         || (state.selectedObject?.type === 'attachment' && attachment.id === state.selectedObject.id)
       )
+      const pathPoints = (
+        highlightAttachment && attachment.full_points?.length >= 2
+          ? attachment.full_points
+          : attachment.points
+      ) || [
+        [attachment.node_lat, attachment.node_lng],
+        [attachment.subscriber_lat, attachment.subscriber_lng],
+      ]
       const polyline = L.polyline(
         pathPoints,
         getAttachmentStyle(attachment, highlightAttachment)
