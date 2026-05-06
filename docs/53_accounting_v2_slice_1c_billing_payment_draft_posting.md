@@ -94,13 +94,31 @@ Slice 1C-D adds draft posting for customer credit adjustments:
 - existing legacy `ExpenseRecord` creation on refund completion remains legacy
   only; Accounting v2 Trial Balance still uses posted journals only.
 
-Remaining Slice 1C gaps after Slice 1C-D:
+Slice 1C-E adds invoice waiver and void source drafts:
+
+- disconnected-billing waiver now collects affected invoices before status
+  update so each waived invoice gets a reviewable `Invoice.waiver` source
+  posting.
+- waiver drafts use remaining AR balance:
+  `Dr 6050 Bad Debts and Subscriber Waivers / Cr 1100 Accounts Receivable`.
+- deceased-subscriber invoice void now collects affected invoices before
+  status update so each voided invoice gets a reviewable `Invoice.void` source
+  posting.
+- void drafts block for review when the original invoice source journal is not
+  posted yet, because the accountant should review or void the original draft
+  instead of creating a second financial entry.
+- void drafts reverse remaining AR only after the original invoice source
+  journal has been posted:
+  `Dr 4000 Internet Service Revenue / Cr 1100 Accounts Receivable`.
+- fully paid or zero-balance waived/voided invoices are skipped with an
+  auditable source posting note instead of creating zero-amount journals.
+
+Remaining Slice 1C gaps after Slice 1C-E:
 
 - VAT invoice posting is still blocked until invoice tax breakdown or explicit
   VAT posting settings are added.
 - 2307 upload attachments and finalized SAWT/2307 export schedules are not yet
   implemented.
-- waiver and void posting services are still pending.
 - retry blocked source posting and backfill management commands are still
   pending.
 

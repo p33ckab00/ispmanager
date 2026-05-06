@@ -361,16 +361,32 @@ def apply_disconnected_billing_policy(subscriber, policy=None, disconnected_by='
         return result
 
     if policy == 'waive_open_balances':
-        updated = Invoice.objects.filter(
+        invoices = list(Invoice.objects.filter(
             subscriber=subscriber,
             status__in=['open', 'partial', 'overdue'],
-        ).update(
-            status='waived',
-            void_reason='admin_adjustment',
-            void_note='Auto-waived: subscriber marked disconnected',
-            voided_at=timezone.now(),
-            voided_by=disconnected_by,
-        )
+        ).order_by('period_start', 'created_at'))
+        waived_at = timezone.now()
+        updated = 0
+        for invoice in invoices:
+            invoice.status = 'waived'
+            invoice.void_reason = 'admin_adjustment'
+            invoice.void_note = 'Auto-waived: subscriber marked disconnected'
+            invoice.voided_at = waived_at
+            invoice.voided_by = disconnected_by
+            invoice.save(update_fields=[
+                'status',
+                'void_reason',
+                'void_note',
+                'voided_at',
+                'voided_by',
+                'updated_at',
+            ])
+            updated += 1
+            try:
+                from apps.accounting.services import create_invoice_waiver_source_draft
+                create_invoice_waiver_source_draft(invoice)
+            except Exception:
+                logger.exception('Accounting v2 waiver draft failed for invoice %s.', invoice.pk)
         result['waived_count'] = updated
         result['message'] = f"Waived {updated} open invoice(s)."
         return result
@@ -1213,14 +1229,30 @@ def mark_overdue_invoices():
 
 @transaction.atomic
 def void_invoices_for_deceased(subscriber, voided_by='admin'):
-    updated = Invoice.objects.filter(
+    invoices = list(Invoice.objects.filter(
         subscriber=subscriber,
         status__in=['open', 'partial', 'overdue'],
-    ).update(
-        status='voided',
-        void_reason='subscriber_deceased',
-        void_note='Auto-voided: subscriber marked deceased',
-        voided_at=timezone.now(),
-        voided_by=voided_by,
-    )
+    ).order_by('period_start', 'created_at'))
+    voided_at = timezone.now()
+    updated = 0
+    for invoice in invoices:
+        invoice.status = 'voided'
+        invoice.void_reason = 'subscriber_deceased'
+        invoice.void_note = 'Auto-voided: subscriber marked deceased'
+        invoice.voided_at = voided_at
+        invoice.voided_by = voided_by
+        invoice.save(update_fields=[
+            'status',
+            'void_reason',
+            'void_note',
+            'voided_at',
+            'voided_by',
+            'updated_at',
+        ])
+        updated += 1
+        try:
+            from apps.accounting.services import create_invoice_void_source_draft
+            create_invoice_void_source_draft(invoice)
+        except Exception:
+            logger.exception('Accounting v2 void draft failed for invoice %s.', invoice.pk)
     return updated

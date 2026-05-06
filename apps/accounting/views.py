@@ -373,6 +373,8 @@ def source_review(request):
         'status_choices': AccountingSourcePosting.STATUS_CHOICES,
         'source_type_options': [
             ('Invoice', 'Invoices'),
+            ('Invoice.waiver', 'Invoice Waivers'),
+            ('Invoice.void', 'Invoice Voids'),
             ('Payment.collection', 'Payments'),
             ('PaymentAllocation', 'Advance Applications'),
             ('AccountCreditAdjustment', 'Credit Adjustments'),

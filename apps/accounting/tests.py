@@ -19,6 +19,8 @@ from apps.accounting.services import (
     create_accounting_foundation,
     create_credit_adjustment_source_draft,
     create_invoice_source_draft,
+    create_invoice_void_source_draft,
+    create_invoice_waiver_source_draft,
     create_manual_journal_entry,
     create_payment_source_draft,
     post_journal_entry,
@@ -330,3 +332,60 @@ class AccountingV2SourcePostingTests(TestCase):
         lines = {line.account.code: line for line in journal_entry.lines.select_related('account')}
         self.assertEqual(lines['2100'].debit, Decimal('250.00'))
         self.assertEqual(lines['7000'].credit, Decimal('250.00'))
+
+    def test_invoice_waiver_source_posting_clears_remaining_ar(self):
+        self._foundation()
+        invoice = self._invoice(amount=Decimal('1000.00'))
+        invoice.amount_paid = Decimal('250.00')
+        invoice.status = 'waived'
+        invoice.voided_at = timezone.now()
+        invoice.save(update_fields=['amount_paid', 'status', 'voided_at', 'updated_at'])
+
+        journal_entry = create_invoice_waiver_source_draft(invoice)
+
+        self.assertTrue(journal_entry.is_balanced())
+        posting = AccountingSourcePosting.objects.get(
+            source_model='Invoice.waiver',
+            source_id=str(invoice.pk),
+        )
+        self.assertEqual(posting.status, 'draft')
+        self.assertEqual(posting.amount, Decimal('750.00'))
+        lines = {line.account.code: line for line in journal_entry.lines.select_related('account')}
+        self.assertEqual(lines['6050'].debit, Decimal('750.00'))
+        self.assertEqual(lines['1100'].credit, Decimal('750.00'))
+
+    def test_invoice_void_source_posting_blocks_when_invoice_journal_is_not_posted(self):
+        self._foundation()
+        invoice = self._invoice()
+        invoice.status = 'voided'
+        invoice.voided_at = timezone.now()
+        invoice.save(update_fields=['status', 'voided_at', 'updated_at'])
+
+        result = create_invoice_void_source_draft(invoice)
+
+        self.assertIsInstance(result, AccountingSourcePosting)
+        self.assertEqual(result.status, 'blocked')
+        self.assertIn('source journal is not posted', result.blocked_reason)
+
+    def test_invoice_void_source_posting_reverses_posted_invoice_remaining_ar(self):
+        self._foundation()
+        invoice = self._invoice(amount=Decimal('1000.00'))
+        invoice_journal = create_invoice_source_draft(invoice)
+        post_journal_entry(invoice_journal)
+        invoice.amount_paid = Decimal('250.00')
+        invoice.status = 'voided'
+        invoice.voided_at = timezone.now()
+        invoice.save(update_fields=['amount_paid', 'status', 'voided_at', 'updated_at'])
+
+        journal_entry = create_invoice_void_source_draft(invoice)
+
+        self.assertTrue(journal_entry.is_balanced())
+        posting = AccountingSourcePosting.objects.get(
+            source_model='Invoice.void',
+            source_id=str(invoice.pk),
+        )
+        self.assertEqual(posting.status, 'draft')
+        self.assertEqual(posting.amount, Decimal('750.00'))
+        lines = {line.account.code: line for line in journal_entry.lines.select_related('account')}
+        self.assertEqual(lines['4000'].debit, Decimal('750.00'))
+        self.assertEqual(lines['1100'].credit, Decimal('750.00'))

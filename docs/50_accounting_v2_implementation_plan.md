@@ -78,6 +78,9 @@ claims can be tied to explicit optional classifications instead of being treated
 as an automatic payment behavior.
 Slice 1C-D adds draft source posting for refund due, refund paid, and customer
 credit forfeiture adjustments.
+Slice 1C-E adds draft source posting for invoice waivers and voids, including
+review blocking when a voided invoice does not have a posted original invoice
+source journal yet.
 
 ## 2. Locked Decisions
 
@@ -304,19 +307,20 @@ multi-tenant hardening, and full compliance diagnostics.
 
 ### Summary
 
-Build the source-posting portion of the first Accounting v2 release. Slice 1C-A
-now covers the safe billing/payment foundation: billing invoices, payments, and
-advance applications can create or reuse Accounting v2 draft journal entries
-for review. Customer EWT/CWT claimed through BIR Form 2307 is tracked
-separately from cash receipts so gross AR can be settled by net cash plus
-creditable withholding tax receivable.
+Build the source-posting portion of the first Accounting v2 release. Slice 1C
+now covers the safe billing/payment foundation: billing invoices, payments,
+advance applications, refund/forfeiture adjustments, waivers, and voids can
+create or reuse Accounting v2 draft journal entries for review. Customer
+EWT/CWT claimed through BIR Form 2307 is tracked separately from cash receipts
+so gross AR can be settled by net cash plus creditable withholding tax
+receivable.
 
 Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
 later migration.
 
-Remaining Slice 1C work is refund-due/refund-paid posting, credit forfeiture,
-waiver/void posting, retry/backfill tooling, 2307 attachment/export schedules,
-and full VAT invoice posting after invoice tax breakdown support exists.
+Remaining Slice 1C work is retry/backfill tooling, 2307 attachment/export
+schedules, and full VAT invoice posting after invoice tax breakdown support
+exists.
 
 ### Key Changes
 

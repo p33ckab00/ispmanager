@@ -5,6 +5,7 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from apps.accounting.models import (
+    AccountingSourcePosting,
     CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
     ExpenseRecord,
@@ -399,6 +400,11 @@ class DisconnectedBillingPolicyTests(TestCase):
         self.assertEqual(result['message'], 'Existing balances preserved.')
 
     def test_waive_policy_marks_open_balances_waived(self):
+        create_accounting_foundation(
+            entity_name='Billing Waiver ISP',
+            template_key='isp_non_vat_sole_prop',
+            fiscal_year=timezone.localdate().year,
+        )
         subscriber = Subscriber.objects.create(
             username='disconnect-waive',
             monthly_rate=Decimal('1000.00'),
@@ -438,6 +444,12 @@ class DisconnectedBillingPolicyTests(TestCase):
         self.assertEqual(open_invoice.status, 'waived')
         self.assertEqual(open_invoice.voided_by, 'tester')
         self.assertEqual(paid_invoice.status, 'paid')
+        posting = AccountingSourcePosting.objects.get(
+            source_model='Invoice.waiver',
+            source_id=str(open_invoice.pk),
+        )
+        self.assertEqual(posting.status, 'draft')
+        self.assertEqual(posting.amount, Decimal('1000.00'))
 
     def test_final_invoice_policy_generates_current_invoice(self):
         subscriber = Subscriber.objects.create(

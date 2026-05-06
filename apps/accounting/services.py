@@ -332,6 +332,7 @@ POSTING_ACCOUNT_CODES = {
     'customer_advances': '2100',
     'refunds_payable': '2110',
     'internet_revenue': '4000',
+    'waiver_expense': '6050',
     'other_income': '7000',
 }
 
@@ -439,7 +440,8 @@ def _existing_source_journal(entity, source, posting_type):
 
 @transaction.atomic
 def _create_source_journal(entity, source, posting_type, entry_date, description, lines,
-                           source_type, reference=''):
+                           source_type, reference='', posting_amount=None):
+    posting_amount = posting_amount if posting_amount is not None else _source_amount(source)
     existing = _existing_source_journal(entity, source, posting_type)
     if existing:
         _upsert_source_posting(
@@ -448,7 +450,7 @@ def _create_source_journal(entity, source, posting_type, entry_date, description
             existing.status if existing.status == 'posted' else 'draft',
             entity=entity,
             journal_entry=existing,
-            amount=_source_amount(source),
+            amount=posting_amount,
             document_date=entry_date,
         )
         return existing
@@ -492,7 +494,7 @@ def _create_source_journal(entity, source, posting_type, entry_date, description
         'draft',
         entity=entity,
         journal_entry=journal_entry,
-        amount=_source_amount(source),
+        amount=posting_amount,
         document_date=entry_date,
     )
     return journal_entry
@@ -635,6 +637,141 @@ def create_invoice_source_draft(invoice):
         'invoice',
         create,
         amount=invoice.amount,
+        document_date=entry_date,
+    )
+
+
+def _invoice_action_date(invoice):
+    return _document_date_from_datetime(
+        getattr(invoice, 'voided_at', None)
+        or getattr(invoice, 'updated_at', None)
+        or getattr(invoice, 'created_at', None)
+    )
+
+
+def _invoice_remaining_amount(invoice):
+    return max(
+        _decimal_amount(getattr(invoice, 'remaining_balance', Decimal('0.00'))),
+        Decimal('0.00'),
+    )
+
+
+def create_invoice_waiver_source_draft(invoice):
+    entry_date = _invoice_action_date(invoice)
+    amount = _invoice_remaining_amount(invoice)
+
+    def create(entity):
+        if invoice.status != 'waived':
+            raise ValidationError('Only waived invoices can create waiver drafts.')
+        if amount <= Decimal('0.00'):
+            return _upsert_source_posting(
+                invoice,
+                'waiver',
+                'skipped',
+                entity=entity,
+                blocked_reason='Waived invoice has no remaining AR balance to clear.',
+                amount=amount,
+                document_date=entry_date,
+            )
+        return _create_source_journal(
+            entity,
+            invoice,
+            'waiver',
+            entry_date,
+            f"Waiver {invoice.invoice_number} - {invoice.subscriber.username}",
+            [
+                {
+                    'account': _posting_account(entity, 'waiver_expense'),
+                    'debit': amount,
+                    'description': invoice.invoice_number,
+                },
+                {
+                    'account': _posting_account(entity, 'ar'),
+                    'credit': amount,
+                    'description': invoice.invoice_number,
+                },
+            ],
+            source_type='adjustment',
+            reference=invoice.invoice_number,
+            posting_amount=amount,
+        )
+
+    return _source_posting_fail_soft(
+        invoice,
+        'waiver',
+        create,
+        amount=amount,
+        document_date=entry_date,
+    )
+
+
+def create_invoice_void_source_draft(invoice):
+    entry_date = _invoice_action_date(invoice)
+    amount = _invoice_remaining_amount(invoice)
+
+    def create(entity):
+        if invoice.status != 'voided':
+            raise ValidationError('Only voided invoices can create void drafts.')
+        if amount <= Decimal('0.00'):
+            return _upsert_source_posting(
+                invoice,
+                'void',
+                'skipped',
+                entity=entity,
+                blocked_reason='Voided invoice has no remaining AR balance to reverse.',
+                amount=amount,
+                document_date=entry_date,
+            )
+
+        original_invoice_journal = _existing_source_journal(entity, invoice, 'invoice')
+        if not original_invoice_journal or original_invoice_journal.status != 'posted':
+            return _block_source_posting(
+                invoice,
+                'void',
+                'Original invoice source journal is not posted; review or void the original draft instead.',
+                entity=entity,
+                amount=amount,
+                document_date=entry_date,
+            )
+
+        if entity.tax_classification == 'vat':
+            return _block_source_posting(
+                invoice,
+                'void',
+                'VAT invoice void reversal is blocked until invoice tax breakdown is available.',
+                entity=entity,
+                amount=amount,
+                document_date=entry_date,
+            )
+
+        return _create_source_journal(
+            entity,
+            invoice,
+            'void',
+            entry_date,
+            f"Void {invoice.invoice_number} - {invoice.subscriber.username}",
+            [
+                {
+                    'account': _posting_account(entity, 'internet_revenue'),
+                    'debit': amount,
+                    'description': invoice.invoice_number,
+                },
+                {
+                    'account': _posting_account(entity, 'ar'),
+                    'credit': amount,
+                    'description': invoice.invoice_number,
+                },
+            ],
+            source_type='adjustment',
+            reference=invoice.invoice_number,
+            posting_amount=amount,
+        )
+
+    return _source_posting_fail_soft(
+        invoice,
+        'void',
+        create,
+        amount=amount,
         document_date=entry_date,
     )
 
