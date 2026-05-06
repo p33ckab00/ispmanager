@@ -11,6 +11,13 @@
     <div class="text-center mb-8">
       <h1 class="text-xl font-bold text-gray-800">Enter OTP</h1>
       <p class="text-gray-500 text-sm mt-1">Sent to {{ phone }}</p>
+      <p id="otp-expiry-line" class="text-xs text-gray-400 mt-2">
+        {% if seconds_remaining > 0 %}
+          Code expires in <span id="otp-countdown">{{ seconds_remaining }}</span>s
+        {% else %}
+          Code expired
+        {% endif %}
+      </p>
     </div>
     {% if messages %}
       {% for message in messages %}
@@ -22,18 +29,57 @@
       <input type="hidden" name="phone" value="{{ phone }}">
       <div class="mb-6">
         <label class="block text-sm font-medium text-gray-700 mb-1">6-digit OTP Code</label>
-        <input type="text" name="code" maxlength="6"
+        <input id="otp-code" type="text" name="code" maxlength="6"
           class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-center tracking-widest text-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="000000" autofocus>
+          placeholder="000000" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]*"
+          {% if seconds_remaining <= 0 %}disabled{% else %}autofocus{% endif %}>
       </div>
-      <button type="submit"
-        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg text-sm transition">
+      <button id="otp-verify-button" type="submit"
+        class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg text-sm transition"
+        {% if seconds_remaining <= 0 %}disabled{% endif %}>
         Verify
       </button>
+      <div class="text-center text-sm mt-4">
+        {% if can_resend %}
+          <a href="/subscribers/portal/" class="text-blue-600 hover:text-blue-700 font-medium">Request a new code</a>
+        {% else %}
+          <span class="text-gray-400">Resend available in <span id="otp-resend-countdown">{{ resend_seconds_remaining }}</span>s</span>
+        {% endif %}
+      </div>
       <a href="/subscribers/portal/" class="block text-center text-sm text-gray-400 hover:text-gray-600 mt-4">
         Use a different number
       </a>
     </form>
   </div>
+  <script>
+    const countdownEl = document.getElementById('otp-countdown');
+    const resendEl = document.getElementById('otp-resend-countdown');
+    const codeInput = document.getElementById('otp-code');
+    const verifyButton = document.getElementById('otp-verify-button');
+    const expiryLine = document.getElementById('otp-expiry-line');
+    let secondsRemaining = Number('{{ seconds_remaining|default:0 }}');
+    let resendSecondsRemaining = Number('{{ resend_seconds_remaining|default:0 }}');
+
+    const formatSeconds = (seconds) => Math.max(0, seconds).toString();
+
+    const tick = () => {
+      if (secondsRemaining > 0) {
+        secondsRemaining -= 1;
+        if (countdownEl) countdownEl.textContent = formatSeconds(secondsRemaining);
+      }
+      if (secondsRemaining <= 0) {
+        if (codeInput) codeInput.disabled = true;
+        if (verifyButton) verifyButton.disabled = true;
+        if (expiryLine) expiryLine.textContent = 'Code expired';
+      }
+      if (resendSecondsRemaining > 0) {
+        resendSecondsRemaining -= 1;
+        if (resendEl) resendEl.textContent = formatSeconds(resendSecondsRemaining);
+        if (resendSecondsRemaining === 0) window.location.reload();
+      }
+    };
+
+    window.setInterval(tick, 1000);
+  </script>
 </body>
 </html>

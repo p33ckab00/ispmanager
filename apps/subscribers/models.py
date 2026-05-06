@@ -127,10 +127,6 @@ class Subscriber(models.Model):
     disconnected_date = models.DateField(null=True, blank=True)
     disconnected_reason = models.TextField(blank=True)
 
-    # Portal
-    portal_otp = models.CharField(max_length=6, blank=True)
-    portal_otp_expires = models.DateTimeField(null=True, blank=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -232,16 +228,39 @@ class RateHistory(models.Model):
 
 
 class SubscriberOTP(models.Model):
-    subscriber = models.ForeignKey(Subscriber, on_delete=models.CASCADE, related_name='otps')
-    phone = models.CharField(max_length=20)
+    CHANNEL_CHOICES = [
+        ('sms', 'SMS'),
+        ('email', 'Email'),
+    ]
+
+    subscriber = models.ForeignKey(
+        Subscriber,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='otps',
+    )
+    phone = models.CharField(max_length=30)
     normalized_phone = models.CharField(max_length=20, blank=True, db_index=True)
-    code = models.CharField(max_length=6)
+    code_hash = models.CharField(max_length=128, blank=True)
+    channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default='sms')
+    destination = models.CharField(max_length=255, blank=True)
     is_used = models.BooleanField(default=False)
     expires_at = models.DateTimeField()
+    sent_at = models.DateTimeField(null=True, blank=True)
+    request_ip = models.GenericIPAddressField(null=True, blank=True)
+    request_user_agent = models.TextField(blank=True)
+    verify_attempts = models.PositiveIntegerField(default=0)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    locked_until = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['normalized_phone', 'created_at']),
+            models.Index(fields=['request_ip', 'created_at']),
+        ]
 
     def __str__(self):
         return f"OTP for {self.phone}"

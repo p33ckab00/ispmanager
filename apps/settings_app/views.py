@@ -34,6 +34,14 @@ def _ctx(active):
     return {'nav_items': NAV_ITEMS, 'active': active}
 
 
+def _bounded_int(value, default, minimum, maximum):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 @login_required
 def settings_index(request):
     return redirect('settings-system-info')
@@ -147,7 +155,43 @@ def subscriber_settings(request):
             if credit_policy in allowed_credit_policies
             else 'preserve_credit'
         )
-        obj.archive_after_days = int(request.POST.get('archive_after_days', 90))
+        obj.archive_after_days = _bounded_int(request.POST.get('archive_after_days'), 90, 0, 3650)
+        obj.portal_otp_expiry_minutes = _bounded_int(
+            request.POST.get('portal_otp_expiry_minutes'),
+            10,
+            1,
+            60,
+        )
+        obj.portal_otp_resend_cooldown_seconds = _bounded_int(
+            request.POST.get('portal_otp_resend_cooldown_seconds'),
+            60,
+            10,
+            3600,
+        )
+        obj.portal_otp_max_verify_attempts = _bounded_int(
+            request.POST.get('portal_otp_max_verify_attempts'),
+            5,
+            1,
+            20,
+        )
+        obj.portal_otp_lockout_minutes = _bounded_int(
+            request.POST.get('portal_otp_lockout_minutes'),
+            15,
+            1,
+            1440,
+        )
+        obj.portal_otp_phone_hourly_limit = _bounded_int(
+            request.POST.get('portal_otp_phone_hourly_limit'),
+            5,
+            1,
+            100,
+        )
+        obj.portal_otp_ip_hourly_limit = _bounded_int(
+            request.POST.get('portal_otp_ip_hourly_limit'),
+            30,
+            1,
+            1000,
+        )
         obj.save()
         AuditLog.log('update', 'settings', 'Subscriber settings updated', user=request.user)
         messages.success(request, 'Subscriber settings saved.')

@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+import math
 
 from django.conf import settings as django_settings
 from django.utils import timezone
@@ -243,6 +244,42 @@ def send_manual_sms(phone, message, subscriber=None, sent_by='admin', sms_type='
     )
     try:
         semaphore_send(phone, message)
+        log.status = 'sent'
+        log.save(update_fields=['status'])
+        return log, None
+    except Exception as e:
+        log.status = 'failed'
+        log.error_message = str(e)
+        log.save(update_fields=['status', 'error_message'])
+        return log, str(e)
+
+
+def send_portal_otp_sms(subscriber, raw_code, expires_at, sent_by='portal', otp=None):
+    if subscriber.sms_opt_out:
+        return None, 'Subscriber opted out of SMS.'
+
+    seconds_remaining = max(0, int((expires_at - timezone.now()).total_seconds()))
+    expiry_minutes = max(1, math.ceil(seconds_remaining / 60))
+    warning = 'Do not share this code. ISP staff will never ask for it.'
+    message = (
+        f"Your ISP Manager login code is: {raw_code}. "
+        f"Valid for {expiry_minutes} minutes. {warning}"
+    )
+    redacted_message = (
+        "Your ISP Manager login code is: ******. "
+        f"Valid for {expiry_minutes} minutes. {warning}"
+    )
+
+    log = SMSLog.objects.create(
+        subscriber=subscriber,
+        phone=subscriber.phone[:20],
+        message=redacted_message,
+        sms_type='otp',
+        status='pending',
+        sent_by=sent_by,
+    )
+    try:
+        semaphore_send(subscriber.phone, message)
         log.status = 'sent'
         log.save(update_fields=['status'])
         return log, None

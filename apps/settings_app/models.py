@@ -178,6 +178,30 @@ class SubscriberSettings(models.Model):
         default=90,
         help_text='Auto-archive disconnected/deceased subscribers after this many days'
     )
+    portal_otp_expiry_minutes = models.IntegerField(
+        default=10,
+        help_text='How long subscriber portal OTP codes remain valid.'
+    )
+    portal_otp_resend_cooldown_seconds = models.IntegerField(
+        default=60,
+        help_text='Minimum wait before another OTP request for the same phone number.'
+    )
+    portal_otp_max_verify_attempts = models.IntegerField(
+        default=5,
+        help_text='Maximum wrong OTP attempts before temporary lockout.'
+    )
+    portal_otp_lockout_minutes = models.IntegerField(
+        default=15,
+        help_text='How long OTP verification is locked after too many wrong attempts.'
+    )
+    portal_otp_phone_hourly_limit = models.IntegerField(
+        default=5,
+        help_text='Maximum OTP requests per normalized phone number per hour.'
+    )
+    portal_otp_ip_hourly_limit = models.IntegerField(
+        default=30,
+        help_text='Maximum OTP requests per source IP per hour.'
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

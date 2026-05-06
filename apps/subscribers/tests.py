@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from django.contrib.auth.hashers import check_password
 from django.contrib.auth.models import Permission, User
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
@@ -10,10 +11,19 @@ from django.utils import timezone
 from apps.core.models import AuditLog
 from apps.nms.models import ServiceAttachment
 from apps.routers.models import Router
-from apps.settings_app.models import BillingSettings
+from apps.settings_app.models import BillingSettings, SubscriberSettings
+from apps.sms.models import SMSLog
+from apps.sms.services import send_portal_otp_sms
 from apps.subscribers.forms import ManualSubscriberForm, SubscriberAdminForm
 from apps.subscribers.models import NetworkNode, Subscriber, SubscriberNode, SubscriberOTP, normalize_phone_digits
-from apps.subscribers.otp import create_otp, find_portal_subscriber_by_phone, verify_otp_for_subscriber
+from apps.subscribers.otp import (
+    GENERIC_OTP_REQUEST_MESSAGE,
+    GENERIC_OTP_VERIFY_ERROR,
+    create_otp,
+    find_portal_subscriber_by_phone,
+    record_portal_otp_request,
+    verify_otp_for_subscriber,
+)
 from apps.subscribers.services import audit_subscriber_field_changes, get_subscriber_billing_readiness
 from apps.subscribers.services import set_subscriber_mikrotik_access, transition_subscriber_status
 
@@ -275,23 +285,224 @@ class SubscriberPhoneNormalizationTests(TestCase):
         self.assertEqual(stale_error, 'No account found with this phone number.')
         self.assertEqual(stale_normalized_phone, '639077613830')
 
-        otp = create_otp(match)
-        self.assertEqual(otp.normalized_phone, '639663067637')
+        result = create_otp(match)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.otp.normalized_phone, '639663067637')
 
     def test_otp_verification_uses_pending_subscriber_id(self):
         subscriber = Subscriber.objects.create(
             username='portal-otp',
             phone='0917 123 4567',
         )
-        otp = create_otp(subscriber)
+        result = create_otp(subscriber)
+        otp = result.otp
 
-        verified, error = verify_otp_for_subscriber(subscriber.pk, otp.code)
+        verified, error = verify_otp_for_subscriber(subscriber.pk, result.raw_code)
 
         otp.refresh_from_db()
         self.assertEqual(verified, subscriber)
         self.assertIsNone(error)
         self.assertTrue(otp.is_used)
         self.assertEqual(otp.normalized_phone, '639171234567')
+
+
+class PortalOTPSecurityTests(TestCase):
+    def _subscriber(self, username='otp-client', phone='0917 123 4567', status='active'):
+        return Subscriber.objects.create(
+            username=username,
+            phone=phone,
+            status=status,
+        )
+
+    def _settings(self, **overrides):
+        settings = SubscriberSettings.get_settings()
+        for field, value in overrides.items():
+            setattr(settings, field, value)
+        settings.save()
+        return settings
+
+    def test_create_otp_hashes_code_and_uses_configured_expiry(self):
+        self._settings(portal_otp_expiry_minutes=5)
+        subscriber = self._subscriber()
+        before = timezone.now()
+
+        result = create_otp(subscriber, request_ip='203.0.113.10', user_agent='portal-test')
+
+        self.assertTrue(result.ok)
+        self.assertFalse(hasattr(result.otp, 'code'))
+        self.assertNotEqual(result.raw_code, result.otp.code_hash)
+        self.assertTrue(check_password(result.raw_code, result.otp.code_hash))
+        self.assertEqual(result.otp.request_ip, '203.0.113.10')
+        self.assertEqual(result.otp.request_user_agent, 'portal-test')
+        self.assertGreaterEqual(result.otp.expires_at, before + timedelta(minutes=5) - timedelta(seconds=2))
+        self.assertLessEqual(result.otp.expires_at, timezone.now() + timedelta(minutes=5, seconds=2))
+
+    def test_expired_otp_is_rejected(self):
+        subscriber = self._subscriber()
+        result = create_otp(subscriber)
+        SubscriberOTP.objects.filter(pk=result.otp.pk).update(
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        verified, error = verify_otp_for_subscriber(subscriber.pk, result.raw_code)
+
+        self.assertIsNone(verified)
+        self.assertEqual(error, GENERIC_OTP_VERIFY_ERROR)
+
+    def test_wrong_attempts_lock_active_otp(self):
+        self._settings(
+            portal_otp_max_verify_attempts=2,
+            portal_otp_lockout_minutes=15,
+        )
+        subscriber = self._subscriber()
+        result = create_otp(subscriber)
+
+        self.assertEqual(verify_otp_for_subscriber(subscriber.pk, '111111'), (None, GENERIC_OTP_VERIFY_ERROR))
+        self.assertEqual(verify_otp_for_subscriber(subscriber.pk, '222222'), (None, GENERIC_OTP_VERIFY_ERROR))
+
+        result.otp.refresh_from_db()
+        self.assertEqual(result.otp.verify_attempts, 2)
+        self.assertIsNotNone(result.otp.locked_until)
+        self.assertGreater(result.otp.locked_until, timezone.now())
+
+        verified, error = verify_otp_for_subscriber(subscriber.pk, result.raw_code)
+        self.assertIsNone(verified)
+        self.assertEqual(error, GENERIC_OTP_VERIFY_ERROR)
+
+    def test_resend_cooldown_blocks_then_new_otp_invalidates_previous_unused_code(self):
+        self._settings(portal_otp_resend_cooldown_seconds=10)
+        subscriber = self._subscriber()
+        first = create_otp(subscriber)
+
+        blocked = create_otp(subscriber)
+        self.assertFalse(blocked.ok)
+        self.assertTrue(blocked.throttled)
+
+        SubscriberOTP.objects.filter(pk=first.otp.pk).update(
+            created_at=timezone.now() - timedelta(seconds=11),
+        )
+        second = create_otp(subscriber)
+
+        first.otp.refresh_from_db()
+        self.assertTrue(second.ok)
+        self.assertTrue(first.otp.is_used)
+        self.assertFalse(second.otp.is_used)
+
+    def test_per_phone_hourly_limit_blocks_requests_after_cooldown(self):
+        self._settings(
+            portal_otp_resend_cooldown_seconds=10,
+            portal_otp_phone_hourly_limit=1,
+        )
+        subscriber = self._subscriber()
+        first = create_otp(subscriber)
+        SubscriberOTP.objects.filter(pk=first.otp.pk).update(
+            created_at=timezone.now() - timedelta(seconds=11),
+        )
+
+        result = create_otp(subscriber)
+
+        self.assertFalse(result.ok)
+        self.assertTrue(result.throttled)
+        self.assertEqual(result.error, 'phone_limit')
+
+    def test_per_ip_hourly_limit_blocks_requests_from_same_ip(self):
+        self._settings(
+            portal_otp_resend_cooldown_seconds=10,
+            portal_otp_phone_hourly_limit=10,
+            portal_otp_ip_hourly_limit=1,
+        )
+        first_subscriber = self._subscriber(username='ip-limit-a', phone='0917 000 0001')
+        second_subscriber = self._subscriber(username='ip-limit-b', phone='0917 000 0002')
+        first = create_otp(first_subscriber, request_ip='203.0.113.15')
+        SubscriberOTP.objects.filter(pk=first.otp.pk).update(
+            created_at=timezone.now() - timedelta(seconds=11),
+        )
+
+        result = create_otp(second_subscriber, request_ip='203.0.113.15')
+
+        self.assertFalse(result.ok)
+        self.assertTrue(result.throttled)
+        self.assertEqual(result.error, 'ip_limit')
+
+    def test_unknown_portal_request_is_recorded_without_subscriber_or_code_hash(self):
+        self._settings()
+
+        result = record_portal_otp_request(
+            '0999 000 0000',
+            normalized_phone='639990000000',
+            request_ip='198.51.100.20',
+            user_agent='unknown-client',
+        )
+
+        self.assertFalse(result.ok)
+        self.assertFalse(result.throttled)
+        self.assertIsNone(result.otp.subscriber)
+        self.assertTrue(result.otp.is_used)
+        self.assertEqual(result.otp.code_hash, '')
+        self.assertEqual(result.otp.request_ip, '198.51.100.20')
+        self.assertEqual(result.otp.request_user_agent, 'unknown-client')
+
+    def test_portal_otp_sms_log_redacts_raw_code(self):
+        subscriber = self._subscriber()
+        result = create_otp(subscriber)
+
+        with patch('apps.sms.services.semaphore_send') as send_mock:
+            log, error = send_portal_otp_sms(subscriber, result.raw_code, result.expires_at)
+
+        self.assertIsNone(error)
+        self.assertEqual(log.status, 'sent')
+        self.assertNotIn(result.raw_code, log.message)
+        self.assertIn('******', log.message)
+        self.assertIn('staff will never ask', log.message)
+        self.assertIn(result.raw_code, send_mock.call_args.args[1])
+        self.assertFalse(SMSLog.objects.filter(message__contains=result.raw_code).exists())
+
+    def test_portal_request_responses_are_generic_for_account_states(self):
+        Subscriber.objects.create(username='portal-valid', phone='0917 000 0010', status='active')
+        Subscriber.objects.create(username='portal-inactive', phone='0917 000 0011', status='inactive')
+        Subscriber.objects.create(username='portal-archived', phone='0917 000 0012', status='archived')
+        Subscriber.objects.create(username='portal-dup-a', phone='0917 000 0013', status='active')
+        Subscriber.objects.create(username='portal-dup-b', phone='09170000013', status='active')
+        cases = [
+            '0917 000 0010',
+            '0917 000 0011',
+            '0917 000 0012',
+            '0917 000 0013',
+            '0917 000 0014',
+        ]
+
+        with patch('apps.subscribers.views.send_portal_otp_sms') as send_mock:
+            for phone in cases:
+                response = self.client.post(
+                    '/subscribers/portal/',
+                    {'phone': phone},
+                    follow=True,
+                    HTTP_HOST='localhost',
+                    REMOTE_ADDR='198.51.100.30',
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.request['PATH_INFO'], '/subscribers/portal/verify/')
+                self.assertContains(response, GENERIC_OTP_REQUEST_MESSAGE)
+
+        self.assertEqual(send_mock.call_count, 1)
+
+    def test_verify_page_exposes_countdown_and_resend_timing(self):
+        self._settings(portal_otp_resend_cooldown_seconds=60)
+        subscriber = self._subscriber()
+        result = create_otp(subscriber)
+        session = self.client.session
+        session['portal_phone'] = subscriber.phone
+        session['portal_normalized_phone'] = normalize_phone_digits(subscriber.phone)
+        session['portal_otp_subscriber_id'] = subscriber.pk
+        session.save()
+
+        response = self.client.get('/subscribers/portal/verify/', HTTP_HOST='localhost')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(response.context['seconds_remaining'], 0)
+        self.assertGreater(response.context['resend_seconds_remaining'], 0)
+        self.assertFalse(response.context['can_resend'])
+        self.assertEqual(response.context['expires_at'], result.otp.expires_at)
 
 
 class SubscriberNodeAssignmentNmsTests(TestCase):

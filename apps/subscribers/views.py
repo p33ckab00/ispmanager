@@ -4,6 +4,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.http import JsonResponse
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from apps.subscribers.models import Subscriber, Plan, RateHistory, NetworkNode, SubscriberNode
 from apps.subscribers.forms import (
@@ -26,10 +27,21 @@ from apps.nms.services import (
 )
 from apps.nms.models import ServiceAttachment
 from apps.billing.services import apply_rate_change
-from apps.subscribers.otp import create_otp, find_portal_subscriber_by_phone, verify_otp_for_subscriber
+from apps.subscribers.otp import (
+    GENERIC_OTP_REQUEST_MESSAGE,
+    GENERIC_OTP_VERIFY_ERROR,
+    PORTAL_OTP_ELIGIBLE_STATUSES,
+    create_otp,
+    find_portal_subscriber_by_phone,
+    get_client_ip,
+    get_otp_session_timing,
+    get_user_agent,
+    record_portal_otp_request,
+    verify_otp_for_subscriber,
+)
 from apps.routers.models import Router
 from apps.core.models import AuditLog
-from apps.sms.services import send_subscriber_billing_sms
+from apps.sms.services import send_portal_otp_sms, send_subscriber_billing_sms
 
 
 def _require_subscriber_perm(request, permission_codename, redirect_to='subscriber-list',
@@ -724,32 +736,60 @@ def subscriber_add(request):
 
 # ── Client Portal ─────────────────────────────────────────────────────────────
 
+def _isoformat_or_empty(value):
+    return value.isoformat() if value else ''
+
+
+def _session_datetime(request, key):
+    value = request.session.get(key)
+    if not value:
+        return None
+    return parse_datetime(value)
+
+
 def portal_request_otp(request):
     if request.method == 'POST':
         form = OTPRequestForm(request.POST)
         if form.is_valid():
             phone = form.cleaned_data['phone']
+            normalized_phone = getattr(form, 'normalized_phone', '')
+            request_ip = get_client_ip(request)
+            user_agent = get_user_agent(request)
             subscriber, error, normalized_phone = find_portal_subscriber_by_phone(phone)
-            if error:
-                messages.error(request, error)
-                return render(request, 'subscribers/portal_otp_request.html', {'form': form})
-
-            if subscriber.status in ('deceased', 'archived'):
-                messages.error(request, 'This account is no longer active.')
-                return render(request, 'subscribers/portal_otp_request.html', {'form': form})
-
-            otp = create_otp(subscriber)
-            try:
-                from apps.sms.semaphore import send_sms
-                send_sms(subscriber.phone, f"Your ISP Manager login code is: {otp.code}. Valid for 10 minutes.")
-            except Exception as e:
-                messages.error(request, f"OTP created but SMS delivery failed: {e}")
-                return render(request, 'subscribers/portal_otp_request.html', {'form': form})
-
-            request.session['portal_phone'] = subscriber.phone
+            request.session['portal_phone'] = phone
             request.session['portal_normalized_phone'] = normalized_phone
-            request.session['portal_otp_subscriber_id'] = subscriber.pk
-            messages.success(request, 'OTP sent to your phone.')
+            request.session.pop('portal_otp_subscriber_id', None)
+
+            result = None
+            if subscriber and not error and subscriber.status in PORTAL_OTP_ELIGIBLE_STATUSES:
+                request.session['portal_otp_subscriber_id'] = subscriber.pk
+                result = create_otp(
+                    subscriber,
+                    request_ip=request_ip,
+                    user_agent=user_agent,
+                )
+                if result.ok:
+                    send_portal_otp_sms(
+                        subscriber,
+                        result.raw_code,
+                        result.expires_at,
+                        sent_by='portal',
+                        otp=result.otp,
+                    )
+            else:
+                result = record_portal_otp_request(
+                    phone,
+                    normalized_phone=normalized_phone,
+                    request_ip=request_ip,
+                    user_agent=user_agent,
+                )
+
+            if result and result.expires_at:
+                request.session['portal_otp_expires_at'] = _isoformat_or_empty(result.expires_at)
+            if result and result.resend_available_at:
+                request.session['portal_otp_resend_available_at'] = _isoformat_or_empty(result.resend_available_at)
+
+            messages.success(request, GENERIC_OTP_REQUEST_MESSAGE)
             return redirect('portal-verify-otp')
     else:
         form = OTPRequestForm()
@@ -759,7 +799,8 @@ def portal_request_otp(request):
 def portal_verify_otp(request):
     phone = request.session.get('portal_phone', '')
     subscriber_id = request.session.get('portal_otp_subscriber_id')
-    if not phone or not subscriber_id:
+    normalized_phone = request.session.get('portal_normalized_phone', '')
+    if not phone:
         return redirect('portal-request-otp')
 
     if request.method == 'POST':
@@ -771,12 +812,41 @@ def portal_verify_otp(request):
                 request.session.pop('portal_phone', None)
                 request.session.pop('portal_normalized_phone', None)
                 request.session.pop('portal_otp_subscriber_id', None)
+                request.session.pop('portal_otp_expires_at', None)
+                request.session.pop('portal_otp_resend_available_at', None)
                 return redirect('portal-dashboard')
             else:
-                messages.error(request, error)
+                messages.error(request, error or GENERIC_OTP_VERIFY_ERROR)
     else:
         form = OTPVerifyForm(initial={'phone': phone})
-    return render(request, 'subscribers/portal_otp_verify.html', {'form': form, 'phone': phone})
+
+    timing = get_otp_session_timing(
+        subscriber_id=subscriber_id,
+        normalized_phone=normalized_phone,
+    )
+    session_expires_at = _session_datetime(request, 'portal_otp_expires_at')
+    session_resend_at = _session_datetime(request, 'portal_otp_resend_available_at')
+    if not timing['expires_at'] and session_expires_at:
+        seconds_remaining = max(0, int((session_expires_at - timezone.now()).total_seconds()))
+        timing['expires_at'] = session_expires_at
+        timing['seconds_remaining'] = seconds_remaining
+    if not timing['resend_available_at'] and session_resend_at:
+        resend_seconds_remaining = max(0, int((session_resend_at - timezone.now()).total_seconds()))
+        timing['resend_available_at'] = session_resend_at
+        timing['resend_seconds_remaining'] = resend_seconds_remaining
+        timing['can_resend'] = resend_seconds_remaining == 0
+
+    return render(request, 'subscribers/portal_otp_verify.html', {
+        'form': form,
+        'phone': phone,
+        'expires_at': timing['expires_at'],
+        'expires_at_iso': _isoformat_or_empty(timing['expires_at']),
+        'resend_available_at': timing['resend_available_at'],
+        'resend_available_at_iso': _isoformat_or_empty(timing['resend_available_at']),
+        'seconds_remaining': timing['seconds_remaining'],
+        'resend_seconds_remaining': timing['resend_seconds_remaining'],
+        'can_resend': timing['can_resend'],
+    })
 
 
 def portal_dashboard(request):
@@ -820,4 +890,6 @@ def portal_logout(request):
     request.session.pop('portal_phone', None)
     request.session.pop('portal_normalized_phone', None)
     request.session.pop('portal_otp_subscriber_id', None)
+    request.session.pop('portal_otp_expires_at', None)
+    request.session.pop('portal_otp_resend_available_at', None)
     return redirect('portal-request-otp')
