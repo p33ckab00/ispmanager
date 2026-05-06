@@ -129,12 +129,25 @@ Slice 1C-F adds source retry and backfill tooling:
   `--limit`, and `--dry-run`; it creates draft/review records only and never
   posts journals automatically.
 
-Remaining Slice 1C gaps after Slice 1C-F:
+Slice 1C-G adds the ATC catalog needed before cutover:
+
+- `AlphanumericTaxCode` stores BIR ATC code, description, tax family, taxpayer
+  type, rate, BIR forms, payor type, active status, and source reference.
+- seed data covers the common 1601-EQ/2307 EWT ATCs from the supplied Taxumo
+  screenshot and BIR RMO references, including key ISP/customer 2307 cases such
+  as `WC157`, `WC158`, and `WC160`.
+- dropped codes are kept inactive for historical interpretation.
+- withholding classes and customer 2307 claims can link to a catalog ATC while
+  retaining the text ATC field for certificate matching.
+
+Remaining Slice 1C gaps after Slice 1C-G:
 
 - VAT invoice posting is still blocked until invoice tax breakdown or explicit
   VAT posting settings are added.
 - 2307 upload attachments and finalized SAWT/2307 export schedules are not yet
   implemented.
+- a future ATC import/maintenance workflow is still needed for new BIR
+  issuances beyond the initial seeded catalog.
 
 ## Current Source Model Facts
 

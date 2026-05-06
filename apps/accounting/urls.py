@@ -16,6 +16,7 @@ urlpatterns = [
     path('withholding/classes/add/', views.withholding_class_add, name='accounting-withholding-class-add'),
     path('withholding/classes/<int:pk>/edit/', views.withholding_class_edit, name='accounting-withholding-class-edit'),
     path('withholding/2307/', views.withholding_2307_list, name='accounting-withholding-2307'),
+    path('withholding/atc/', views.atc_code_list, name='accounting-atc-code-list'),
     path('trial-balance/', views.trial_balance, name='accounting-trial-balance'),
     path('income/', views.income_list, name='income-list'),
     path('income/add/', views.income_add, name='income-add'),

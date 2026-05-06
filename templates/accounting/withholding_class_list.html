@@ -7,6 +7,7 @@
     <p class="text-gray-500 text-sm mt-1">{{ entity }}</p>
   </div>
   <div class="flex gap-2">
+    <a href="{% url 'accounting-atc-code-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">ATC Catalog</a>
     {% if perms.accounting.add_withholdingtaxclass %}
     <a href="{% url 'accounting-withholding-class-add' %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Add Class</a>
     {% endif %}

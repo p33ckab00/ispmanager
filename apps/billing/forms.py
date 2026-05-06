@@ -27,6 +27,11 @@ class PaymentForm(forms.Form):
         required=False,
         empty_label='Manual / no class',
     )
+    atc_code = forms.ModelChoiceField(
+        queryset=None,
+        required=False,
+        empty_label='Manual / no ATC catalog code',
+    )
     withholding_amount = forms.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -61,7 +66,7 @@ class PaymentForm(forms.Form):
         self.open_balance = kwargs.pop('open_balance', None)
         subscriber = kwargs.pop('subscriber', None)
         super().__init__(*args, **kwargs)
-        from apps.accounting.models import AccountingEntity, WithholdingTaxClass
+        from apps.accounting.models import AccountingEntity, AlphanumericTaxCode, WithholdingTaxClass
 
         entity = AccountingEntity.objects.filter(is_active=True).first()
         withholding_classes = WithholdingTaxClass.objects.filter(is_active=True)
@@ -72,6 +77,10 @@ class PaymentForm(forms.Form):
             'code',
             'name',
         )
+        self.fields['atc_code'].queryset = AlphanumericTaxCode.objects.filter(
+            is_active=True,
+            bir_form__icontains='2307',
+        ).order_by('tax_family', 'code')
         if subscriber and not self.initial.get('payor_name'):
             self.initial['payor_name'] = subscriber.display_name
 
@@ -87,6 +96,8 @@ class PaymentForm(forms.Form):
         period_to = cleaned.get('period_to')
         received_date = cleaned.get('received_date')
         certificate_date = cleaned.get('certificate_date')
+        withholding_class = cleaned.get('withholding_class')
+        atc_code = cleaned.get('atc_code') or getattr(withholding_class, 'atc_code', None)
 
         if not has_withholding:
             cleaned['withholding_amount'] = Decimal('0.00')
@@ -104,6 +115,8 @@ class PaymentForm(forms.Form):
             self.add_error('period_to', '2307 period end cannot be before period start.')
         if received_date and not certificate_date:
             self.add_error('certificate_date', 'Enter the certificate date when marking 2307 as received.')
+        if atc_code and not cleaned.get('atc'):
+            cleaned['atc'] = atc_code.code
 
         return cleaned
 
@@ -115,6 +128,10 @@ class PaymentForm(forms.Form):
             return None
         return {
             'withholding_class': self.cleaned_data.get('withholding_class'),
+            'atc_code': (
+                self.cleaned_data.get('atc_code')
+                or getattr(self.cleaned_data.get('withholding_class'), 'atc_code', None)
+            ),
             'gross_amount': (self.cleaned_data.get('amount') or Decimal('0.00')) + tax_withheld,
             'tax_withheld': tax_withheld,
             'withholding_rate': (

@@ -84,6 +84,9 @@ source journal yet.
 Slice 1C-F adds source review retry and the
 `backfill_accounting_source_postings` management command for draft-only
 historical source posting.
+Slice 1C-G adds an Accounting-owned BIR ATC catalog seeded from the supplied
+Taxumo screenshot cross-check and BIR RMO references. Withholding classes and
+customer 2307 claims can now link to catalog ATC codes.
 
 ## 2. Locked Decisions
 
@@ -321,8 +324,9 @@ receivable.
 Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
 later migration.
 
-Remaining Slice 1C work is 2307 attachment/export schedules and full VAT
-invoice posting after invoice tax breakdown support exists.
+Remaining Slice 1C work is 2307 attachment/export schedules, future ATC catalog
+maintenance/import workflow, and full VAT invoice posting after invoice tax
+breakdown support exists.
 
 ### Key Changes
 
@@ -349,6 +353,8 @@ Add billing/payment draft posting:
   by the customer advance workflow
 - customer EWT/CWT claimed through BIR Form 2307 creates/reuses a CWT receivable
   draft line and does not reduce VAT, revenue, discount, waiver, or bad debt
+- BIR ATC catalog choices can be linked to withholding classes and customer
+  2307 claims
 - refund completion creates/reuses a draft refund journal entry
 - waiver, bad debt, and credit forfeiture create/reuse explicit draft journal
   entries

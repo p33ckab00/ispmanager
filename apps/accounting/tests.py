@@ -8,6 +8,7 @@ from django.utils import timezone
 from apps.accounting.models import (
     AccountingPeriod,
     AccountingSourcePosting,
+    AlphanumericTaxCode,
     ChartOfAccount,
     CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
@@ -25,6 +26,7 @@ from apps.accounting.services import (
     create_payment_source_draft,
     post_journal_entry,
     retry_source_posting,
+    seed_bir_atc_codes,
 )
 from apps.billing.models import AccountCreditAdjustment, Invoice, Payment, PaymentAllocation
 from apps.subscribers.models import Subscriber
@@ -422,3 +424,12 @@ class AccountingV2SourcePostingTests(TestCase):
 
         self.assertEqual(result.status, 'blocked')
         self.assertEqual(result.blocked_reason, 'Source document no longer exists.')
+
+    def test_bir_atc_catalog_seed_includes_common_2307_codes(self):
+        result = seed_bir_atc_codes()
+
+        self.assertGreaterEqual(result['total'], 60)
+        self.assertTrue(AlphanumericTaxCode.objects.filter(code='WC160', rate=Decimal('2.0000')).exists())
+        self.assertTrue(AlphanumericTaxCode.objects.filter(code='WC158', rate=Decimal('1.0000')).exists())
+        self.assertTrue(AlphanumericTaxCode.objects.filter(code='WI820', rate=Decimal('0.5000')).exists())
+        self.assertFalse(AlphanumericTaxCode.objects.get(code='WC760').is_active)

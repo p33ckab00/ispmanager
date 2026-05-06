@@ -14,6 +14,7 @@ from apps.accounting.models import (
     AccountingPeriod,
     AccountingSettings,
     AccountingSourcePosting,
+    AlphanumericTaxCode,
     ChartOfAccount,
     CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
@@ -24,6 +25,7 @@ from apps.accounting.models import (
     SourceDocumentLink,
 )
 from apps.billing.models import Payment, PaymentAllocation
+from apps.accounting.atc_seed import DEFAULT_BIR_ATC_CODES
 
 
 def _account(code, name, account_type, normal_balance, description=''):
@@ -124,6 +126,38 @@ def available_coa_templates():
         {'key': key, 'label': value['label']}
         for key, value in COA_TEMPLATES.items()
     ]
+
+
+def seed_bir_atc_codes():
+    created = 0
+    updated = 0
+    for item in DEFAULT_BIR_ATC_CODES:
+        defaults = {
+            'description': item['description'],
+            'tax_family': item['tax_family'],
+            'taxpayer_type': item['taxpayer_type'],
+            'rate': item['rate'],
+            'rate_label': item['rate_label'],
+            'bir_form': item['bir_form'],
+            'payor_type': item['payor_type'],
+            'source_reference': item['source_reference'],
+            'source_url': item['source_url'],
+            'is_active': item['is_active'],
+            'notes': item['notes'],
+        }
+        _, was_created = AlphanumericTaxCode.objects.update_or_create(
+            code=item['code'],
+            defaults=defaults,
+        )
+        if was_created:
+            created += 1
+        else:
+            updated += 1
+    return {
+        'created': created,
+        'updated': updated,
+        'total': len(DEFAULT_BIR_ATC_CODES),
+    }
 
 
 def get_coa_template(template_key):

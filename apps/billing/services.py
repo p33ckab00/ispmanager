@@ -956,17 +956,19 @@ def record_payment_with_allocation(subscriber, amount, method='cash', reference=
 
         entity = AccountingEntity.objects.filter(is_active=True).first()
         withholding_class = withholding_data.get('withholding_class')
+        atc_code = withholding_data.get('atc_code') or getattr(withholding_class, 'atc_code', None)
         withholding_claim = CustomerWithholdingTaxClaim(
             entity=entity,
             subscriber=subscriber,
             payment=payment,
             withholding_class=withholding_class,
+            atc_code=atc_code,
             gross_amount=Decimal(
                 str(withholding_data.get('gross_amount') or (Decimal(str(amount)) + withholding_amount))
             ),
             tax_withheld=withholding_amount,
             withholding_rate=Decimal(str(withholding_data.get('withholding_rate') or '0.0000')),
-            atc=withholding_data.get('atc', ''),
+            atc=withholding_data.get('atc') or getattr(atc_code, 'code', ''),
             period_from=withholding_data.get('period_from'),
             period_to=withholding_data.get('period_to'),
             payor_tin=withholding_data.get('payor_tin', ''),

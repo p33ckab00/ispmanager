@@ -12,6 +12,7 @@ from apps.accounting.models import (
     AccountingPeriod,
     AccountingSettings,
     AccountingSourcePosting,
+    AlphanumericTaxCode,
     ChartOfAccount,
     CustomerWithholdingTaxClaim,
     ExpenseRecord,
@@ -464,6 +465,29 @@ def withholding_2307_list(request):
         'status_choices': CustomerWithholdingTaxClaim.STATUS_CHOICES,
         'gross_total': totals['gross_total'] or Decimal('0.00'),
         'withheld_total': totals['withheld_total'] or Decimal('0.00'),
+    })
+
+
+@login_required
+def atc_code_list(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_alphanumerictaxcode')
+    if permission_check is not True:
+        return permission_check
+    q = request.GET.get('q', '').strip()
+    status = request.GET.get('status', '')
+    qs = AlphanumericTaxCode.objects.all().order_by('tax_family', 'code')
+    if q:
+        qs = qs.filter(Q(code__icontains=q) | Q(description__icontains=q))
+    if status == 'active':
+        qs = qs.filter(is_active=True)
+    elif status == 'inactive':
+        qs = qs.filter(is_active=False)
+    paginator = Paginator(qs, 50)
+    page = paginator.get_page(request.GET.get('page', 1))
+    return render(request, 'accounting/atc_code_list.html', {
+        'page_obj': page,
+        'q': q,
+        'status': status,
     })
 
 

@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from apps.accounting.models import (
     AccountingSourcePosting,
+    AlphanumericTaxCode,
     CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
     ExpenseRecord,
@@ -326,6 +327,14 @@ class BillingAutoReconnectTests(TestCase):
             atc='WC000',
             rate=Decimal('10.0000'),
         )
+        atc_code = AlphanumericTaxCode.objects.create(
+            code='WC999',
+            description='Test service ATC',
+            tax_family='expanded_withholding_tax',
+            taxpayer_type='corporation',
+            rate=Decimal('10.0000'),
+            bir_form='1601-EQ/2307',
+        )
         subscriber = Subscriber.objects.create(
             username='payment-ewt',
             monthly_rate=Decimal('1000.00'),
@@ -352,6 +361,7 @@ class BillingAutoReconnectTests(TestCase):
             recorded_by='tester',
             withholding_data={
                 'withholding_class': withholding_class,
+                'atc_code': atc_code,
                 'gross_amount': Decimal('1000.00'),
                 'tax_withheld': Decimal('100.00'),
                 'withholding_rate': Decimal('10.0000'),
@@ -367,6 +377,8 @@ class BillingAutoReconnectTests(TestCase):
         self.assertEqual(remaining, Decimal('0.00'))
         self.assertEqual(payment.amount, Decimal('900.00'))
         self.assertEqual(claim.withholding_class, withholding_class)
+        self.assertEqual(claim.atc_code, atc_code)
+        self.assertEqual(claim.atc, 'WC999')
         self.assertEqual(claim.tax_withheld, Decimal('100.00'))
         self.assertEqual(allocation.amount, Decimal('100.00'))
         self.assertEqual(invoice.amount_paid, Decimal('1000.00'))

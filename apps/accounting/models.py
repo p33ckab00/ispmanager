@@ -487,6 +487,70 @@ class AccountingSourcePosting(models.Model):
         return f"{self.source_app}.{self.source_model}:{self.source_id} - {self.status}"
 
 
+class AlphanumericTaxCode(models.Model):
+    TAX_FAMILY_CHOICES = [
+        ('expanded_withholding_tax', 'Expanded Withholding Tax'),
+        ('creditable_vat_withheld', 'Creditable VAT Withheld'),
+        ('percentage_tax_withheld', 'Percentage Tax Withheld'),
+        ('final_withholding_tax', 'Final Withholding Tax'),
+        ('income_tax', 'Income Tax'),
+        ('other', 'Other'),
+    ]
+    TAXPAYER_TYPE_CHOICES = [
+        ('individual', 'Individual'),
+        ('corporation', 'Corporation'),
+        ('both', 'Individual / Corporation'),
+        ('not_applicable', 'Not Applicable'),
+    ]
+    PAYOR_TYPE_CHOICES = [
+        ('any', 'Any Payor'),
+        ('private_withholding_agent', 'Private Withholding Agent'),
+        ('top_withholding_agent', 'Top Withholding Agent'),
+        ('government', 'Government / GOCC'),
+        ('other', 'Other'),
+    ]
+
+    code = models.CharField(max_length=30, unique=True)
+    description = models.TextField()
+    tax_family = models.CharField(
+        max_length=40,
+        choices=TAX_FAMILY_CHOICES,
+        default='expanded_withholding_tax',
+    )
+    taxpayer_type = models.CharField(
+        max_length=30,
+        choices=TAXPAYER_TYPE_CHOICES,
+        default='not_applicable',
+    )
+    rate = models.DecimalField(max_digits=7, decimal_places=4, default=MONEY_ZERO)
+    rate_label = models.CharField(max_length=80, blank=True)
+    bir_form = models.CharField(max_length=120, blank=True)
+    payor_type = models.CharField(max_length=40, choices=PAYOR_TYPE_CHOICES, default='any')
+    source_reference = models.CharField(max_length=255, blank=True)
+    source_url = models.URLField(blank=True)
+    effective_from = models.DateField(null=True, blank=True)
+    effective_to = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['tax_family', 'code']
+
+    def clean(self):
+        if self.effective_from and self.effective_to and self.effective_to < self.effective_from:
+            raise ValidationError('ATC effective end date cannot be before start date.')
+
+    def save(self, *args, **kwargs):
+        if self.code:
+            self.code = self.code.upper().strip()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.code} - {self.description}"
+
+
 class WithholdingTaxClass(models.Model):
     TAX_FAMILY_CHOICES = [
         ('expanded_withholding_tax', 'Expanded Withholding Tax'),
@@ -521,6 +585,13 @@ class WithholdingTaxClass(models.Model):
     entity = models.ForeignKey(
         AccountingEntity,
         on_delete=models.CASCADE,
+        related_name='withholding_tax_classes',
+    )
+    atc_code = models.ForeignKey(
+        AlphanumericTaxCode,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='withholding_tax_classes',
     )
     code = models.CharField(max_length=40)
@@ -564,6 +635,10 @@ class WithholdingTaxClass(models.Model):
     def clean(self):
         if self.effective_from and self.effective_to and self.effective_to < self.effective_from:
             raise ValidationError('Withholding tax class end date cannot be before start date.')
+        if self.atc:
+            self.atc = self.atc.upper().strip()
+        if self.atc_code_id and not self.atc:
+            self.atc = self.atc_code.code
 
     def __str__(self):
         return f"{self.code} - {self.name}"
@@ -601,6 +676,13 @@ class CustomerWithholdingTaxClaim(models.Model):
     )
     withholding_class = models.ForeignKey(
         WithholdingTaxClass,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='customer_withholding_claims',
+    )
+    atc_code = models.ForeignKey(
+        AlphanumericTaxCode,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

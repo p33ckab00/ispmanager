@@ -1,5 +1,13 @@
 from django import forms
-from apps.accounting.models import ExpenseRecord, IncomeRecord, JournalEntry, WithholdingTaxClass
+from decimal import Decimal
+
+from apps.accounting.models import (
+    AlphanumericTaxCode,
+    ExpenseRecord,
+    IncomeRecord,
+    JournalEntry,
+    WithholdingTaxClass,
+)
 from apps.accounting.services import available_coa_templates
 
 
@@ -48,6 +56,7 @@ class WithholdingTaxClassForm(forms.ModelForm):
     class Meta:
         model = WithholdingTaxClass
         fields = [
+            'atc_code',
             'code',
             'name',
             'tax_family',
@@ -68,3 +77,23 @@ class WithholdingTaxClassForm(forms.ModelForm):
             'effective_to': forms.DateInput(attrs={'type': 'date'}),
             'notes': forms.Textarea(attrs={'rows': 3}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['atc_code'].queryset = AlphanumericTaxCode.objects.filter(
+            is_active=True,
+            bir_form__icontains='2307',
+        ).order_by('tax_family', 'code')
+        self.fields['atc_code'].required = False
+        self.fields['atc_code'].empty_label = 'Manual / no ATC catalog code'
+
+    def clean(self):
+        cleaned = super().clean()
+        atc_code = cleaned.get('atc_code')
+        if atc_code:
+            cleaned['atc'] = cleaned.get('atc') or atc_code.code
+            if not cleaned.get('rate') or cleaned.get('rate') == Decimal('0.0000'):
+                cleaned['rate'] = atc_code.rate
+            if not cleaned.get('bir_reference'):
+                cleaned['bir_reference'] = atc_code.source_reference
+        return cleaned
