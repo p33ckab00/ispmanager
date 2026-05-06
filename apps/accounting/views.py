@@ -11,6 +11,7 @@ from apps.accounting.models import (
     AccountingEntity,
     AccountingPeriod,
     AccountingSettings,
+    AccountingSourcePosting,
     ChartOfAccount,
     ExpenseRecord,
     IncomeRecord,
@@ -58,6 +59,8 @@ def _accounting_context():
         'account_count': ChartOfAccount.objects.filter(entity=entity).count() if entity else 0,
         'period_count': AccountingPeriod.objects.filter(entity=entity).count() if entity else 0,
         'draft_journal_count': JournalEntry.objects.filter(entity=entity, status='draft').count() if entity else 0,
+        'source_draft_count': AccountingSourcePosting.objects.filter(entity=entity, status='draft').count() if entity else 0,
+        'source_blocked_count': AccountingSourcePosting.objects.filter(Q(entity=entity) | Q(entity__isnull=True), status='blocked').count() if entity else 0,
         'open_period': open_period,
     }
 
@@ -324,6 +327,43 @@ def trial_balance(request):
         'total_debit': total_debit,
         'total_credit': total_credit,
         'is_balanced': total_debit == total_credit,
+    })
+
+
+@login_required
+def source_review(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_accountingsourceposting')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    status = request.GET.get('status', '')
+    source_type = request.GET.get('source_type', '')
+    qs = (
+        AccountingSourcePosting.objects
+        .filter(Q(entity=entity) | Q(entity__isnull=True))
+        .select_related('journal_entry', 'subscriber')
+        .order_by('-document_date', '-created_at')
+    )
+    if status:
+        qs = qs.filter(status=status)
+    if source_type:
+        qs = qs.filter(source_model__icontains=source_type)
+    paginator = Paginator(qs, 25)
+    page = paginator.get_page(request.GET.get('page', 1))
+    return render(request, 'accounting/source_review.html', {
+        'entity': entity,
+        'page_obj': page,
+        'status': status,
+        'source_type': source_type,
+        'status_choices': AccountingSourcePosting.STATUS_CHOICES,
+        'source_type_options': [
+            ('Invoice', 'Invoices'),
+            ('Payment.collection', 'Payments'),
+            ('PaymentAllocation', 'Advance Applications'),
+            ('AccountCreditAdjustment', 'Credit Adjustments'),
+        ],
     })
 
 

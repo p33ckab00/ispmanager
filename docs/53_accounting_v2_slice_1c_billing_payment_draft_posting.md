@@ -33,6 +33,41 @@ The source journal workflow is:
 
 Trial Balance and Accounting v2 reports continue to use posted journals only.
 
+## Implementation Status
+
+Slice 1C-A is the first implemented vertical of this plan. It includes:
+
+- `AccountingSourcePosting` records for draft, posted, blocked, and skipped
+  source posting review.
+- `CustomerWithholdingTaxClaim` records for customer EWT/CWT and BIR Form 2307
+  follow-up data.
+- seeded COA support for `1210 Creditable Withholding Tax Receivable` and
+  `2110 Refunds Payable`.
+- non-VAT invoice draft posting:
+  `Dr 1100 Accounts Receivable / Cr 4000 Internet Service Revenue`.
+- payment draft posting for cash, bank, GCash, Maya, wallet/gateway clearing,
+  AR settlement, customer advances, and CWT receivable.
+- advance application draft posting only when a prior customer advance is later
+  applied to an invoice; immediate allocations are marked skipped to avoid
+  double posting.
+- fail-soft billing hooks so invoices/payments still complete when Accounting
+  v2 setup, period, or account mapping is missing.
+- `/accounting/review/` source review queue and dashboard counts for source
+  drafts and blocked source postings.
+
+Remaining Slice 1C gaps after Slice 1C-A:
+
+- VAT invoice posting is still blocked until invoice tax breakdown or explicit
+  VAT posting settings are added.
+- Payment forms do not yet expose a guided EWT/2307 input workflow; the model
+  and posting service support it.
+- 2307 received/pending follow-up schedules and upload attachments are not yet
+  implemented.
+- refund-due, refund-paid, credit forfeiture, waiver, and void posting services
+  are still pending.
+- retry blocked source posting and backfill management commands are still
+  pending.
+
 ## Current Source Model Facts
 
 The current billing module has these source objects:

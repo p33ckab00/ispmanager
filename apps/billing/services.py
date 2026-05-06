@@ -1,6 +1,7 @@
 from decimal import Decimal
 from datetime import date, timedelta
 import calendar
+import logging
 from django.utils import timezone
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
@@ -13,6 +14,9 @@ from apps.billing.models import (
     BillingSnapshotItem,
 )
 from apps.settings_app.models import BillingSettings
+
+
+logger = logging.getLogger(__name__)
 
 
 # ── Period Calculation ─────────────────────────────────────────────────────────
@@ -236,7 +240,7 @@ def apply_unallocated_payments_to_invoice(invoice):
         if allocate <= Decimal('0.00'):
             continue
 
-        PaymentAllocation.objects.create(
+        allocation = PaymentAllocation.objects.create(
             payment=payment,
             invoice=invoice,
             amount_allocated=allocate,
@@ -246,6 +250,12 @@ def apply_unallocated_payments_to_invoice(invoice):
         applied += allocate
         _apply_payment_status(invoice)
         invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])
+        try:
+            from apps.accounting.services import create_payment_allocation_advance_application_draft
+            create_payment_allocation_advance_application_draft(allocation)
+        except Exception:
+            logger.exception('Accounting v2 advance application draft failed for allocation %s.', allocation.pk)
+            pass
 
     return applied
 
@@ -780,6 +790,12 @@ def generate_invoice_for_subscriber(subscriber, billing_settings=None, reference
 
     if existing:
         apply_unallocated_payments_to_invoice(existing)
+        try:
+            from apps.accounting.services import create_invoice_source_draft
+            create_invoice_source_draft(existing)
+        except Exception:
+            logger.exception('Accounting v2 invoice draft failed for invoice %s.', existing.pk)
+            pass
         return existing, 'Invoice already exists for this period.'
 
     try:
@@ -800,6 +816,12 @@ def generate_invoice_for_subscriber(subscriber, billing_settings=None, reference
         apply_unallocated_payments_to_invoice(invoice)
         return invoice, 'Invoice already exists for this period.'
     apply_unallocated_payments_to_invoice(invoice)
+    try:
+        from apps.accounting.services import create_invoice_source_draft
+        create_invoice_source_draft(invoice)
+    except Exception:
+        logger.exception('Accounting v2 invoice draft failed for invoice %s.', invoice.pk)
+        pass
 
     return invoice, None
 
@@ -870,7 +892,7 @@ def record_payment_with_allocation(subscriber, amount, method='cash', reference=
         if allocate <= Decimal('0.00'):
             continue
 
-        PaymentAllocation.objects.create(
+        allocation = PaymentAllocation.objects.create(
             payment=payment,
             invoice=invoice,
             amount_allocated=allocate,
@@ -885,6 +907,18 @@ def record_payment_with_allocation(subscriber, amount, method='cash', reference=
             invoice.status = 'partial'
 
         invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])
+
+    try:
+        from apps.accounting.services import (
+            create_payment_allocation_advance_application_draft,
+            create_payment_source_draft,
+        )
+        create_payment_source_draft(payment)
+        for allocation in payment.allocations.select_related('invoice'):
+            create_payment_allocation_advance_application_draft(allocation)
+    except Exception:
+        logger.exception('Accounting v2 payment draft failed for payment %s.', payment.pk)
+        pass
 
     payment.auto_reconnect_result = None
 

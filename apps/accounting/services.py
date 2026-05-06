@@ -12,13 +12,16 @@ from apps.accounting.models import (
     AccountingEntity,
     AccountingPeriod,
     AccountingSettings,
+    AccountingSourcePosting,
     ChartOfAccount,
+    CustomerWithholdingTaxClaim,
     ExpenseRecord,
     IncomeRecord,
     JournalEntry,
     JournalLine,
+    SourceDocumentLink,
 )
-from apps.billing.models import Payment
+from apps.billing.models import Payment, PaymentAllocation
 
 
 def _account(code, name, account_type, normal_balance, description=''):
@@ -36,11 +39,13 @@ COMMON_ISP_ACCOUNTS = [
     _account('1010', 'Bank Accounts', 'asset', 'debit'),
     _account('1020', 'E-Wallet and Gateway Clearing', 'asset', 'debit'),
     _account('1100', 'Accounts Receivable - Subscribers', 'asset', 'debit'),
+    _account('1210', 'Creditable Withholding Tax Receivable', 'asset', 'debit'),
     _account('1300', 'CPE and Network Inventory', 'asset', 'debit'),
     _account('1400', 'Prepaid Expenses', 'asset', 'debit'),
     _account('1500', 'Network Equipment and Facilities', 'asset', 'debit'),
     _account('1590', 'Accumulated Depreciation - Network Equipment', 'asset', 'credit'),
     _account('2000', 'Accounts Payable', 'liability', 'credit'),
+    _account('2110', 'Refunds Payable', 'liability', 'credit'),
     _account('2100', 'Customer Advances', 'liability', 'credit'),
     _account('2200', 'Subscriber Deposits', 'liability', 'credit'),
     _account('2310', 'Withholding Tax Payable', 'liability', 'credit'),
@@ -317,6 +322,212 @@ def _decimal_amount(value):
     return Decimal(str(value)).quantize(Decimal('0.01'))
 
 
+POSTING_ACCOUNT_CODES = {
+    'ar': '1100',
+    'cash': '1000',
+    'bank': '1010',
+    'wallet': '1020',
+    'cwt_receivable': '1210',
+    'customer_advances': '2100',
+    'refunds_payable': '2110',
+    'internet_revenue': '4000',
+}
+
+PAYMENT_METHOD_ACCOUNT_KEYS = {
+    'cash': 'cash',
+    'bank': 'bank',
+    'gcash': 'wallet',
+    'maya': 'wallet',
+    'other': 'wallet',
+}
+
+
+def _active_accounting_entity():
+    return AccountingEntity.objects.filter(is_active=True).first()
+
+
+def _document_date_from_datetime(value):
+    if not value:
+        return timezone.localdate()
+    return timezone.localtime(value).date()
+
+
+def _source_identity(source, posting_type):
+    return {
+        'source_app': source._meta.app_label,
+        'source_model': f"{source.__class__.__name__}.{posting_type}",
+        'source_id': str(source.pk),
+    }
+
+
+def _source_number(source):
+    return (
+        getattr(source, 'invoice_number', '')
+        or getattr(getattr(source, 'invoice', None), 'invoice_number', '')
+        or getattr(source, 'reference', '')
+        or getattr(source, 'certificate_number', '')
+        or str(source.pk)
+    )
+
+
+def _source_subscriber(source):
+    return getattr(source, 'subscriber', None) or getattr(getattr(source, 'payment', None), 'subscriber', None)
+
+
+def _source_amount(source):
+    return getattr(source, 'amount', Decimal('0.00')) or Decimal('0.00')
+
+
+def _upsert_source_posting(source, posting_type, status, entity=None, journal_entry=None,
+                           blocked_reason='', amount=None, document_date=None):
+    identity = _source_identity(source, posting_type)
+    defaults = {
+        'entity': entity,
+        'journal_entry': journal_entry,
+        'source_number': _source_number(source),
+        'subscriber': _source_subscriber(source),
+        'document_date': document_date,
+        'amount': amount if amount is not None else _source_amount(source),
+        'status': status,
+        'blocked_reason': blocked_reason,
+        'last_attempt_at': timezone.now(),
+    }
+    posting, _ = AccountingSourcePosting.objects.update_or_create(
+        **identity,
+        defaults=defaults,
+    )
+    return posting
+
+
+def _block_source_posting(source, posting_type, reason, entity=None, amount=None, document_date=None):
+    return _upsert_source_posting(
+        source,
+        posting_type,
+        'blocked',
+        entity=entity,
+        blocked_reason=reason,
+        amount=amount,
+        document_date=document_date,
+    )
+
+
+def _posting_account(entity, account_key):
+    code = POSTING_ACCOUNT_CODES[account_key]
+    try:
+        return ChartOfAccount.objects.get(entity=entity, code=code, is_active=True)
+    except ChartOfAccount.DoesNotExist as exc:
+        raise ValidationError(f"Missing Accounting v2 account mapping for {account_key}: {code}") from exc
+
+
+def _payment_cash_account(entity, method):
+    account_key = PAYMENT_METHOD_ACCOUNT_KEYS.get(method or 'other', 'wallet')
+    return _posting_account(entity, account_key)
+
+
+def _existing_source_journal(entity, source, posting_type):
+    identity = _source_identity(source, posting_type)
+    link = (
+        SourceDocumentLink.objects
+        .filter(entity=entity, **identity)
+        .select_related('journal_entry')
+        .first()
+    )
+    return link.journal_entry if link else None
+
+
+@transaction.atomic
+def _create_source_journal(entity, source, posting_type, entry_date, description, lines,
+                           source_type, reference=''):
+    existing = _existing_source_journal(entity, source, posting_type)
+    if existing:
+        _upsert_source_posting(
+            source,
+            posting_type,
+            existing.status if existing.status == 'posted' else 'draft',
+            entity=entity,
+            journal_entry=existing,
+            amount=_source_amount(source),
+            document_date=entry_date,
+        )
+        return existing
+
+    period = find_period_for_date(entity, entry_date)
+    journal_entry = JournalEntry.objects.create(
+        entity=entity,
+        period=period,
+        entry_number=next_journal_entry_number(entity, entry_date, prefix='SRC'),
+        entry_date=entry_date,
+        description=description,
+        reference=reference,
+        source_type=source_type,
+        source_document_number=_source_number(source),
+    )
+    for index, line in enumerate(lines, start=1):
+        journal_line = JournalLine(
+            journal_entry=journal_entry,
+            account=line['account'],
+            line_number=index,
+            description=line.get('description', ''),
+            debit=_decimal_amount(line.get('debit')),
+            credit=_decimal_amount(line.get('credit')),
+        )
+        journal_line.full_clean()
+        journal_line.save()
+
+    identity = _source_identity(source, posting_type)
+    SourceDocumentLink.objects.create(
+        entity=entity,
+        journal_entry=journal_entry,
+        source_app=identity['source_app'],
+        source_model=identity['source_model'],
+        source_id=identity['source_id'],
+        source_number=_source_number(source),
+        document_date=entry_date,
+    )
+    _upsert_source_posting(
+        source,
+        posting_type,
+        'draft',
+        entity=entity,
+        journal_entry=journal_entry,
+        amount=_source_amount(source),
+        document_date=entry_date,
+    )
+    return journal_entry
+
+
+def _source_posting_fail_soft(source, posting_type, callback, amount=None, document_date=None):
+    entity = _active_accounting_entity()
+    if not entity:
+        return _block_source_posting(
+            source,
+            posting_type,
+            'Accounting v2 setup is not ready.',
+            amount=amount,
+            document_date=document_date,
+        )
+    try:
+        return callback(entity)
+    except ValidationError as exc:
+        return _block_source_posting(
+            source,
+            posting_type,
+            exc.messages[0] if hasattr(exc, 'messages') else str(exc),
+            entity=entity,
+            amount=amount,
+            document_date=document_date,
+        )
+    except (ChartOfAccount.DoesNotExist, AccountingPeriod.DoesNotExist) as exc:
+        return _block_source_posting(
+            source,
+            posting_type,
+            str(exc),
+            entity=entity,
+            amount=amount,
+            document_date=document_date,
+        )
+
+
 @transaction.atomic
 def create_manual_journal_entry(
     entity,
@@ -378,7 +589,189 @@ def post_journal_entry(journal_entry, posted_by=None):
     journal_entry.posted_at = timezone.now()
     journal_entry.full_clean()
     journal_entry.save(update_fields=['status', 'posted_by', 'posted_at', 'updated_at'])
+    AccountingSourcePosting.objects.filter(journal_entry=journal_entry).update(
+        status='posted',
+        blocked_reason='',
+        last_attempt_at=timezone.now(),
+        updated_at=timezone.now(),
+    )
     return journal_entry
+
+
+def create_invoice_source_draft(invoice):
+    entry_date = _document_date_from_datetime(invoice.created_at)
+
+    def create(entity):
+        if entity.tax_classification == 'vat':
+            raise ValidationError(
+                'VAT invoice source posting is blocked until invoice tax breakdown is available.'
+            )
+        return _create_source_journal(
+            entity,
+            invoice,
+            'invoice',
+            entry_date,
+            f"Invoice {invoice.invoice_number} - {invoice.subscriber.username}",
+            [
+                {
+                    'account': _posting_account(entity, 'ar'),
+                    'debit': invoice.amount,
+                    'description': invoice.invoice_number,
+                },
+                {
+                    'account': _posting_account(entity, 'internet_revenue'),
+                    'credit': invoice.amount,
+                    'description': invoice.invoice_number,
+                },
+            ],
+            source_type='billing',
+            reference=invoice.invoice_number,
+        )
+
+    return _source_posting_fail_soft(
+        invoice,
+        'invoice',
+        create,
+        amount=invoice.amount,
+        document_date=entry_date,
+    )
+
+
+def _payment_allocated_amount(payment):
+    return payment.allocations.aggregate(total=Sum('amount_allocated'))['total'] or Decimal('0.00')
+
+
+def _payment_cwt_amount(payment):
+    return (
+        CustomerWithholdingTaxClaim.objects
+        .filter(payment=payment)
+        .exclude(status__in=['disallowed', 'canceled'])
+        .aggregate(total=Sum('tax_withheld'))['total']
+        or Decimal('0.00')
+    )
+
+
+def create_payment_source_draft(payment):
+    entry_date = _document_date_from_datetime(payment.paid_at)
+
+    def create(entity):
+        allocated = _payment_allocated_amount(payment)
+        cwt_amount = _payment_cwt_amount(payment)
+        advance_amount = payment.amount - allocated
+        if allocated < Decimal('0.00') or advance_amount < Decimal('0.00'):
+            raise ValidationError('Payment allocations exceed the recorded cash receipt.')
+        if allocated == Decimal('0.00') and advance_amount == Decimal('0.00') and cwt_amount == Decimal('0.00'):
+            raise ValidationError('Payment source posting has no amount to post.')
+
+        lines = []
+        if payment.amount > Decimal('0.00'):
+            lines.append({
+                'account': _payment_cash_account(entity, payment.method),
+                'debit': payment.amount,
+                'description': payment.get_method_display(),
+            })
+        if cwt_amount > Decimal('0.00'):
+            lines.append({
+                'account': _posting_account(entity, 'cwt_receivable'),
+                'debit': cwt_amount,
+                'description': 'Customer EWT/CWT claim',
+            })
+        if allocated > Decimal('0.00'):
+            lines.append({
+                'account': _posting_account(entity, 'ar'),
+                'credit': allocated + cwt_amount,
+                'description': 'Subscriber receivable settled',
+            })
+        elif cwt_amount > Decimal('0.00'):
+            raise ValidationError('Customer EWT/CWT claim needs a receivable allocation.')
+        if advance_amount > Decimal('0.00'):
+            lines.append({
+                'account': _posting_account(entity, 'customer_advances'),
+                'credit': advance_amount,
+                'description': 'Unallocated customer advance',
+            })
+
+        return _create_source_journal(
+            entity,
+            payment,
+            'collection',
+            entry_date,
+            f"Payment {payment.pk} - {payment.subscriber.username}",
+            lines,
+            source_type='payment',
+            reference=payment.reference,
+        )
+
+    return _source_posting_fail_soft(
+        payment,
+        'collection',
+        create,
+        amount=payment.amount,
+        document_date=entry_date,
+    )
+
+
+def create_payment_allocation_advance_application_draft(allocation):
+    entry_date = _document_date_from_datetime(allocation.created_at)
+
+    def create(entity):
+        payment = allocation.payment
+        allocations = list(
+            PaymentAllocation.objects
+            .filter(payment=payment)
+            .order_by('created_at', 'pk')
+        )
+        running_cash_used = Decimal('0.00')
+        advance_amount = Decimal('0.00')
+        for item in allocations:
+            available_cash = max(payment.amount - running_cash_used, Decimal('0.00'))
+            cash_part = min(item.amount_allocated, available_cash)
+            advance_part = item.amount_allocated - cash_part
+            running_cash_used += cash_part
+            if item.pk == allocation.pk:
+                advance_amount = advance_part
+                break
+
+        if advance_amount <= Decimal('0.00'):
+            return _upsert_source_posting(
+                allocation,
+                'advance_application',
+                'skipped',
+                entity=entity,
+                blocked_reason='Allocation was covered by the original payment collection draft.',
+                amount=allocation.amount_allocated,
+                document_date=entry_date,
+            )
+
+        return _create_source_journal(
+            entity,
+            allocation,
+            'advance_application',
+            entry_date,
+            f"Advance application - {allocation.invoice.invoice_number}",
+            [
+                {
+                    'account': _posting_account(entity, 'customer_advances'),
+                    'debit': advance_amount,
+                    'description': allocation.invoice.invoice_number,
+                },
+                {
+                    'account': _posting_account(entity, 'ar'),
+                    'credit': advance_amount,
+                    'description': allocation.invoice.invoice_number,
+                },
+            ],
+            source_type='payment',
+            reference=allocation.invoice.invoice_number,
+        )
+
+    return _source_posting_fail_soft(
+        allocation,
+        'advance_application',
+        create,
+        amount=allocation.amount_allocated,
+        document_date=entry_date,
+    )
 
 
 def build_billing_income_description(payment):

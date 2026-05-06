@@ -3,17 +3,25 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.accounting.models import (
     AccountingPeriod,
+    AccountingSourcePosting,
     ChartOfAccount,
+    CustomerWithholdingTaxClaim,
     JournalLine,
+    SourceDocumentLink,
 )
 from apps.accounting.services import (
     create_accounting_foundation,
+    create_invoice_source_draft,
     create_manual_journal_entry,
+    create_payment_source_draft,
     post_journal_entry,
 )
+from apps.billing.models import Invoice, Payment, PaymentAllocation
+from apps.subscribers.models import Subscriber
 
 
 class AccountingV2FoundationTests(TestCase):
@@ -135,3 +143,104 @@ class AccountingV2FoundationTests(TestCase):
 
         with self.assertRaisesMessage(ValidationError, 'either a debit or a credit'):
             bad_line.full_clean()
+
+
+class AccountingV2SourcePostingTests(TestCase):
+    def _subscriber(self):
+        return Subscriber.objects.create(
+            username='source-client',
+            full_name='Source Client',
+            status='active',
+            is_billable=True,
+        )
+
+    def _invoice(self, subscriber=None, amount=Decimal('1000.00')):
+        subscriber = subscriber or self._subscriber()
+        today = timezone.localdate()
+        return Invoice.objects.create(
+            subscriber=subscriber,
+            period_start=today.replace(day=1),
+            period_end=today,
+            due_date=today,
+            amount=amount,
+            rate_snapshot=amount,
+        )
+
+    def _foundation(self):
+        return create_accounting_foundation(
+            entity_name='Source ISP',
+            template_key='isp_non_vat_sole_prop',
+            fiscal_year=timezone.localdate().year,
+        )['entity']
+
+    def test_invoice_source_posting_blocks_without_accounting_setup(self):
+        invoice = self._invoice()
+
+        result = create_invoice_source_draft(invoice)
+
+        self.assertIsInstance(result, AccountingSourcePosting)
+        self.assertEqual(result.status, 'blocked')
+        self.assertIn('setup is not ready', result.blocked_reason)
+
+    def test_non_vat_invoice_source_posting_creates_idempotent_draft(self):
+        entity = self._foundation()
+        invoice = self._invoice()
+
+        journal_entry = create_invoice_source_draft(invoice)
+        second = create_invoice_source_draft(invoice)
+
+        self.assertEqual(journal_entry.pk, second.pk)
+        self.assertEqual(journal_entry.source_type, 'billing')
+        self.assertTrue(journal_entry.is_balanced())
+        self.assertEqual(SourceDocumentLink.objects.filter(journal_entry=journal_entry).count(), 1)
+        posting = AccountingSourcePosting.objects.get(source_model='Invoice.invoice', source_id=str(invoice.pk))
+        self.assertEqual(posting.status, 'draft')
+        self.assertEqual(posting.entity, entity)
+
+        lines = {line.account.code: line for line in journal_entry.lines.select_related('account')}
+        self.assertEqual(lines['1100'].debit, Decimal('1000.00'))
+        self.assertEqual(lines['4000'].credit, Decimal('1000.00'))
+
+    def test_payment_with_cwt_claim_posts_cash_cwt_and_ar(self):
+        self._foundation()
+        subscriber = self._subscriber()
+        invoice = self._invoice(subscriber=subscriber)
+        payment = Payment.objects.create(
+            subscriber=subscriber,
+            amount=Decimal('900.00'),
+            method='bank',
+            reference='NET-CWT',
+            recorded_by='tester',
+            paid_at=timezone.now(),
+        )
+        PaymentAllocation.objects.create(
+            payment=payment,
+            invoice=invoice,
+            amount_allocated=Decimal('900.00'),
+        )
+        CustomerWithholdingTaxClaim.objects.create(
+            subscriber=subscriber,
+            payment=payment,
+            gross_amount=Decimal('1000.00'),
+            tax_withheld=Decimal('100.00'),
+            withholding_rate=Decimal('10.0000'),
+            status='pending_2307',
+        )
+
+        journal_entry = create_payment_source_draft(payment)
+
+        self.assertTrue(journal_entry.is_balanced())
+        lines = {line.account.code: line for line in journal_entry.lines.select_related('account')}
+        self.assertEqual(lines['1010'].debit, Decimal('900.00'))
+        self.assertEqual(lines['1210'].debit, Decimal('100.00'))
+        self.assertEqual(lines['1100'].credit, Decimal('1000.00'))
+
+    def test_posting_source_journal_marks_source_posting_posted(self):
+        self._foundation()
+        invoice = self._invoice()
+        journal_entry = create_invoice_source_draft(invoice)
+
+        post_journal_entry(journal_entry)
+
+        posting = AccountingSourcePosting.objects.get(source_model='Invoice.invoice', source_id=str(invoice.pk))
+        self.assertEqual(posting.status, 'posted')

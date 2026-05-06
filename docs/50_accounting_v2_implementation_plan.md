@@ -62,11 +62,14 @@ Slice 1B workspace UI has also been implemented for manual Accounting v2 use.
 It adds setup, chart, periods, journal list/detail/create/post, trial balance,
 dashboard status links, and read-only ledger role preset permissions.
 
-Slice 1C billing/payment draft posting is planned in
+Slice 1C billing/payment draft posting has started in
 `docs/53_accounting_v2_slice_1c_billing_payment_draft_posting.md`. That plan
 documents the source-event gaps, resolved posting rules, idempotency behavior,
 customer EWT/2307 handling, review queue, and tests needed before
-implementation.
+the remaining source-posting work. Slice 1C-A implements the safe first
+vertical: source posting review records, non-VAT invoice draft journals,
+payment draft journals, customer advance application drafts, and customer
+EWT/CWT claim tracking for BIR Form 2307 follow-up.
 
 ## 2. Locked Decisions
 
@@ -289,19 +292,23 @@ Add bank/wallet/gateway reconciliation, settlement batches, compliance
 calendar, filing status workflow, amendment workflow, archive verification,
 multi-tenant hardening, and full compliance diagnostics.
 
-## 5. Remaining Slice 1C: Billing and Payment Draft Posting
+## 5. Slice 1C: Billing and Payment Draft Posting
 
 ### Summary
 
-Build the source-posting portion of the first Accounting v2 release. After
-Slice 1C, billing invoices, payments, allocations, refunds, waivers, voids, and
-credit forfeitures can create or reuse Accounting v2 draft journal entries for
-review. Customer EWT/CWT claimed through BIR Form 2307 is tracked separately
-from cash receipts so gross AR can be settled by net cash plus creditable
-withholding tax receivable.
+Build the source-posting portion of the first Accounting v2 release. Slice 1C-A
+now covers the safe billing/payment foundation: billing invoices, payments, and
+advance applications can create or reuse Accounting v2 draft journal entries
+for review. Customer EWT/CWT claimed through BIR Form 2307 is tracked
+separately from cash receipts so gross AR can be settled by net cash plus
+creditable withholding tax receivable.
 
 Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
 later migration.
+
+Remaining Slice 1C work is refund-due/refund-paid posting, credit forfeiture,
+waiver/void posting, retry/backfill tooling, 2307 follow-up screens, and full
+VAT invoice posting after invoice tax breakdown support exists.
 
 ### Key Changes
 

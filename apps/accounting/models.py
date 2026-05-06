@@ -430,6 +430,121 @@ class SourceDocumentLink(models.Model):
         return f"{self.source_app}.{self.source_model}:{self.source_id}"
 
 
+class AccountingSourcePosting(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft Journal Created'),
+        ('posted', 'Posted'),
+        ('blocked', 'Blocked'),
+        ('skipped', 'Skipped'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='source_postings',
+    )
+    journal_entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='source_posting_records',
+    )
+    source_app = models.CharField(max_length=80)
+    source_model = models.CharField(max_length=80)
+    source_id = models.CharField(max_length=80)
+    source_number = models.CharField(max_length=120, blank=True)
+    subscriber = models.ForeignKey(
+        'subscribers.Subscriber',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='accounting_source_postings',
+    )
+    document_date = models.DateField(null=True, blank=True)
+    amount = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='blocked')
+    blocked_reason = models.TextField(blank=True)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-document_date', '-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['source_app', 'source_model', 'source_id'],
+                name='accounting_unique_source_posting',
+            ),
+        ]
+        permissions = [
+            ('review_accountingsourceposting', 'Can review accounting source postings'),
+        ]
+
+    def __str__(self):
+        return f"{self.source_app}.{self.source_model}:{self.source_id} - {self.status}"
+
+
+class CustomerWithholdingTaxClaim(models.Model):
+    STATUS_CHOICES = [
+        ('customer_claimed', 'Customer Claimed'),
+        ('pending_2307', 'Pending 2307'),
+        ('received', '2307 Received'),
+        ('validated', 'Validated'),
+        ('applied_to_return', 'Applied to Return'),
+        ('disallowed', 'Disallowed'),
+        ('canceled', 'Canceled'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='customer_withholding_claims',
+    )
+    subscriber = models.ForeignKey(
+        'subscribers.Subscriber',
+        on_delete=models.CASCADE,
+        related_name='customer_withholding_claims',
+    )
+    payment = models.ForeignKey(
+        'billing.Payment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='customer_withholding_claims',
+    )
+    gross_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    tax_withheld = models.DecimalField(max_digits=14, decimal_places=2)
+    withholding_rate = models.DecimalField(max_digits=7, decimal_places=4, default=MONEY_ZERO)
+    atc = models.CharField(max_length=30, blank=True)
+    period_from = models.DateField(null=True, blank=True)
+    period_to = models.DateField(null=True, blank=True)
+    payor_tin = models.CharField(max_length=50, blank=True)
+    payor_name = models.CharField(max_length=255, blank=True)
+    payor_address = models.TextField(blank=True)
+    certificate_number = models.CharField(max_length=120, blank=True)
+    certificate_date = models.DateField(null=True, blank=True)
+    received_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='pending_2307')
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-received_date', '-created_at']
+
+    def clean(self):
+        if self.tax_withheld and self.gross_amount and self.tax_withheld > self.gross_amount:
+            raise ValidationError('Tax withheld cannot exceed the gross amount covered.')
+
+    def __str__(self):
+        return f"2307/CWT {self.subscriber} - PHP {self.tax_withheld}"
+
+
 class IncomeRecord(models.Model):
     SOURCE_CHOICES = [
         ('billing', 'Billing Payment'),
