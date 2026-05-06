@@ -187,61 +187,59 @@ Exports and interfaces:
 
 ## 4. Slice Roadmap
 
-### Slice 1 - Accounting v2 Foundation
+### Slice 1 - Accounting Foundation and Billing Draft Posting
 
 Build setup wizard, accounting entity, accounting settings, COA templates,
-periods, manual draft journals, post approval, permissions, and trial balance.
+periods, manual draft journals, post approval, permissions, trial balance, and
+draft journal creation from existing billing/payment source documents.
 
-No billing auto-posting, no BIR/NTC exports, no official BIR invoices, and no
-CAS/EIS claims.
+This slice connects billing to accounting, but only as draft accounting entries.
+It does not approve/post source journals automatically.
 
-### Slice 2 - Billing and Payment Draft Posting
+No BIR/NTC exports, no official BIR invoices, no CAS/EIS claims, no opening
+balance cutover, and no financial statements beyond Trial Balance.
 
-Create draft journals from billing invoices, payments, payment allocations,
-customer advances, waivers, refunds, bad debts, and credit forfeitures.
-
-Add diagnostics for unmapped, unapproved, unbalanced, and period-blocked source
-documents.
-
-### Slice 3 - Cutover and Opening Balances
+### Slice 2 - Cutover and Opening Balances
 
 Add opening balance import, subscriber AR reconciliation, credit reconciliation,
 cash/bank/wallet opening balances, AP, inventory, fixed assets, taxes, loans,
 equity, and go-live readiness checks.
 
-### Slice 4 - Financial Statements and Subledgers
+### Slice 3 - Financial Statements and Subledgers
 
 Add General Ledger, Balance Sheet, Income Statement, Cash Flow, Changes in
 Equity, AR aging, AP aging, VAT ledger, fixed asset schedule, depreciation
 schedule, and CPE/inventory schedule.
 
-### Slice 5 - BIR Books and Guides
+### Slice 4 - BIR Books and Guides
 
 Add loose-leaf books, BIR form guide registry, VAT and percentage-tax schedules,
 withholding/2307 schedules, annual inventory list support, PDF/XLSX exports,
 manifest, file hashes, and immutable package archives.
 
-### Slice 6 - NTC Compliance Packs
+### Slice 5 - NTC Compliance Packs
 
 Add NTC profile, configurable templates, quarterly VAS-style packs, annual
 finances/operations pack, subscriber/service-area schedules, network/facility
 schedules, QoS/incident/complaint summaries, filing checklist, and archive
 records.
 
-### Slice 7 - Reconciliation, Calendar, and Hardening
+### Slice 6 - Reconciliation, Calendar, and Hardening
 
 Add bank/wallet/gateway reconciliation, settlement batches, compliance
 calendar, filing status workflow, amendment workflow, archive verification,
 multi-tenant hardening, and full compliance diagnostics.
 
-## 5. Next Slice: Accounting v2 Foundation
+## 5. Next Slice: Accounting Foundation and Billing Draft Posting
 
 ### Summary
 
 Build the first implementation slice as the durable foundation for Accounting
 v2. After this slice, an admin can set up an accounting entity, choose an ISP
 COA template, manage accounting periods, create balanced draft journal entries,
-approve/post them, and view a basic trial balance.
+approve/post them, view a basic trial balance, and see draft accounting entries
+created from billing invoices, payments, allocations, refunds, waivers, bad
+debts, credit forfeitures, and customer advances.
 
 Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
 later migration.
@@ -283,6 +281,23 @@ Add journal workflow:
 - posted entries are read-only
 - locked periods block posting
 
+Add billing/payment draft posting:
+
+- invoice generation creates or reuses a draft journal entry:
+  `Dr Accounts Receivable / Cr Internet Service Revenue / Cr Output VAT if VAT`
+- payment recording creates or reuses a draft journal entry:
+  `Dr Cash/Bank/Wallet Clearing / Cr Accounts Receivable`
+- unallocated payment or overpayment creates/reuses customer advance logic:
+  `Dr Cash/Bank/Wallet Clearing / Cr Customer Advances`
+- payment allocation creates/reuses a draft application entry only when needed
+  by the customer advance workflow
+- refund completion creates/reuses a draft refund journal entry
+- waiver, bad debt, and credit forfeiture create/reuse explicit draft journal
+  entries
+- source posting is idempotent through `SourceDocumentLink`, keyed by source
+  model, source ID, and posting type
+- source draft journals appear in a review queue before posting
+
 Add first report:
 
 - Trial Balance by period/date range
@@ -297,6 +312,7 @@ Add UI routes:
 - `/accounting/journals/`
 - `/accounting/journals/add/`
 - `/accounting/journals/<id>/`
+- `/accounting/review/`
 - `/accounting/trial-balance/`
 
 Update Accounting dashboard:
@@ -304,6 +320,7 @@ Update Accounting dashboard:
 - show setup status
 - show open period
 - show draft journal count
+- show unreviewed source draft count
 - link to chart, journals, and trial balance
 - keep legacy income/expense links labelled as legacy
 
@@ -311,6 +328,7 @@ Add permissions and role presets:
 
 - view/manage chart of accounts
 - add/change/post journal entries
+- review source draft entries
 - view trial balance
 - manage accounting setup
 - ISP Admin gets all
@@ -337,7 +355,13 @@ Add permissions and role presets:
 - Posted journals cannot be edited/deleted.
 - Reversal is not required in this slice, but status/model fields must allow it
   later.
-- Do not wire billing invoice/payment services yet.
+- Wire billing invoice/payment services to create draft journals only.
+- Do not approve or post source-created draft journals automatically.
+- Keep the existing `IncomeRecord` payment mirror during this slice, but mark it
+  as legacy reporting; official Accounting v2 reports must use posted
+  `JournalEntry` rows only.
+- Do not double-count legacy `IncomeRecord` values in Trial Balance or any
+  Accounting v2 report.
 - Do not generate official BIR invoices.
 - Do not remove current income/expense summaries.
 
@@ -402,6 +426,20 @@ Add permissions and role presets:
 - journal line cannot have both debit and credit.
 - posted journal is read-only.
 - posting into locked period is blocked.
+- source-created draft journals remain editable only while draft.
+
+### Billing/payment draft posting tests
+
+- generated billing invoice creates one draft source journal.
+- rerunning invoice generation reuses the existing source journal.
+- recorded payment creates one draft source journal.
+- overpayment creates a customer advance draft journal.
+- payment allocation against a later invoice creates/reuses the required
+  customer advance application draft journal.
+- refund completion creates one draft refund journal.
+- waiver, bad debt, and credit forfeiture create explicit draft journals.
+- source-created draft journals do not appear in Trial Balance until posted.
+- legacy `IncomeRecord` mirror does not affect Accounting v2 Trial Balance.
 
 ### Trial balance tests
 
@@ -426,8 +464,8 @@ Add permissions and role presets:
 
 - One Accounting v2 release, implemented internally in phases: foundation,
   posting, cutover, statements, BIR, NTC, reconciliation, hardening.
-- First slice creates ledger foundation only; billing-to-ledger automation is
-  Slice 2.
+- First slice creates the ledger foundation and billing/payment draft posting
+  together.
 - One active `AccountingEntity` in UI for now, but all new tables include entity
   foreign keys.
 - Default BIR mode is `loose_leaf_guides`; CAS/EIS modes are stored as future
