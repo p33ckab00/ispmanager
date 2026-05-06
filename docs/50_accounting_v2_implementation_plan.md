@@ -21,6 +21,43 @@ Regulatory boundary: v1 will generate books, worksheets, schedules, archives,
 and filing guides. It will not claim CAS/CBA/EIS readiness or direct BIR/NTC
 submission.
 
+## 1A. Implementation Status
+
+Slice 1A, the backend ledger foundation, has been implemented as an additive
+change beside the existing income and expense tracker. It does not replace any
+current accounting pages yet.
+
+Implemented in Slice 1A:
+
+- `AccountingEntity`
+- `AccountingSettings`
+- `AccountingPeriod`
+- `ChartOfAccount`
+- `JournalEntry`
+- `JournalLine`
+- `SourceDocumentLink`
+- four seedable ISP COA templates
+- monthly accounting period generation
+- manual draft journal creation service
+- balanced-posting validation
+- posted journal immutability
+- locked or closed period posting block through open-period-only posting
+- management command: `seed_accounting_v2_foundation`
+- focused tests for template seeding, periods, posting, locked periods, line
+  validation, and posted immutability
+
+Explicitly not included in Slice 1A:
+
+- no setup wizard UI yet
+- no chart, period, journal, or trial balance pages yet
+- no billing/payment automatic draft posting yet
+- no BIR/NTC exports yet
+- no official BIR invoice behavior
+- no CAS/CBA/EIS claim
+
+The existing `/accounting/` dashboard, income pages, expense pages, and payment
+to `IncomeRecord` mirror remain unchanged for compatibility.
+
 ## 2. Locked Decisions
 
 - Accounting v2 is a complete subsystem, not a small extension of the current
@@ -187,11 +224,18 @@ Exports and interfaces:
 
 ## 4. Slice Roadmap
 
-### Slice 1 - Accounting Foundation and Billing Draft Posting
+### Slice 1A - Ledger Foundation
 
-Build setup wizard, accounting entity, accounting settings, COA templates,
-periods, manual draft journals, post approval, permissions, trial balance, and
-draft journal creation from existing billing/payment source documents.
+Build accounting entity, accounting settings, COA templates, periods, manual
+draft journal service, post validation, source link model, and backend tests.
+
+This slice is additive and keeps the legacy accounting pages working.
+
+### Slice 1B - Accounting Workspace and Billing Draft Posting
+
+Build setup wizard, chart of accounts page, period page, manual journal UI,
+posting action, permissions, trial balance, dashboard status cards, and draft
+journal creation from existing billing/payment source documents.
 
 This slice connects billing to accounting, but only as draft accounting entries.
 It does not approve/post source journals automatically.
@@ -230,23 +274,24 @@ Add bank/wallet/gateway reconciliation, settlement batches, compliance
 calendar, filing status workflow, amendment workflow, archive verification,
 multi-tenant hardening, and full compliance diagnostics.
 
-## 5. Next Slice: Accounting Foundation and Billing Draft Posting
+## 5. Remaining Slice 1B: Accounting Workspace and Billing Draft Posting
 
 ### Summary
 
-Build the first implementation slice as the durable foundation for Accounting
-v2. After this slice, an admin can set up an accounting entity, choose an ISP
-COA template, manage accounting periods, create balanced draft journal entries,
-approve/post them, view a basic trial balance, and see draft accounting entries
-created from billing invoices, payments, allocations, refunds, waivers, bad
-debts, credit forfeitures, and customer advances.
+Build the remaining user-facing and source-posting portion of the first
+Accounting v2 release. After Slice 1B, an admin can set up an accounting entity
+from the browser, choose an ISP COA template, manage accounting periods, create
+balanced draft journal entries, approve/post them, view a basic trial balance,
+and see draft accounting entries created from billing invoices, payments,
+allocations, refunds, waivers, bad debts, credit forfeitures, and customer
+advances.
 
 Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
 later migration.
 
 ### Key Changes
 
-Add Accounting v2 models under `apps/accounting`:
+Use the Slice 1A Accounting v2 models already added under `apps/accounting`:
 
 - `AccountingEntity`: single active company for now; tenant-ready
 - `AccountingSettings`: compliance mode, fiscal year, currency, setup status
@@ -255,8 +300,7 @@ Add Accounting v2 models under `apps/accounting`:
   flag
 - `JournalEntry`: `draft`, `posted`, `reviewed`, `reversed`, `voided`
 - `JournalLine`: debit/credit lines linked to accounts
-- `SourceDocumentLink`: reserved bridge for later billing/payment/expense
-  posting
+- `SourceDocumentLink`: bridge for billing/payment/expense draft posting
 
 Seed selectable ISP COA templates:
 
@@ -464,8 +508,10 @@ Add permissions and role presets:
 
 - One Accounting v2 release, implemented internally in phases: foundation,
   posting, cutover, statements, BIR, NTC, reconciliation, hardening.
-- First slice creates the ledger foundation and billing/payment draft posting
-  together.
+- Slice 1A created the backend ledger foundation first so the existing
+  accounting pages stayed stable.
+- Slice 1B completes the original first-slice user workspace and billing/payment
+  draft posting.
 - One active `AccountingEntity` in UI for now, but all new tables include entity
   foreign keys.
 - Default BIR mode is `loose_leaf_guides`; CAS/EIS modes are stored as future
@@ -473,5 +519,3 @@ Add permissions and role presets:
 - Current billing statement PDFs remain non-BIR billing statements in v1.
 - Accounting v2 creates draft journals automatically; accountant/admin approval
   posts them to GL.
-- Existing dirty OTP/settings worktree changes are unrelated and must not be
-  touched during this documentation or implementation work.

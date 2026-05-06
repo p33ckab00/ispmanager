@@ -9,6 +9,8 @@ and future multi-tenant production use.
 Implementation planning is continued in
 `docs/50_accounting_v2_implementation_plan.md`, which locks the delivery
 decisions, release slices, and next buildable Accounting v2 foundation slice.
+The first implemented backend slice is recorded in
+`docs/51_accounting_v2_slice_1a_ledger_foundation.md`.
 
 ## 1. Conversation Summary
 
