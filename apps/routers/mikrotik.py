@@ -166,6 +166,47 @@ def _set_disabled_by_lookup(router, resource_path, lookups, disabled, label):
         _disconnect_safely(conn)
 
 
+def _remove_by_lookup(router, resource_path, lookups, label, missing_ok=False):
+    lookup_items = [(key, value) for key, value in lookups if value not in (None, '')]
+    if not lookup_items:
+        return False, f"Missing lookup data for {label}."
+
+    api, conn = get_connection(router)
+    try:
+        resource = api.get_resource(resource_path)
+        records = []
+        matched_key = ''
+        matched_value = ''
+
+        for key, value in lookup_items:
+            try:
+                records = resource.get(**{key: str(value)})
+            except Exception:
+                records = []
+            if records:
+                matched_key = key
+                matched_value = value
+                break
+
+        if not records:
+            if missing_ok:
+                return True, None
+            lookup_text = ', '.join(f"{key}={value}" for key, value in lookup_items)
+            return False, f"No {label} found on router for {lookup_text}."
+
+        record = records[0]
+        record_id = record.get('id') or record.get('.id')
+        if not record_id:
+            return False, f"{label} matched by {matched_key}={matched_value} has no RouterOS id."
+
+        resource.remove(id=record_id)
+        return True, None
+    except Exception as e:
+        return False, str(e)
+    finally:
+        _disconnect_safely(conn)
+
+
 def set_ppp_secret_disabled(router, username, disabled=True):
     return _set_disabled_by_lookup(
         router,
@@ -198,6 +239,41 @@ def set_dhcp_lease_disabled(router, username='', mac_address='', ip_address=None
         ],
         disabled,
         'DHCP lease',
+    )
+
+
+def remove_ppp_active_session(router, username):
+    return _remove_by_lookup(
+        router,
+        '/ppp/active',
+        [('name', username)],
+        'PPP active session',
+        missing_ok=True,
+    )
+
+
+def remove_hotspot_active_session(router, username):
+    return _remove_by_lookup(
+        router,
+        '/ip/hotspot/active',
+        [('user', username)],
+        'Hotspot active session',
+        missing_ok=True,
+    )
+
+
+def remove_dhcp_lease(router, username='', mac_address='', ip_address=None):
+    return _remove_by_lookup(
+        router,
+        '/ip/dhcp-server/lease',
+        [
+            ('mac-address', mac_address),
+            ('address', ip_address),
+            ('comment', username),
+            ('host-name', username),
+        ],
+        'DHCP lease',
+        missing_ok=True,
     )
 
 

@@ -9,7 +9,7 @@ This document explains how the system currently behaves when a subscriber become
 - the subscriber has overdue unpaid invoices
 - the admin wants to give additional palugit
 - the connection should stay active until the admin manually decides to suspend
-- once suspended, the PPP secret on MikroTik should be disabled
+- once suspended, MikroTik access should be disabled and any active session or lease should be removed where supported
 
 ## Current Design Summary
 
@@ -21,7 +21,7 @@ The current system already separates these concerns:
 
 That separation is good and aligns with ISP operations.
 
-However, the current system does **not** yet support a per-subscriber palugit or service-enforcement hold override.
+The current system supports per-subscriber palugit through suspension-hold fields. An active hold keeps the subscriber eligible for billing follow-up while preventing automatic overdue suspension until the hold expires.
 
 ## Final Business Definition
 
@@ -63,22 +63,32 @@ It does **not** by itself:
 
 - suspend the subscriber
 - disconnect the subscriber
-- disable the MikroTik PPP secret
+- disable MikroTik access
+- remove active MikroTik sessions or leases
 
 ## 3. Actual service interruption happens only on suspend or disconnect
 
-The MikroTik PPP secret is disabled only when one of these actions happens:
+MikroTik access is disabled only when one of these actions happens:
 
 - manual `Suspend`
 - manual `Disconnect`
 - scheduler-driven auto suspend for overdue subscribers
+
+For service types that support enforcement, suspend first disables the account or lease, then removes active access:
+
+- PPPoE: disable `/ppp/secret`, then remove matching `/ppp/active`
+- Hotspot: disable `/ip/hotspot/user`, then remove matching `/ip/hotspot/active`
+- DHCP/IPoE: disable the matched `/ip/dhcp-server/lease`, then remove that lease
+- Static: return a warning because a firewall/address-list policy is still required
 
 ## 4. Manual suspend path
 
 When admin clicks `Suspend` on the subscriber page:
 
 - subscriber status becomes `suspended`
-- the system attempts to set MikroTik PPP secret `disabled=yes`
+- the system attempts to disable the matching MikroTik account or lease
+- if disabling succeeds, the system removes the matching active session or lease
+- if no active session exists, the router-side removal is treated as already complete
 - an audit log entry is created
 - a Telegram notification may be sent
 
@@ -115,36 +125,25 @@ This matches the desired behavior operationally.
 
 ### If `enable_auto_disconnect` is enabled
 
-Then the current system does **not** support per-subscriber exemption.
+Then subscribers with an active palugit hold are skipped by auto-suspend.
 
 Meaning:
 
 - once subscriber has an `overdue` invoice
 - and remains `active`
+- and has no active `suspension_hold_until`
 - the scheduler may suspend the subscriber on the next run
 
-There is no built-in field or admin action for:
+The built-in hold fields are:
 
-- `palugit until`
-- `promise to pay`
-- `skip auto suspend`
-- `service enforcement hold`
+- `suspension_hold_until`
+- `suspension_hold_reason`
+- `suspension_hold_by`
+- `suspension_hold_created_at`
 
 ## Current Gaps
 
-### Gap 1: No per-subscriber palugit control
-
-The system has:
-
-- global grace period
-- global auto suspend toggle
-
-But it does not have:
-
-- subscriber-specific grace extension
-- subscriber-specific hold from auto suspend
-
-### Gap 2: Misleading billing setting label
+### Gap 1: Misleading billing setting label
 
 The UI says:
 
@@ -155,27 +154,30 @@ But the code actually:
 - auto-suspends the subscriber
 - does not mark them `disconnected`
 
-### Gap 3: Suspended app status can exist even if MikroTik action failed
+### Gap 2: Suspended app status can exist even if MikroTik action failed
 
-The suspend service updates subscriber status to `suspended` even when:
+The suspend service still updates subscriber status to `suspended` when:
 
 - MikroTik auto suspend is disabled
 - no router is assigned
-- RouterOS API call fails
+- the initial RouterOS disable action fails
+- active session or lease removal fails after the account was disabled
 
-So the UI state and actual router enforcement can drift.
+If the status changes but MikroTik returns a warning, the UI surfaces that warning to the operator. This protects the workflow from silently hiding router-side enforcement problems.
 
-### Gap 4: Payment does not auto-reconnect
+### Gap 3: Static subscriber suspension still needs a router policy
 
-If a subscriber is already suspended and then pays:
+Static subscribers do not have a safe generic RouterOS object to disable or remove.
 
-- payment allocation works
-- accounting income is created
-- overdue invoices may become paid
+To enforce static subscriber suspension, operations still needs a configured router policy such as:
 
-But the subscriber is not automatically reconnected.
+- address-list membership
+- firewall drop or redirect rule
+- captive or walled-garden rule
 
-Manual `Reconnect` is still required.
+## Payment reconnect behavior
+
+If auto-reconnect after full payment is enabled, a suspended subscriber can be reconnected after all open, partial, and overdue balances are fully paid. Otherwise, staff still use manual `Reconnect`.
 
 ## Current Operational Recommendation
 
@@ -188,21 +190,18 @@ If the business wants:
 Then for now the safest current setup is:
 
 1. keep overdue marking active
-2. turn off global `enable_auto_disconnect`
-3. let staff use manual `Suspend` from the subscriber page
+2. use palugit holds for subscriber-specific extensions
+3. either turn off global `enable_auto_disconnect` or let it run for accounts without active holds
+4. let staff use manual `Suspend` from the subscriber page when collections decides to cut service
 
 That gives the closest working behavior to the desired process.
 
 ## Conclusion
 
-The current system can support:
+The current system supports:
 
 - `overdue but not yet cut`
+- per-subscriber palugit holds
+- suspend-time MikroTik account disable plus active session or lease removal
 
-But only at a global operational level, not per subscriber.
-
-The missing feature is:
-
-- a per-subscriber overdue-with-palugit workflow implemented as a service-enforcement hold
-
-That should be added before relying on automatic suspend in real production operations.
+The remaining production caveat is static subscriber enforcement, which still needs an explicit RouterOS policy before automatic suspension can reliably cut static access.

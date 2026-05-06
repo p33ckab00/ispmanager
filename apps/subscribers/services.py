@@ -262,25 +262,42 @@ def set_subscriber_mikrotik_access(subscriber, disabled=True):
     service_type = subscriber.service_type or 'pppoe'
 
     if service_type == 'pppoe':
-        return mikrotik.set_ppp_secret_disabled(
+        ok, err = mikrotik.set_ppp_secret_disabled(
             subscriber.router,
             subscriber.username,
             disabled=disabled,
         )
+        if not disabled or not ok:
+            return ok, err
+        return mikrotik.remove_ppp_active_session(subscriber.router, subscriber.username)
+
     if service_type == 'hotspot':
-        return mikrotik.set_hotspot_user_disabled(
+        ok, err = mikrotik.set_hotspot_user_disabled(
             subscriber.router,
             subscriber.username,
             disabled=disabled,
         )
+        if not disabled or not ok:
+            return ok, err
+        return mikrotik.remove_hotspot_active_session(subscriber.router, subscriber.username)
+
     if service_type == 'dhcp':
-        return mikrotik.set_dhcp_lease_disabled(
+        ok, err = mikrotik.set_dhcp_lease_disabled(
             subscriber.router,
             username=subscriber.username,
             mac_address=subscriber.mac_address,
             ip_address=subscriber.ip_address,
             disabled=disabled,
         )
+        if not disabled or not ok:
+            return ok, err
+        return mikrotik.remove_dhcp_lease(
+            subscriber.router,
+            username=subscriber.username,
+            mac_address=subscriber.mac_address,
+            ip_address=subscriber.ip_address,
+        )
+
     if service_type == 'static':
         return False, (
             f"Static subscriber auto-{action} is not configured. "

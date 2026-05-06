@@ -68,6 +68,12 @@
 | get_interface_traffic() | monitor-traffic once for one interface |
 | get_ppp_active() | Pull /ppp/active sessions |
 | get_ppp_secrets() | Pull /ppp/secret list |
+| set_ppp_secret_disabled() | Enable or disable a PPP secret by username |
+| set_hotspot_user_disabled() | Enable or disable a Hotspot user by username |
+| set_dhcp_lease_disabled() | Enable or disable a DHCP/IPoE lease by MAC, IP, comment, or host-name |
+| remove_ppp_active_session() | Remove a live PPP session by username |
+| remove_hotspot_active_session() | Remove a live Hotspot session by username |
+| remove_dhcp_lease() | Remove a DHCP/IPoE lease by MAC, IP, comment, or host-name |
 | add_ppp_secret() | Add PPP secret to router |
 | get_system_resource() | CPU, memory, uptime |
 | get_system_identity() | Router name |
@@ -81,6 +87,7 @@
 - If router is unreachable during sync: status set to offline
 - Physical ports shown as clickable cards in detail view
 - PPPoE sessions, VLANs, bridges, tunnels shown in separate panels
+- Subscriber suspend enforcement disables the configured MikroTik account or lease, then removes the current active session or lease when supported
 - Live traffic uses HTMX hx-trigger="load, every 10s" polling
 - Soft delete: is_active=False, never hard delete
 

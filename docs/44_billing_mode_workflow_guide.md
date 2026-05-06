@@ -1113,7 +1113,6 @@ Production gaps identified:
 
 - New subscribers synced from MikroTik can be incomplete because router data may not include plan, rate, phone, start date, or billing policy.
 - Direct status editing can bypass lifecycle actions if not controlled carefully.
-- MikroTik suspend/reconnect currently targets PPP secrets and should become service-type-aware for hotspot, DHCP/IPoE, and static accounts.
 - Subscriber pages need a visible billing/SMS readiness indicator.
 - Auto-reconnect after full payment is not fully implemented yet.
 - Disconnected account billing policy now supports preserve balance, final invoice, or waive open balances.
@@ -1163,6 +1162,13 @@ Implemented service-type-aware MikroTik access slice:
   - then `address`,
   - then `comment=username`,
   - then `host-name=username`.
+- Suspend enforcement is two-step:
+  - disable the account or lease first,
+  - then remove the current active access when supported.
+- PPPoE suspend removes the matching `/ppp/active` session after disabling the secret.
+- Hotspot suspend removes the matching `/ip/hotspot/active` session after disabling the user.
+- DHCP/IPoE suspend removes the matched DHCP lease after disabling it.
+- Missing active sessions are treated as already offline.
 - Static subscribers now return an explicit warning instead of silently trying to disable a PPP secret.
 - Static service suspension needs a defined router policy first, such as a firewall address-list and matching drop/redirect rule.
 - The subscriber status still changes in the app when MikroTik returns a warning; the UI surfaces that warning to the operator.

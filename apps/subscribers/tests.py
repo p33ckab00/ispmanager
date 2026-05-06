@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.contrib.auth.models import Permission, User
 from django.test import SimpleTestCase, TestCase
@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.core.models import AuditLog
 from apps.nms.models import ServiceAttachment
+from apps.routers.models import Router
 from apps.settings_app.models import BillingSettings
 from apps.subscribers.forms import ManualSubscriberForm, SubscriberAdminForm
 from apps.subscribers.models import NetworkNode, Subscriber, SubscriberNode, SubscriberOTP, normalize_phone_digits
@@ -29,41 +30,114 @@ class MikroTikServiceAccessTests(SimpleTestCase):
         data.update(overrides)
         return SimpleNamespace(**data)
 
-    @patch('apps.subscribers.services.mikrotik.set_ppp_secret_disabled', return_value=(True, None))
-    def test_pppoe_access_uses_ppp_secret(self, helper):
+    def test_pppoe_suspend_disables_secret_and_removes_active_session(self):
         subscriber = self._subscriber('pppoe')
 
-        ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
+        with (
+            patch('apps.subscribers.services.mikrotik.set_ppp_secret_disabled', return_value=(True, None)) as disable,
+            patch('apps.subscribers.services.mikrotik.remove_ppp_active_session', return_value=(True, None)) as remove,
+        ):
+            ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
 
         self.assertTrue(ok)
         self.assertIsNone(err)
-        helper.assert_called_once_with(subscriber.router, subscriber.username, disabled=True)
+        disable.assert_called_once_with(subscriber.router, subscriber.username, disabled=True)
+        remove.assert_called_once_with(subscriber.router, subscriber.username)
 
-    @patch('apps.subscribers.services.mikrotik.set_hotspot_user_disabled', return_value=(True, None))
-    def test_hotspot_access_uses_hotspot_user(self, helper):
+    def test_hotspot_reconnect_enables_user_without_removing_active_session(self):
         subscriber = self._subscriber('hotspot')
 
-        ok, err = set_subscriber_mikrotik_access(subscriber, disabled=False)
+        with (
+            patch('apps.subscribers.services.mikrotik.set_hotspot_user_disabled', return_value=(True, None)) as enable,
+            patch('apps.subscribers.services.mikrotik.remove_hotspot_active_session') as remove,
+        ):
+            ok, err = set_subscriber_mikrotik_access(subscriber, disabled=False)
 
         self.assertTrue(ok)
         self.assertIsNone(err)
-        helper.assert_called_once_with(subscriber.router, subscriber.username, disabled=False)
+        enable.assert_called_once_with(subscriber.router, subscriber.username, disabled=False)
+        remove.assert_not_called()
 
-    @patch('apps.subscribers.services.mikrotik.set_dhcp_lease_disabled', return_value=(True, None))
-    def test_dhcp_access_uses_lease_identifiers(self, helper):
+    def test_hotspot_suspend_disables_user_and_removes_active_session(self):
+        subscriber = self._subscriber('hotspot')
+
+        with (
+            patch('apps.subscribers.services.mikrotik.set_hotspot_user_disabled', return_value=(True, None)) as disable,
+            patch('apps.subscribers.services.mikrotik.remove_hotspot_active_session', return_value=(True, None)) as remove,
+        ):
+            ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
+
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        disable.assert_called_once_with(subscriber.router, subscriber.username, disabled=True)
+        remove.assert_called_once_with(subscriber.router, subscriber.username)
+
+    def test_dhcp_suspend_disables_and_removes_lease(self):
         subscriber = self._subscriber('dhcp')
 
-        ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
+        with (
+            patch('apps.subscribers.services.mikrotik.set_dhcp_lease_disabled', return_value=(True, None)) as disable,
+            patch('apps.subscribers.services.mikrotik.remove_dhcp_lease', return_value=(True, None)) as remove,
+        ):
+            ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
 
         self.assertTrue(ok)
         self.assertIsNone(err)
-        helper.assert_called_once_with(
+        disable.assert_called_once_with(
             subscriber.router,
             username=subscriber.username,
             mac_address=subscriber.mac_address,
             ip_address=subscriber.ip_address,
             disabled=True,
         )
+        remove.assert_called_once_with(
+            subscriber.router,
+            username=subscriber.username,
+            mac_address=subscriber.mac_address,
+            ip_address=subscriber.ip_address,
+        )
+
+    def test_active_removal_is_skipped_when_disable_fails(self):
+        subscriber = self._subscriber('pppoe')
+
+        with (
+            patch('apps.subscribers.services.mikrotik.set_ppp_secret_disabled', return_value=(False, 'disable failed')) as disable,
+            patch('apps.subscribers.services.mikrotik.remove_ppp_active_session') as remove,
+        ):
+            ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
+
+        self.assertFalse(ok)
+        self.assertEqual(err, 'disable failed')
+        disable.assert_called_once_with(subscriber.router, subscriber.username, disabled=True)
+        remove.assert_not_called()
+
+    def test_missing_active_session_does_not_warn_after_disable(self):
+        subscriber = self._subscriber('pppoe')
+
+        with (
+            patch('apps.subscribers.services.mikrotik.set_ppp_secret_disabled', return_value=(True, None)),
+            patch('apps.subscribers.services.mikrotik.remove_ppp_active_session', return_value=(True, None)),
+        ):
+            ok, err = set_subscriber_mikrotik_access(subscriber, disabled=True)
+
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+
+    def test_missing_routeros_active_record_counts_as_success(self):
+        api = Mock()
+        conn = Mock()
+        resource = Mock()
+        resource.get.return_value = []
+        api.get_resource.return_value = resource
+
+        with patch('apps.routers.mikrotik.get_connection', return_value=(api, conn)):
+            from apps.routers import mikrotik
+            ok, err = mikrotik.remove_ppp_active_session(object(), 'client-001')
+
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        resource.remove.assert_not_called()
+        conn.disconnect.assert_called_once()
 
     def test_static_access_returns_explicit_policy_warning(self):
         subscriber = self._subscriber('static')
@@ -373,6 +447,38 @@ class SubscriberStatusTransitionTests(TestCase):
         self.assertEqual(subscriber.suspension_hold_by, '')
         self.assertFalse(ok)
         self.assertIn('No router assigned', err)
+
+    def test_suspend_transition_keeps_suspended_status_when_active_removal_warns(self):
+        router = Router.objects.create(
+            name='Test Router',
+            host='192.0.2.1',
+            username='admin',
+            password='secret',
+        )
+        subscriber = Subscriber.objects.create(
+            router=router,
+            username='remove-warning',
+            status='active',
+            service_type='pppoe',
+        )
+
+        with (
+            patch('apps.subscribers.services.mikrotik.set_ppp_secret_disabled', return_value=(True, None)),
+            patch(
+                'apps.subscribers.services.mikrotik.remove_ppp_active_session',
+                return_value=(False, 'active session removal failed'),
+            ),
+        ):
+            ok, err = transition_subscriber_status(
+                subscriber,
+                'suspended',
+                changed_by='tester',
+            )
+
+        subscriber.refresh_from_db()
+        self.assertFalse(ok)
+        self.assertEqual(err, 'active session removal failed')
+        self.assertEqual(subscriber.status, 'suspended')
 
     def test_admin_form_blocks_terminal_status_change(self):
         subscriber = Subscriber.objects.create(

@@ -154,16 +154,31 @@ The first implementation intentionally keeps scope tight.
 
 Still not included:
 
-- auto-reconnect on payment
 - collections dashboard logic
 - promise-to-pay automation
 - palugit expiry notification automation
-- stronger MikroTik enforcement reconciliation if secret disable fails
+- static subscriber suspension policy automation
 
 ## Recommended Next Follow-Up
 
 The next logical hardening pass would be:
 
-1. improve suspend failure visibility when MikroTik secret disable fails
+1. define the static-subscriber suspend policy, such as address-list plus firewall rule
 2. optionally notify when palugit expires
-3. discuss whether payment should suggest or trigger reconnect workflow
+3. expand collections dashboard workflows around palugit and overdue risk
+
+## MikroTik suspend enforcement update
+
+Suspend now performs a two-step MikroTik enforcement flow when auto-suspend is enabled:
+
+- disable the account or lease first
+- remove the current active session or lease only after disable succeeds
+
+Service-specific behavior:
+
+- PPPoE disables `/ppp/secret` by `name=username`, then removes `/ppp/active`
+- Hotspot disables `/ip/hotspot/user` by `name=username`, then removes `/ip/hotspot/active`
+- DHCP/IPoE disables `/ip/dhcp-server/lease` by MAC, IP, comment, or host-name, then removes the matched lease
+- Static subscribers still return a policy warning because they need a configured firewall/address-list enforcement rule
+
+If the account disable succeeds but active removal fails, the subscriber remains `suspended` in the app and the operator receives a MikroTik warning.
