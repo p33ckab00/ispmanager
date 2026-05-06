@@ -80,7 +80,9 @@ role cannot create a test database.
 
 ## Next Slice
 
-Slice 1C should add billing and payment draft posting:
+Slice 1C is planned in
+`docs/53_accounting_v2_slice_1c_billing_payment_draft_posting.md`. It should
+add billing and payment draft posting:
 
 - invoice source draft journal
 - payment source draft journal

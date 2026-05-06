@@ -60,8 +60,12 @@ to `IncomeRecord` mirror remain unchanged for compatibility.
 
 Slice 1B workspace UI has also been implemented for manual Accounting v2 use.
 It adds setup, chart, periods, journal list/detail/create/post, trial balance,
-dashboard status links, and read-only ledger role preset permissions. Billing
-and payment draft posting remains the next accounting sub-slice.
+dashboard status links, and read-only ledger role preset permissions.
+
+Slice 1C billing/payment draft posting is planned in
+`docs/53_accounting_v2_slice_1c_billing_payment_draft_posting.md`. That plan
+documents the source-event gaps, resolved posting rules, idempotency behavior,
+review queue, and tests needed before implementation.
 
 ## 2. Locked Decisions
 
@@ -247,6 +251,8 @@ Build draft journal creation from existing billing/payment source documents.
 
 This slice connects billing to accounting, but only as draft accounting entries.
 It does not approve/post source journals automatically.
+The detailed implementation plan is in
+`docs/53_accounting_v2_slice_1c_billing_payment_draft_posting.md`.
 
 No BIR/NTC exports, no official BIR invoices, no CAS/EIS claims, no opening
 balance cutover, and no financial statements beyond Trial Balance.
@@ -282,24 +288,21 @@ Add bank/wallet/gateway reconciliation, settlement batches, compliance
 calendar, filing status workflow, amendment workflow, archive verification,
 multi-tenant hardening, and full compliance diagnostics.
 
-## 5. Remaining Slice 1B: Accounting Workspace and Billing Draft Posting
+## 5. Remaining Slice 1C: Billing and Payment Draft Posting
 
 ### Summary
 
-Build the remaining user-facing and source-posting portion of the first
-Accounting v2 release. After Slice 1B, an admin can set up an accounting entity
-from the browser, choose an ISP COA template, manage accounting periods, create
-balanced draft journal entries, approve/post them, view a basic trial balance,
-and see draft accounting entries created from billing invoices, payments,
-allocations, refunds, waivers, bad debts, credit forfeitures, and customer
-advances.
+Build the source-posting portion of the first Accounting v2 release. After
+Slice 1C, billing invoices, payments, allocations, refunds, waivers, voids, and
+credit forfeitures can create or reuse Accounting v2 draft journal entries for
+review.
 
 Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
 later migration.
 
 ### Key Changes
 
-Use the Slice 1A Accounting v2 models already added under `apps/accounting`:
+Use the Accounting v2 models already added under `apps/accounting`:
 
 - `AccountingEntity`: single active company for now; tenant-ready
 - `AccountingSettings`: compliance mode, fiscal year, currency, setup status
@@ -309,29 +312,6 @@ Use the Slice 1A Accounting v2 models already added under `apps/accounting`:
 - `JournalEntry`: `draft`, `posted`, `reviewed`, `reversed`, `voided`
 - `JournalLine`: debit/credit lines linked to accounts
 - `SourceDocumentLink`: bridge for billing/payment/expense draft posting
-
-Seed selectable ISP COA templates:
-
-- ISP Non-VAT Sole Proprietor
-- ISP VAT Sole Proprietor
-- ISP Non-VAT Corporation
-- ISP VAT Corporation
-
-Add Accounting setup wizard:
-
-- company/taxpayer basics
-- VAT/non-VAT template selection
-- fiscal/calendar year start
-- create monthly accounting periods for current year
-- seed chart of accounts once only
-
-Add journal workflow:
-
-- manual journal entry create/edit while draft
-- validate total debits equal total credits
-- post action moves draft to posted
-- posted entries are read-only
-- locked periods block posting
 
 Add billing/payment draft posting:
 
@@ -350,42 +330,22 @@ Add billing/payment draft posting:
   model, source ID, and posting type
 - source draft journals appear in a review queue before posting
 
-Add first report:
-
-- Trial Balance by period/date range
-- includes debit, credit, and ending balance by account
-- totals must balance
-
 Add UI routes:
 
-- `/accounting/setup/`
-- `/accounting/chart/`
-- `/accounting/periods/`
-- `/accounting/journals/`
-- `/accounting/journals/add/`
-- `/accounting/journals/<id>/`
 - `/accounting/review/`
-- `/accounting/trial-balance/`
+- retry blocked source posting from review queue
 
 Update Accounting dashboard:
 
-- show setup status
-- show open period
-- show draft journal count
 - show unreviewed source draft count
-- link to chart, journals, and trial balance
-- keep legacy income/expense links labelled as legacy
+- show blocked source posting count
 
 Add permissions and role presets:
 
-- view/manage chart of accounts
-- add/change/post journal entries
 - review source draft entries
-- view trial balance
-- manage accounting setup
 - ISP Admin gets all
-- cashier gets view-only accounting plus existing expense permission unless
-  already broader
+- cashier remains read-only for Accounting v2 source drafts unless explicitly
+  granted review/post permissions
 
 ### Implementation Notes
 
@@ -409,6 +369,11 @@ Add permissions and role presets:
   later.
 - Wire billing invoice/payment services to create draft journals only.
 - Do not approve or post source-created draft journals automatically.
+- Billing must remain fail-soft while Accounting v2 is not live. Missing setup,
+  period, or account mapping should create a blocked review result or skip
+  posting without breaking invoice/payment creation.
+- VAT draft posting must not guess Output VAT from gross invoices until tax
+  breakdown or explicit VAT posting settings exist.
 - Keep the existing `IncomeRecord` payment mirror during this slice, but mark it
   as legacy reporting; official Accounting v2 reports must use posted
   `JournalEntry` rows only.
@@ -462,17 +427,18 @@ Add permissions and role presets:
 - historical billing AR reconciles to subscriber subledger and GL control
 - legacy income/expense records remain accessible after cutover
 
-## 7. Next Slice Test Plan
+## 7. Slice 1C Focus Test Plan
 
-### Model tests
+The detailed Slice 1C test plan is in
+`docs/53_accounting_v2_slice_1c_billing_payment_draft_posting.md`. The summary
+below keeps the roadmap-level checks visible.
+
+### Carry-forward foundation checks
 
 - COA template seeds expected required accounts.
 - setup wizard creates one active accounting entity.
 - setup cannot seed duplicate accounts for the same entity.
 - accounting periods are created for all 12 months.
-
-### Journal tests
-
 - balanced draft journal can be posted.
 - unbalanced draft journal cannot be posted.
 - journal line cannot have both debit and credit.
@@ -493,14 +459,14 @@ Add permissions and role presets:
 - source-created draft journals do not appear in Trial Balance until posted.
 - legacy `IncomeRecord` mirror does not affect Accounting v2 Trial Balance.
 
-### Trial balance tests
+### Trial balance regression tests
 
 - posted entries appear in trial balance.
 - draft entries do not appear.
 - total debits equal total credits.
 - account balances follow normal balance correctly.
 
-### Permission tests
+### Permission regression tests
 
 - unauthorized users cannot manage setup/chart/journals.
 - read-only auditor can view but not post.
@@ -518,8 +484,8 @@ Add permissions and role presets:
   posting, cutover, statements, BIR, NTC, reconciliation, hardening.
 - Slice 1A created the backend ledger foundation first so the existing
   accounting pages stayed stable.
-- Slice 1B completes the original first-slice user workspace and billing/payment
-  draft posting.
+- Slice 1B completed the first browser workspace.
+- Slice 1C is the next billing/payment source draft posting slice.
 - One active `AccountingEntity` in UI for now, but all new tables include entity
   foreign keys.
 - Default BIR mode is `loose_leaf_guides`; CAS/EIS modes are stored as future

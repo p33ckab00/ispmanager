@@ -13,6 +13,8 @@ The first implemented backend slice is recorded in
 `docs/51_accounting_v2_slice_1a_ledger_foundation.md`.
 The first browser workspace slice is recorded in
 `docs/52_accounting_v2_slice_1b_workspace_ui.md`.
+The billing/payment draft posting plan is recorded in
+`docs/53_accounting_v2_slice_1c_billing_payment_draft_posting.md`.
 
 ## 1. Conversation Summary
 
