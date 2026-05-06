@@ -113,14 +113,28 @@ Slice 1C-E adds invoice waiver and void source drafts:
 - fully paid or zero-balance waived/voided invoices are skipped with an
   auditable source posting note instead of creating zero-amount journals.
 
-Remaining Slice 1C gaps after Slice 1C-E:
+Slice 1C-F adds source retry and backfill tooling:
+
+- blocked, skipped, and draft source postings can be retried from
+  `/accounting/review/` by users with source review permission.
+- retry dispatches by source identity and posting type, including invoices,
+  collections, advance applications, credit adjustments, waivers, and voids.
+- retry remains fail-soft: deleted source documents, unsupported posting types,
+  missing setup, missing periods, and missing account mappings stay blocked for
+  review instead of breaking the page.
+- `backfill_accounting_source_postings` queues draft source postings for
+  historical invoices, payments, advance applications, credit adjustments,
+  waivers, and voids.
+- the backfill command supports `--source`, `--from-date`, `--to-date`,
+  `--limit`, and `--dry-run`; it creates draft/review records only and never
+  posts journals automatically.
+
+Remaining Slice 1C gaps after Slice 1C-F:
 
 - VAT invoice posting is still blocked until invoice tax breakdown or explicit
   VAT posting settings are added.
 - 2307 upload attachments and finalized SAWT/2307 export schedules are not yet
   implemented.
-- retry blocked source posting and backfill management commands are still
-  pending.
 
 ## Current Source Model Facts
 
@@ -571,6 +585,13 @@ Add:
 - link to draft journal detail
 - button to retry blocked source posting after setup/mapping is fixed
 
+Backfill command:
+
+```bash
+.venv/bin/python manage.py backfill_accounting_source_postings --source all --dry-run
+.venv/bin/python manage.py backfill_accounting_source_postings --source invoices --from-date 2026-01-01 --to-date 2026-03-31
+```
+
 Existing journal detail remains the posting screen for balanced drafts.
 
 ## Tests
@@ -630,6 +651,10 @@ Existing journal detail remains the posting screen for balanced drafts.
 - missing period creates blocked source posting
 - missing mapped account creates blocked source posting
 - review queue lists blocked and draft source postings
+- blocked source posting retry creates a draft after setup/mapping is fixed
+- deleted source document retry remains blocked with an auditable reason
+- backfill command can dry-run and create draft/review source postings by
+  source family
 - source-created drafts remain editable only while draft
 - posted source journals cannot be edited
 
@@ -655,6 +680,7 @@ Slice 1C is complete when:
 - customer EWT/CWT claims can settle AR as CWT receivable with 2307 tracking
 - source posting is idempotent
 - Accounting review queue shows draft and blocked source postings
+- source review retry and backfill command can re-run source draft creation
 - billing does not fail when Accounting v2 setup is incomplete
 - Trial Balance includes source journals only after posting
 - legacy income/expense pages still load

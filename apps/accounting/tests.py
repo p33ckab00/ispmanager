@@ -24,6 +24,7 @@ from apps.accounting.services import (
     create_manual_journal_entry,
     create_payment_source_draft,
     post_journal_entry,
+    retry_source_posting,
 )
 from apps.billing.models import AccountCreditAdjustment, Invoice, Payment, PaymentAllocation
 from apps.subscribers.models import Subscriber
@@ -389,3 +390,35 @@ class AccountingV2SourcePostingTests(TestCase):
         lines = {line.account.code: line for line in journal_entry.lines.select_related('account')}
         self.assertEqual(lines['4000'].debit, Decimal('750.00'))
         self.assertEqual(lines['1100'].credit, Decimal('750.00'))
+
+    def test_retry_blocked_invoice_source_posting_after_setup_creates_draft(self):
+        invoice = self._invoice()
+        blocked = create_invoice_source_draft(invoice)
+        self.assertEqual(blocked.status, 'blocked')
+
+        entity = self._foundation()
+        retry_source_posting(blocked)
+
+        posting = AccountingSourcePosting.objects.get(
+            source_model='Invoice.invoice',
+            source_id=str(invoice.pk),
+        )
+        self.assertEqual(posting.entity, entity)
+        self.assertEqual(posting.status, 'draft')
+        self.assertIsNotNone(posting.journal_entry)
+
+    def test_retry_missing_source_document_stays_blocked(self):
+        entity = self._foundation()
+        posting = AccountingSourcePosting.objects.create(
+            entity=entity,
+            source_app='billing',
+            source_model='Invoice.invoice',
+            source_id='999999',
+            status='blocked',
+            blocked_reason='Initial failure',
+        )
+
+        result = retry_source_posting(posting)
+
+        self.assertEqual(result.status, 'blocked')
+        self.assertEqual(result.blocked_reason, 'Source document no longer exists.')

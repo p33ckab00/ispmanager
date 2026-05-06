@@ -11,6 +11,7 @@ urlpatterns = [
     path('journals/<int:pk>/', views.journal_detail, name='accounting-journal-detail'),
     path('journals/<int:pk>/post/', views.journal_post, name='accounting-journal-post'),
     path('review/', views.source_review, name='accounting-source-review'),
+    path('review/<int:pk>/retry/', views.source_posting_retry, name='accounting-source-posting-retry'),
     path('withholding/classes/', views.withholding_class_list, name='accounting-withholding-class-list'),
     path('withholding/classes/add/', views.withholding_class_add, name='accounting-withholding-class-add'),
     path('withholding/classes/<int:pk>/edit/', views.withholding_class_edit, name='accounting-withholding-class-edit'),

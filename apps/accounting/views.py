@@ -30,6 +30,7 @@ from apps.accounting.services import (
     create_accounting_foundation,
     create_manual_journal_entry,
     post_journal_entry,
+    retry_source_posting,
     sync_payments_to_income,
     get_monthly_summary,
     get_totals,
@@ -380,6 +381,46 @@ def source_review(request):
             ('AccountCreditAdjustment', 'Credit Adjustments'),
         ],
     })
+
+
+@login_required
+def source_posting_retry(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.review_accountingsourceposting',
+        'accounting-source-review',
+    )
+    if permission_check is not True:
+        return permission_check
+    if request.method != 'POST':
+        return redirect('accounting-source-review')
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    posting = get_object_or_404(
+        AccountingSourcePosting.objects.filter(Q(entity=entity) | Q(entity__isnull=True)),
+        pk=pk,
+    )
+    try:
+        retry_source_posting(posting)
+        posting.refresh_from_db()
+        if posting.status == 'draft':
+            messages.success(request, f"Source posting retried and draft journal is ready: {posting.source_number}.")
+        elif posting.status == 'posted':
+            messages.success(request, f"Source posting is already posted: {posting.source_number}.")
+        elif posting.status == 'skipped':
+            messages.info(request, f"Source posting retry skipped: {posting.blocked_reason or posting.source_number}.")
+        else:
+            messages.warning(request, f"Source posting is still blocked: {posting.blocked_reason}.")
+        AuditLog.log(
+            'update',
+            'accounting',
+            f"Source posting retry: {posting.source_model}:{posting.source_id} -> {posting.status}",
+            user=request.user,
+        )
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-source-review')
 
 
 @login_required

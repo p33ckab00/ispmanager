@@ -81,6 +81,9 @@ credit forfeiture adjustments.
 Slice 1C-E adds draft source posting for invoice waivers and voids, including
 review blocking when a voided invoice does not have a posted original invoice
 source journal yet.
+Slice 1C-F adds source review retry and the
+`backfill_accounting_source_postings` management command for draft-only
+historical source posting.
 
 ## 2. Locked Decisions
 
@@ -318,9 +321,8 @@ receivable.
 Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
 later migration.
 
-Remaining Slice 1C work is retry/backfill tooling, 2307 attachment/export
-schedules, and full VAT invoice posting after invoice tax breakdown support
-exists.
+Remaining Slice 1C work is 2307 attachment/export schedules and full VAT
+invoice posting after invoice tax breakdown support exists.
 
 ### Key Changes
 
@@ -353,6 +355,10 @@ Add billing/payment draft posting:
 - source posting is idempotent through `SourceDocumentLink`, keyed by source
   model, source ID, and posting type
 - source draft journals appear in a review queue before posting
+- blocked or skipped source postings can be retried from source review after
+  setup, period, or account mapping issues are fixed
+- historical billing source documents can be backfilled through a draft-only
+  management command
 
 Add UI routes:
 

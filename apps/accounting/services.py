@@ -2,6 +2,7 @@ from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
@@ -773,6 +774,71 @@ def create_invoice_void_source_draft(invoice):
         create,
         amount=amount,
         document_date=entry_date,
+    )
+
+
+def _set_source_posting_blocked(posting, reason):
+    posting.status = 'blocked'
+    posting.blocked_reason = reason
+    posting.journal_entry = None
+    posting.last_attempt_at = timezone.now()
+    posting.save(update_fields=[
+        'status',
+        'blocked_reason',
+        'journal_entry',
+        'last_attempt_at',
+        'updated_at',
+    ])
+    return posting
+
+
+def _split_source_model(source_model):
+    if '.' not in source_model:
+        raise ValidationError('Source posting is missing a posting type.')
+    model_name, posting_type = source_model.rsplit('.', 1)
+    if not model_name or not posting_type:
+        raise ValidationError('Source posting is missing a source model or posting type.')
+    return model_name, posting_type
+
+
+def retry_source_posting(posting):
+    model_name, posting_type = _split_source_model(posting.source_model)
+    try:
+        model = apps.get_model(posting.source_app, model_name)
+    except LookupError:
+        return _set_source_posting_blocked(
+            posting,
+            f"Source model {posting.source_app}.{model_name} is not available.",
+        )
+
+    try:
+        source = model.objects.get(pk=posting.source_id)
+    except model.DoesNotExist:
+        return _set_source_posting_blocked(
+            posting,
+            'Source document no longer exists.',
+        )
+
+    if model_name == 'Invoice' and posting_type == 'invoice':
+        return create_invoice_source_draft(source)
+    if model_name == 'Invoice' and posting_type == 'waiver':
+        return create_invoice_waiver_source_draft(source)
+    if model_name == 'Invoice' and posting_type == 'void':
+        return create_invoice_void_source_draft(source)
+    if model_name == 'Payment' and posting_type == 'collection':
+        return create_payment_source_draft(source)
+    if model_name == 'PaymentAllocation' and posting_type == 'advance_application':
+        return create_payment_allocation_advance_application_draft(source)
+    if model_name == 'AccountCreditAdjustment' and posting_type == 'refund_due':
+        return create_refund_due_source_draft(source)
+    if model_name == 'AccountCreditAdjustment' and posting_type == 'refund_paid':
+        return create_refund_paid_source_draft(source)
+    if model_name == 'AccountCreditAdjustment' and posting_type == 'credit_forfeit':
+        return create_credit_forfeiture_source_draft(source)
+
+    return _set_source_posting_blocked(
+        posting,
+        f"Unsupported source posting type: {posting.source_model}.",
     )
 
 
