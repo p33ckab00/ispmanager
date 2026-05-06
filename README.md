@@ -99,6 +99,7 @@ Project documentation starts here:
 - [Premium NMS Exact UI Boundary](docs/40_premium_nms_exact_ui_boundary.md)
 - [Premium NMS Phased Implementation Plan](docs/41_premium_nms_phased_implementation_plan.md)
 - [Premium NMS Current Implementation Status](docs/42_premium_nms_current_implementation_status.md)
+- [Past-Due Captive Portal Future Plan](docs/48_past_due_captive_portal_future_plan.md)
 - [Internal Server Error Recovery Runbook](docs/43_internal_server_error_recovery_runbook.md)
 - [Ubuntu Env Template](deploy/ispmanager_ubuntu.env.template)
 - [Ubuntu Fresh Install Script](deploy/install_ubuntu_fresh.sh)
