@@ -58,6 +58,11 @@ Explicitly not included in Slice 1A:
 The existing `/accounting/` dashboard, income pages, expense pages, and payment
 to `IncomeRecord` mirror remain unchanged for compatibility.
 
+Slice 1B workspace UI has also been implemented for manual Accounting v2 use.
+It adds setup, chart, periods, journal list/detail/create/post, trial balance,
+dashboard status links, and read-only ledger role preset permissions. Billing
+and payment draft posting remains the next accounting sub-slice.
+
 ## 2. Locked Decisions
 
 - Accounting v2 is a complete subsystem, not a small extension of the current
@@ -231,11 +236,14 @@ draft journal service, post validation, source link model, and backend tests.
 
 This slice is additive and keeps the legacy accounting pages working.
 
-### Slice 1B - Accounting Workspace and Billing Draft Posting
+### Slice 1B - Accounting Workspace
 
 Build setup wizard, chart of accounts page, period page, manual journal UI,
-posting action, permissions, trial balance, dashboard status cards, and draft
-journal creation from existing billing/payment source documents.
+posting action, permissions, trial balance, and dashboard status cards.
+
+### Slice 1C - Billing and Payment Draft Posting
+
+Build draft journal creation from existing billing/payment source documents.
 
 This slice connects billing to accounting, but only as draft accounting entries.
 It does not approve/post source journals automatically.

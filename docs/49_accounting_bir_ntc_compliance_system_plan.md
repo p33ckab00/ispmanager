@@ -11,6 +11,8 @@ Implementation planning is continued in
 decisions, release slices, and next buildable Accounting v2 foundation slice.
 The first implemented backend slice is recorded in
 `docs/51_accounting_v2_slice_1a_ledger_foundation.md`.
+The first browser workspace slice is recorded in
+`docs/52_accounting_v2_slice_1b_workspace_ui.md`.
 
 ## 1. Conversation Summary
 

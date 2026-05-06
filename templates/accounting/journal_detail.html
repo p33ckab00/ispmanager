@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ journal_entry.entry_number }} - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">{{ journal_entry.entry_number }}</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ journal_entry.description }}</p>
+  </div>
+  <div class="flex gap-2">
+    {% if journal_entry.status == 'draft' %}
+    <form method="post" action="{% url 'accounting-journal-post' journal_entry.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+        <i class="fa fa-check mr-1"></i> Post
+      </button>
+    </form>
+    {% endif %}
+    <a href="{% url 'accounting-journal-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Back</a>
+  </div>
+</div>
+<div class="grid gap-4 md:grid-cols-4 mb-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Date</p>
+    <p class="font-semibold">{{ journal_entry.entry_date }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Period</p>
+    <p class="font-semibold">{{ journal_entry.period.name }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Status</p>
+    <p class="font-semibold">{{ journal_entry.get_status_display }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Reference</p>
+    <p class="font-semibold">{{ journal_entry.reference|default:"-" }}</p>
+  </div>
+</div>
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Account</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Description</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Debit</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Credit</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for line in lines %}
+      <tr>
+        <td class="px-4 py-3"><span class="font-mono text-xs">{{ line.account.code }}</span> {{ line.account.name }}</td>
+        <td class="px-4 py-3 text-gray-500">{{ line.description|default:"-" }}</td>
+        <td class="px-4 py-3 text-right">{% if line.debit %}PHP {{ line.debit }}{% else %}-{% endif %}</td>
+        <td class="px-4 py-3 text-right">{% if line.credit %}PHP {{ line.credit }}{% else %}-{% endif %}</td>
+      </tr>
+      {% endfor %}
+      <tr class="bg-gray-50 font-semibold">
+        <td colspan="2" class="px-4 py-3 text-right">Total</td>
+        <td class="px-4 py-3 text-right">PHP {{ totals.debit }}</td>
+        <td class="px-4 py-3 text-right">PHP {{ totals.credit }}</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}

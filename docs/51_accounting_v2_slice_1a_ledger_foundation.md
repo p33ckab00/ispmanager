@@ -123,13 +123,12 @@ Got an error creating the test database: permission denied to create database
 
 ## Next Slice
 
-Slice 1B should complete the original first Accounting v2 slice by adding:
+Slice 1B is documented in
+`docs/52_accounting_v2_slice_1b_workspace_ui.md` and adds the first browser
+workspace for the ledger foundation.
 
-- setup wizard and accounting-owned settings screen
-- chart, period, journal, and trial balance pages
-- post action from the UI
-- permissions and role preset updates
-- Accounting dashboard status cards
+After Slice 1B, the next implementation slice should add:
+
 - billing invoice draft posting
 - payment draft posting
 - source review queue

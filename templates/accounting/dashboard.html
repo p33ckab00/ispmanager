@@ -20,6 +20,48 @@
 
 {% include "partials/messages.html" %}
 
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <div>
+      <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Accounting v2</p>
+      {% if accounting_entity %}
+        <h3 class="text-lg font-semibold text-gray-800">{{ accounting_entity }}</h3>
+        <p class="text-sm text-gray-500 mt-1">
+          {{ accounting_settings.get_setup_status_display|default:"Foundation ready" }}
+          {% if open_period %} · Current period: {{ open_period.name }}{% endif %}
+        </p>
+      {% else %}
+        <h3 class="text-lg font-semibold text-gray-800">Foundation not set up</h3>
+        <p class="text-sm text-gray-500 mt-1">Set up the Accounting v2 entity, periods, and ISP chart of accounts.</p>
+      {% endif %}
+    </div>
+    <div class="flex flex-wrap gap-2">
+      <a href="{% url 'accounting-setup' %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+        <i class="fa fa-sliders mr-1"></i> Setup
+      </a>
+      <a href="{% url 'accounting-chart-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Chart</a>
+      <a href="{% url 'accounting-journal-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Journals</a>
+      <a href="{% url 'accounting-trial-balance' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Trial Balance</a>
+    </div>
+  </div>
+  {% if accounting_entity %}
+  <div class="grid grid-cols-3 gap-3 mt-5 text-center">
+    <div class="rounded-lg bg-gray-50 p-3">
+      <p class="text-xs text-gray-400 uppercase">Accounts</p>
+      <p class="text-xl font-bold text-gray-800">{{ account_count }}</p>
+    </div>
+    <div class="rounded-lg bg-gray-50 p-3">
+      <p class="text-xs text-gray-400 uppercase">Periods</p>
+      <p class="text-xl font-bold text-gray-800">{{ period_count }}</p>
+    </div>
+    <div class="rounded-lg bg-gray-50 p-3">
+      <p class="text-xs text-gray-400 uppercase">Draft Journals</p>
+      <p class="text-xl font-bold text-gray-800">{{ draft_journal_count }}</p>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
 <div class="grid grid-cols-3 gap-4 mb-6">
   <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 text-center">
     <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Total Income</p>

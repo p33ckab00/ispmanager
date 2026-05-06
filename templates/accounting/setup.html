@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Accounting Setup - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4"><a href="{% url 'accounting-dashboard' %}" class="text-sm text-blue-600 hover:underline"><i class="fa fa-arrow-left mr-1"></i> Back to Accounting</a></div>
+<div class="mb-6">
+  <h2 class="text-2xl font-bold text-gray-800">Accounting v2 Setup</h2>
+  <p class="text-gray-500 text-sm mt-1">Create or refresh the active accounting entity, periods, and ISP chart of accounts.</p>
+</div>
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-3xl">
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    <div class="grid gap-4 md:grid-cols-2">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.name.label }}</label>
+        {{ form.name }}
+        {% if form.name.errors %}<p class="text-red-500 text-xs mt-1">{{ form.name.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.legal_name.label }}</label>
+        {{ form.legal_name }}
+        {% if form.legal_name.errors %}<p class="text-red-500 text-xs mt-1">{{ form.legal_name.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.tin.label }}</label>
+        {{ form.tin }}
+        {% if form.tin.errors %}<p class="text-red-500 text-xs mt-1">{{ form.tin.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.fiscal_year.label }}</label>
+        {{ form.fiscal_year }}
+        {% if form.fiscal_year.errors %}<p class="text-red-500 text-xs mt-1">{{ form.fiscal_year.errors.0 }}</p>{% endif %}
+      </div>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.template_key.label }}</label>
+      {{ form.template_key }}
+      {% if form.template_key.errors %}<p class="text-red-500 text-xs mt-1">{{ form.template_key.errors.0 }}</p>{% endif %}
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.registered_address.label }}</label>
+      {{ form.registered_address }}
+      {% if form.registered_address.errors %}<p class="text-red-500 text-xs mt-1">{{ form.registered_address.errors.0 }}</p>{% endif %}
+    </div>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+      Save Foundation
+    </button>
+  </form>
+</div>
+{% endblock %}
