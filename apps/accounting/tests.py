@@ -9,6 +9,7 @@ from apps.accounting.models import (
     AccountingPeriod,
     AccountingSourcePosting,
     ChartOfAccount,
+    CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
     JournalLine,
     SourceDocumentLink,
@@ -218,13 +219,18 @@ class AccountingV2SourcePostingTests(TestCase):
             invoice=invoice,
             amount_allocated=Decimal('900.00'),
         )
-        CustomerWithholdingTaxClaim.objects.create(
+        claim = CustomerWithholdingTaxClaim.objects.create(
             subscriber=subscriber,
             payment=payment,
             gross_amount=Decimal('1000.00'),
             tax_withheld=Decimal('100.00'),
             withholding_rate=Decimal('10.0000'),
             status='pending_2307',
+        )
+        CustomerWithholdingAllocation.objects.create(
+            claim=claim,
+            invoice=invoice,
+            amount=Decimal('100.00'),
         )
 
         journal_entry = create_payment_source_draft(payment)

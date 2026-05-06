@@ -544,23 +544,30 @@ def record_payment(request, subscriber_pk):
     open_balance = sum(inv.remaining_balance for inv in open_invoices)
 
     if request.method == 'POST':
-        form = PaymentForm(request.POST)
+        form = PaymentForm(request.POST, open_balance=open_balance, subscriber=subscriber)
         if form.is_valid():
-            payment, unallocated = record_payment_with_allocation(
-                subscriber=subscriber,
-                amount=form.cleaned_data['amount'],
-                method=form.cleaned_data['method'],
-                reference=form.cleaned_data['reference'],
-                notes=form.cleaned_data['notes'],
-                paid_at=form.cleaned_data['paid_at'],
-                recorded_by=request.user.username,
-            )
+            try:
+                payment, unallocated = record_payment_with_allocation(
+                    subscriber=subscriber,
+                    amount=form.cleaned_data['amount'],
+                    method=form.cleaned_data['method'],
+                    reference=form.cleaned_data['reference'],
+                    notes=form.cleaned_data['notes'],
+                    paid_at=form.cleaned_data['paid_at'],
+                    recorded_by=request.user.username,
+                    withholding_data=form.get_withholding_data(),
+                )
+            except ValueError as exc:
+                messages.error(request, str(exc))
+                return redirect('billing-record-payment', subscriber_pk=subscriber.pk)
             AuditLog.log('update', 'billing',
                          f"Payment PHP {payment.amount} for {subscriber.username}", user=request.user)
             from apps.notifications.telegram import notify_event
             notify_event('payment_received', 'Payment Received',
                          f"{subscriber.display_name}: PHP {payment.amount} via {payment.get_method_display()}")
             msg = f"Payment of PHP {payment.amount} recorded."
+            if form.cleaned_data.get('has_withholding'):
+                msg += f" EWT/CWT claim PHP {form.cleaned_data['withholding_amount']} recorded for 2307 follow-up."
             if unallocated > 0:
                 msg += f" PHP {unallocated} unallocated (credit)."
             messages.success(request, msg)
@@ -574,7 +581,7 @@ def record_payment(request, subscriber_pk):
                     messages.warning(request, f"Auto-reconnect did not complete: {reconnect_result['error']}")
             return redirect('subscriber-detail', pk=subscriber_pk)
     else:
-        form = PaymentForm(initial={'amount': open_balance})
+        form = PaymentForm(initial={'amount': open_balance}, open_balance=open_balance, subscriber=subscriber)
 
     return render(request, 'billing/record_payment.html', {
         'subscriber': subscriber,

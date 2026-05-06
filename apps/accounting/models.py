@@ -545,6 +545,39 @@ class CustomerWithholdingTaxClaim(models.Model):
         return f"2307/CWT {self.subscriber} - PHP {self.tax_withheld}"
 
 
+class CustomerWithholdingAllocation(models.Model):
+    claim = models.ForeignKey(
+        CustomerWithholdingTaxClaim,
+        on_delete=models.CASCADE,
+        related_name='allocations',
+    )
+    invoice = models.ForeignKey(
+        'billing.Invoice',
+        on_delete=models.CASCADE,
+        related_name='customer_withholding_allocations',
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['claim', 'invoice'],
+                name='accounting_unique_withholding_allocation',
+            ),
+        ]
+
+    def clean(self):
+        if self.amount and self.amount <= MONEY_ZERO:
+            raise ValidationError('Withholding allocation amount must be greater than zero.')
+        if self.claim_id and self.invoice_id and self.claim.subscriber_id != self.invoice.subscriber_id:
+            raise ValidationError('Withholding claim and invoice must belong to the same subscriber.')
+
+    def __str__(self):
+        return f"{self.claim} -> {self.invoice.invoice_number}: PHP {self.amount}"
+
+
 class IncomeRecord(models.Model):
     SOURCE_CHOICES = [
         ('billing', 'Billing Payment'),

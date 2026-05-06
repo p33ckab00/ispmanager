@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}BIR 2307 Follow-up - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">BIR 2307 Follow-up</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ entity }}</p>
+  </div>
+  <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Back</a>
+</div>
+
+<div class="grid grid-cols-2 gap-4 mb-6 max-w-2xl">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Gross Covered</p>
+    <p class="text-2xl font-bold text-gray-800 mt-1">PHP {{ gross_total }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Tax Withheld</p>
+    <p class="text-2xl font-bold text-orange-600 mt-1">PHP {{ withheld_total }}</p>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6">
+  <form method="get" class="flex flex-wrap items-end gap-3">
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+      <select name="status" class="border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-48">
+        <option value="">All</option>
+        {% for value,label in status_choices %}
+        <option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Search</label>
+      <input type="text" name="q" value="{{ q }}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm min-w-64" placeholder="subscriber, TIN, certificate">
+    </div>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm">Filter</button>
+  </form>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Subscriber</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Payor / TIN</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Covered Invoices</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Gross</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Withheld</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">2307</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for claim in page_obj %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3">
+          <p class="font-medium">{{ claim.subscriber.display_name }}</p>
+          <p class="text-xs text-gray-400">{{ claim.subscriber.username }}</p>
+        </td>
+        <td class="px-4 py-3">
+          <p>{{ claim.payor_name|default:"-" }}</p>
+          <p class="text-xs text-gray-400 font-mono">{{ claim.payor_tin|default:"-" }}</p>
+        </td>
+        <td class="px-4 py-3">
+          {% for allocation in claim.allocations.all %}
+          <p class="text-xs">{{ allocation.invoice.invoice_number }} - PHP {{ allocation.amount }}</p>
+          {% empty %}
+          <span class="text-xs text-gray-400">No invoice allocation</span>
+          {% endfor %}
+        </td>
+        <td class="px-4 py-3 text-right">PHP {{ claim.gross_amount }}</td>
+        <td class="px-4 py-3 text-right font-semibold text-orange-600">PHP {{ claim.tax_withheld }}</td>
+        <td class="px-4 py-3">
+          <span class="px-2 py-0.5 rounded text-xs {% if claim.status == 'received' or claim.status == 'validated' %}bg-green-50 text-green-700{% elif claim.status == 'pending_2307' or claim.status == 'customer_claimed' %}bg-orange-50 text-orange-700{% else %}bg-gray-100 text-gray-600{% endif %}">
+            {{ claim.get_status_display }}
+          </span>
+          <p class="text-xs text-gray-400 mt-1">{{ claim.certificate_number|default:"No certificate no." }}</p>
+          {% if claim.received_date %}<p class="text-xs text-gray-400">Received {{ claim.received_date }}</p>{% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="px-4 py-12 text-center text-gray-400">No customer EWT/CWT claims yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

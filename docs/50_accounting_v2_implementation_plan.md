@@ -70,6 +70,9 @@ the remaining source-posting work. Slice 1C-A implements the safe first
 vertical: source posting review records, non-VAT invoice draft journals,
 payment draft journals, customer advance application drafts, and customer
 EWT/CWT claim tracking for BIR Form 2307 follow-up.
+Slice 1C-B adds the guided payment workflow for customer EWT/CWT, withholding
+allocations against invoice balances, and the `/accounting/withholding/2307/`
+follow-up schedule.
 
 ## 2. Locked Decisions
 
@@ -307,8 +310,8 @@ Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
 later migration.
 
 Remaining Slice 1C work is refund-due/refund-paid posting, credit forfeiture,
-waiver/void posting, retry/backfill tooling, 2307 follow-up screens, and full
-VAT invoice posting after invoice tax breakdown support exists.
+waiver/void posting, retry/backfill tooling, 2307 attachment/export schedules,
+and full VAT invoice posting after invoice tax breakdown support exists.
 
 ### Key Changes
 

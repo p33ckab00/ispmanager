@@ -13,6 +13,7 @@ from apps.accounting.models import (
     AccountingSettings,
     AccountingSourcePosting,
     ChartOfAccount,
+    CustomerWithholdingTaxClaim,
     ExpenseRecord,
     IncomeRecord,
     JournalEntry,
@@ -61,6 +62,10 @@ def _accounting_context():
         'draft_journal_count': JournalEntry.objects.filter(entity=entity, status='draft').count() if entity else 0,
         'source_draft_count': AccountingSourcePosting.objects.filter(entity=entity, status='draft').count() if entity else 0,
         'source_blocked_count': AccountingSourcePosting.objects.filter(Q(entity=entity) | Q(entity__isnull=True), status='blocked').count() if entity else 0,
+        'withholding_pending_count': CustomerWithholdingTaxClaim.objects.filter(
+            Q(entity=entity) | Q(entity__isnull=True),
+            status__in=['customer_claimed', 'pending_2307'],
+        ).count() if entity else 0,
         'open_period': open_period,
     }
 
@@ -364,6 +369,50 @@ def source_review(request):
             ('PaymentAllocation', 'Advance Applications'),
             ('AccountCreditAdjustment', 'Credit Adjustments'),
         ],
+    })
+
+
+@login_required
+def withholding_2307_list(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_customerwithholdingtaxclaim')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    status = request.GET.get('status', '')
+    q = request.GET.get('q', '').strip()
+    qs = (
+        CustomerWithholdingTaxClaim.objects
+        .filter(Q(entity=entity) | Q(entity__isnull=True))
+        .select_related('subscriber', 'payment')
+        .prefetch_related('allocations__invoice')
+        .order_by('-received_date', '-created_at')
+    )
+    if status:
+        qs = qs.filter(status=status)
+    if q:
+        qs = qs.filter(
+            Q(subscriber__username__icontains=q)
+            | Q(subscriber__full_name__icontains=q)
+            | Q(payor_name__icontains=q)
+            | Q(payor_tin__icontains=q)
+            | Q(certificate_number__icontains=q)
+        )
+    totals = qs.aggregate(
+        gross_total=Sum('gross_amount'),
+        withheld_total=Sum('tax_withheld'),
+    )
+    paginator = Paginator(qs, 25)
+    page = paginator.get_page(request.GET.get('page', 1))
+    return render(request, 'accounting/withholding_2307_list.html', {
+        'entity': entity,
+        'page_obj': page,
+        'status': status,
+        'q': q,
+        'status_choices': CustomerWithholdingTaxClaim.STATUS_CHOICES,
+        'gross_total': totals['gross_total'] or Decimal('0.00'),
+        'withheld_total': totals['withheld_total'] or Decimal('0.00'),
     })
 
 

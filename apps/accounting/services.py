@@ -14,6 +14,7 @@ from apps.accounting.models import (
     AccountingSettings,
     AccountingSourcePosting,
     ChartOfAccount,
+    CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
     ExpenseRecord,
     IncomeRecord,
@@ -642,6 +643,15 @@ def _payment_allocated_amount(payment):
 
 
 def _payment_cwt_amount(payment):
+    allocated = (
+        CustomerWithholdingAllocation.objects
+        .filter(claim__payment=payment)
+        .exclude(claim__status__in=['disallowed', 'canceled'])
+        .aggregate(total=Sum('amount'))['total']
+        or Decimal('0.00')
+    )
+    if allocated > Decimal('0.00'):
+        return allocated
     return (
         CustomerWithholdingTaxClaim.objects
         .filter(payment=payment)

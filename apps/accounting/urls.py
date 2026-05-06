@@ -11,6 +11,7 @@ urlpatterns = [
     path('journals/<int:pk>/', views.journal_detail, name='accounting-journal-detail'),
     path('journals/<int:pk>/post/', views.journal_post, name='accounting-journal-post'),
     path('review/', views.source_review, name='accounting-source-review'),
+    path('withholding/2307/', views.withholding_2307_list, name='accounting-withholding-2307'),
     path('trial-balance/', views.trial_balance, name='accounting-trial-balance'),
     path('income/', views.income_list, name='income-list'),
     path('income/add/', views.income_add, name='income-add'),

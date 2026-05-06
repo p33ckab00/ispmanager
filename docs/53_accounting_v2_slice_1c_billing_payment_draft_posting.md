@@ -55,13 +55,24 @@ Slice 1C-A is the first implemented vertical of this plan. It includes:
 - `/accounting/review/` source review queue and dashboard counts for source
   drafts and blocked source postings.
 
-Remaining Slice 1C gaps after Slice 1C-A:
+Slice 1C-B adds the operator workflow for customer EWT/CWT:
+
+- payment recording can capture net cash received plus customer EWT/CWT claimed
+  for BIR Form 2307.
+- `CustomerWithholdingAllocation` links the withholding claim to the invoice
+  balance it settled.
+- invoice settlement can now be cash allocation plus EWT/CWT allocation while
+  `Payment.amount` remains actual cash received.
+- payment source draft journals use the withholding allocation amount for
+  `Dr 1210 Creditable Withholding Tax Receivable`.
+- `/accounting/withholding/2307/` lists pending, received, validated, and other
+  customer 2307/CWT records for follow-up.
+
+Remaining Slice 1C gaps after Slice 1C-B:
 
 - VAT invoice posting is still blocked until invoice tax breakdown or explicit
   VAT posting settings are added.
-- Payment forms do not yet expose a guided EWT/2307 input workflow; the model
-  and posting service support it.
-- 2307 received/pending follow-up schedules and upload attachments are not yet
+- 2307 upload attachments and finalized SAWT/2307 export schedules are not yet
   implemented.
 - refund-due, refund-paid, credit forfeiture, waiver, and void posting services
   are still pending.

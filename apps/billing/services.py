@@ -2,6 +2,7 @@ from decimal import Decimal
 from datetime import date, timedelta
 import calendar
 import logging
+from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
@@ -856,7 +857,8 @@ def generate_invoices_for_all(billing_settings=None):
 
 @transaction.atomic
 def record_payment_with_allocation(subscriber, amount, method='cash', reference='',
-                                    notes='', recorded_by='admin', paid_at=None):
+                                    notes='', recorded_by='admin', paid_at=None,
+                                    withholding_data=None):
     """
     Records a payment, mirrors it into accounting income, and allocates
     oldest-first against open invoices.
@@ -907,6 +909,71 @@ def record_payment_with_allocation(subscriber, amount, method='cash', reference=
             invoice.status = 'partial'
 
         invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])
+
+    withholding_claim = None
+    withholding_data = withholding_data or {}
+    withholding_amount = Decimal(str(withholding_data.get('tax_withheld') or '0.00'))
+    if withholding_amount > Decimal('0.00'):
+        from apps.accounting.models import (
+            AccountingEntity,
+            CustomerWithholdingAllocation,
+            CustomerWithholdingTaxClaim,
+        )
+
+        entity = AccountingEntity.objects.filter(is_active=True).first()
+        withholding_claim = CustomerWithholdingTaxClaim(
+            entity=entity,
+            subscriber=subscriber,
+            payment=payment,
+            gross_amount=Decimal(
+                str(withholding_data.get('gross_amount') or (Decimal(str(amount)) + withholding_amount))
+            ),
+            tax_withheld=withholding_amount,
+            withholding_rate=Decimal(str(withholding_data.get('withholding_rate') or '0.0000')),
+            atc=withholding_data.get('atc', ''),
+            period_from=withholding_data.get('period_from'),
+            period_to=withholding_data.get('period_to'),
+            payor_tin=withholding_data.get('payor_tin', ''),
+            payor_name=withholding_data.get('payor_name', ''),
+            payor_address=withholding_data.get('payor_address', ''),
+            certificate_number=withholding_data.get('certificate_number', ''),
+            certificate_date=withholding_data.get('certificate_date'),
+            received_date=withholding_data.get('received_date'),
+            status=withholding_data.get('status') or 'pending_2307',
+        )
+        try:
+            withholding_claim.full_clean()
+        except ValidationError as exc:
+            raise ValueError('; '.join(exc.messages)) from exc
+        withholding_claim.save()
+        remaining_withholding = withholding_amount
+        withholding_invoices = Invoice.objects.filter(
+            subscriber=subscriber,
+            status__in=['open', 'partial', 'overdue'],
+        ).order_by('period_start', 'created_at')
+        for invoice in withholding_invoices:
+            if remaining_withholding <= Decimal('0.00'):
+                break
+            balance = invoice.remaining_balance
+            allocate = min(remaining_withholding, balance)
+            if allocate <= Decimal('0.00'):
+                continue
+            withholding_allocation = CustomerWithholdingAllocation(
+                claim=withholding_claim,
+                invoice=invoice,
+                amount=allocate,
+            )
+            try:
+                withholding_allocation.full_clean()
+            except ValidationError as exc:
+                raise ValueError('; '.join(exc.messages)) from exc
+            withholding_allocation.save()
+            invoice.amount_paid += allocate
+            remaining_withholding -= allocate
+            _apply_payment_status(invoice)
+            invoice.save(update_fields=['amount_paid', 'status', 'updated_at'])
+        if remaining_withholding > Decimal('0.00'):
+            raise ValueError('EWT/CWT amount exceeds remaining open invoice balances after cash allocation.')
 
     try:
         from apps.accounting.services import (

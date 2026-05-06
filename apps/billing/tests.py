@@ -4,7 +4,12 @@ from decimal import Decimal
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
-from apps.accounting.models import ExpenseRecord
+from apps.accounting.models import (
+    CustomerWithholdingAllocation,
+    CustomerWithholdingTaxClaim,
+    ExpenseRecord,
+)
+from apps.accounting.services import create_accounting_foundation
 from apps.billing.services import (
     apply_disconnected_credit_policy,
     apply_disconnected_billing_policy,
@@ -304,6 +309,56 @@ class BillingAutoReconnectTests(TestCase):
         self.assertEqual(subscriber.status, 'suspended')
         self.assertFalse(payment.auto_reconnect_result['attempted'])
         self.assertEqual(payment.auto_reconnect_result['remaining_balance'], Decimal('600.00'))
+
+    def test_net_payment_with_customer_withholding_settles_invoice(self):
+        create_accounting_foundation(
+            entity_name='Billing EWT ISP',
+            template_key='isp_non_vat_sole_prop',
+            fiscal_year=timezone.localdate().year,
+        )
+        subscriber = Subscriber.objects.create(
+            username='payment-ewt',
+            monthly_rate=Decimal('1000.00'),
+            start_date=date(2026, 4, 29),
+            cutoff_day=28,
+            billing_type='postpaid',
+            status='active',
+            is_billable=True,
+        )
+        invoice = Invoice.objects.create(
+            subscriber=subscriber,
+            period_start=date(2026, 4, 29),
+            period_end=date(2026, 5, 28),
+            due_date=date(2026, 5, 28),
+            amount=Decimal('1000.00'),
+            status='open',
+        )
+
+        payment, remaining = record_payment_with_allocation(
+            subscriber,
+            Decimal('900.00'),
+            method='bank',
+            reference='NET-2307',
+            recorded_by='tester',
+            withholding_data={
+                'gross_amount': Decimal('1000.00'),
+                'tax_withheld': Decimal('100.00'),
+                'withholding_rate': Decimal('10.0000'),
+                'status': 'pending_2307',
+                'payor_name': 'Corporate Customer',
+                'payor_tin': '123-456-789-000',
+            },
+        )
+
+        invoice.refresh_from_db()
+        claim = CustomerWithholdingTaxClaim.objects.get(payment=payment)
+        allocation = CustomerWithholdingAllocation.objects.get(claim=claim, invoice=invoice)
+        self.assertEqual(remaining, Decimal('0.00'))
+        self.assertEqual(payment.amount, Decimal('900.00'))
+        self.assertEqual(claim.tax_withheld, Decimal('100.00'))
+        self.assertEqual(allocation.amount, Decimal('100.00'))
+        self.assertEqual(invoice.amount_paid, Decimal('1000.00'))
+        self.assertEqual(invoice.status, 'paid')
 
 
 class DisconnectedBillingPolicyTests(TestCase):

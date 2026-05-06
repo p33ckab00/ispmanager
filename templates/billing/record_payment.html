@@ -6,6 +6,11 @@
 <p class="text-gray-500 text-sm mt-1">{{ subscriber.display_name }}</p></div>
 {% include "partials/messages.html" %}
 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-lg">
+  {% if form.non_field_errors %}
+  <div class="bg-red-50 border border-red-100 rounded-lg p-3 mb-5 text-sm text-red-700">
+    {{ form.non_field_errors }}
+  </div>
+  {% endif %}
   {% if open_invoices %}
   <div class="bg-yellow-50 border border-yellow-100 rounded-lg p-3 mb-5">
     <p class="text-sm font-medium text-yellow-800">Open Invoices</p>
@@ -26,7 +31,7 @@
         <label class="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
         <select name="method" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           {% for val, label in form.fields.method.choices %}
-          <option value="{{ val }}">{{ label }}</option>
+          <option value="{{ val }}" {% if form.method.value == val %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
@@ -44,7 +49,89 @@
     </div>
     <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
-      <textarea name="notes" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+      <textarea name="notes" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ form.notes.value|default:'' }}</textarea>
+    </div>
+
+    <div class="border-t border-gray-100 pt-4">
+      <label class="flex items-start gap-2 text-sm font-medium text-gray-700">
+        <input type="checkbox" name="has_withholding" value="1" class="mt-1 rounded border-gray-300 text-blue-600" {% if form.has_withholding.value %}checked{% endif %}>
+        <span>Customer withheld EWT/CWT and will issue BIR Form 2307</span>
+      </label>
+      <div class="grid grid-cols-2 gap-4 mt-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">EWT/CWT Amount</label>
+          <input type="number" step="0.01" name="withholding_amount" value="{{ form.withholding_amount.value|default:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% if form.withholding_amount.errors %}<p class="text-xs text-red-600 mt-1">{{ form.withholding_amount.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Rate %</label>
+          <input type="number" step="0.0001" name="withholding_rate" value="{{ form.withholding_rate.value|default:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-4 mt-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">2307 Status</label>
+          <select name="withholding_status" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            {% for val, label in form.fields.withholding_status.choices %}
+            <option value="{{ val }}" {% if form.withholding_status.value == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">ATC</label>
+          <input type="text" name="atc" value="{{ form.atc.value|default:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-4 mt-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Period From</label>
+          <input type="date" name="period_from" value="{{ form.period_from.value|default:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Period To</label>
+          <input type="date" name="period_to" value="{{ form.period_to.value|default:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% if form.period_to.errors %}<p class="text-xs text-red-600 mt-1">{{ form.period_to.errors|join:", " }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="mt-3">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Payor Registered Name</label>
+        <input type="text" name="payor_name" value="{{ form.payor_name.value|default:'' }}"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div class="grid grid-cols-2 gap-4 mt-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Payor TIN</label>
+          <input type="text" name="payor_tin" value="{{ form.payor_tin.value|default:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Certificate No.</label>
+          <input type="text" name="certificate_number" value="{{ form.certificate_number.value|default:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-4 mt-3">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Certificate Date</label>
+          <input type="date" name="certificate_date" value="{{ form.certificate_date.value|default:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% if form.certificate_date.errors %}<p class="text-xs text-red-600 mt-1">{{ form.certificate_date.errors|join:", " }}</p>{% endif %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Received Date</label>
+          <input type="date" name="received_date" value="{{ form.received_date.value|default:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+      </div>
+      <div class="mt-3">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Payor Address</label>
+        <textarea name="payor_address" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">{{ form.payor_address.value|default:'' }}</textarea>
+      </div>
     </div>
     <p class="text-xs text-gray-400">Payment will be allocated to oldest open invoices first.</p>
     <div class="flex gap-3">
