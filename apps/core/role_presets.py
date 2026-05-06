@@ -33,6 +33,7 @@ ROLE_GROUP_PRESETS = {
             ('accounting', 'view_accountingsourceposting'),
             ('accounting', 'view_customerwithholdingallocation'),
             ('accounting', 'view_customerwithholdingtaxclaim'),
+            ('accounting', 'view_withholdingtaxclass'),
             ('sms', 'view_smslog'),
         ],
     },

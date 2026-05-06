@@ -8,6 +8,7 @@ from apps.accounting.models import (
     CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
     ExpenseRecord,
+    WithholdingTaxClass,
 )
 from apps.accounting.services import create_accounting_foundation
 from apps.billing.services import (
@@ -311,10 +312,18 @@ class BillingAutoReconnectTests(TestCase):
         self.assertEqual(payment.auto_reconnect_result['remaining_balance'], Decimal('600.00'))
 
     def test_net_payment_with_customer_withholding_settles_invoice(self):
-        create_accounting_foundation(
+        entity = create_accounting_foundation(
             entity_name='Billing EWT ISP',
             template_key='isp_non_vat_sole_prop',
             fiscal_year=timezone.localdate().year,
+        )['entity']
+        withholding_class = WithholdingTaxClass.objects.create(
+            entity=entity,
+            code='EWT-SERVICE',
+            name='Service income EWT',
+            tax_family='expanded_withholding_tax',
+            atc='WC000',
+            rate=Decimal('10.0000'),
         )
         subscriber = Subscriber.objects.create(
             username='payment-ewt',
@@ -341,6 +350,7 @@ class BillingAutoReconnectTests(TestCase):
             reference='NET-2307',
             recorded_by='tester',
             withholding_data={
+                'withholding_class': withholding_class,
                 'gross_amount': Decimal('1000.00'),
                 'tax_withheld': Decimal('100.00'),
                 'withholding_rate': Decimal('10.0000'),
@@ -355,6 +365,7 @@ class BillingAutoReconnectTests(TestCase):
         allocation = CustomerWithholdingAllocation.objects.get(claim=claim, invoice=invoice)
         self.assertEqual(remaining, Decimal('0.00'))
         self.assertEqual(payment.amount, Decimal('900.00'))
+        self.assertEqual(claim.withholding_class, withholding_class)
         self.assertEqual(claim.tax_withheld, Decimal('100.00'))
         self.assertEqual(allocation.amount, Decimal('100.00'))
         self.assertEqual(invoice.amount_paid, Decimal('1000.00'))

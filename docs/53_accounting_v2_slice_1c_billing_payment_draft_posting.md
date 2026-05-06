@@ -68,7 +68,22 @@ Slice 1C-B adds the operator workflow for customer EWT/CWT:
 - `/accounting/withholding/2307/` lists pending, received, validated, and other
   customer 2307/CWT records for follow-up.
 
-Remaining Slice 1C gaps after Slice 1C-B:
+Slice 1C-C makes withholding classification explicit and optional:
+
+- payment withholding remains opt-in only; the normal payment path has no
+  withholding.
+- `WithholdingTaxClass` is an Accounting-owned settings model for EWT/CWT,
+  creditable VAT withheld, percentage tax withheld, and other creditable
+  withholding cases.
+- withholding classes store code, name, tax family, ATC, rate, basis, payor
+  type, supplier taxpayer/tax classification, BIR reference, effectivity dates,
+  active status, and notes.
+- customer 2307/CWT claims can link to a selected withholding class or remain
+  manual when the operator has not configured one yet.
+- the system does not auto-seed official BIR rates/classes; accountants should
+  maintain active classes based on current BIR references and taxpayer facts.
+
+Remaining Slice 1C gaps after Slice 1C-C:
 
 - VAT invoice posting is still blocked until invoice tax breakdown or explicit
   VAT posting settings are added.

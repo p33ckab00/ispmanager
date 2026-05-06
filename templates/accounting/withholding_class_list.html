@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Withholding Classes - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Withholding Classes</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ entity }}</p>
+  </div>
+  <div class="flex gap-2">
+    {% if perms.accounting.add_withholdingtaxclass %}
+    <a href="{% url 'accounting-withholding-class-add' %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Add Class</a>
+    {% endif %}
+    <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Back</a>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Code</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Name</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Family</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">ATC</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Rate</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500"></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for item in classes %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3 font-mono text-xs">{{ item.code }}</td>
+        <td class="px-4 py-3 font-medium">{{ item.name }}</td>
+        <td class="px-4 py-3">{{ item.get_tax_family_display }}</td>
+        <td class="px-4 py-3 font-mono text-xs">{{ item.atc|default:"-" }}</td>
+        <td class="px-4 py-3 text-right">{{ item.rate }}%</td>
+        <td class="px-4 py-3">
+          {% if item.is_active %}
+            <span class="px-2 py-0.5 rounded bg-green-50 text-green-700 text-xs">Active</span>
+          {% else %}
+            <span class="px-2 py-0.5 rounded bg-gray-100 text-gray-500 text-xs">Inactive</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-right">
+          {% if perms.accounting.change_withholdingtaxclass %}
+          <a href="{% url 'accounting-withholding-class-edit' item.pk %}" class="text-blue-600 hover:underline text-xs">Edit</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="px-4 py-12 text-center text-gray-400">No withholding classes configured.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

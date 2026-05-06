@@ -487,6 +487,88 @@ class AccountingSourcePosting(models.Model):
         return f"{self.source_app}.{self.source_model}:{self.source_id} - {self.status}"
 
 
+class WithholdingTaxClass(models.Model):
+    TAX_FAMILY_CHOICES = [
+        ('expanded_withholding_tax', 'Expanded Withholding Tax'),
+        ('creditable_vat_withheld', 'Creditable VAT Withheld'),
+        ('percentage_tax_withheld', 'Percentage Tax Withheld'),
+        ('other_creditable_withholding', 'Other Creditable Withholding'),
+    ]
+    BASIS_CHOICES = [
+        ('gross_payment', 'Gross Payment'),
+        ('vatable_base', 'VATable Base'),
+        ('gross_invoice', 'Gross Invoice'),
+        ('manual', 'Manual Amount'),
+    ]
+    PAYOR_TYPE_CHOICES = [
+        ('any', 'Any Payor'),
+        ('private_withholding_agent', 'Private Withholding Agent'),
+        ('top_withholding_agent', 'Top Withholding Agent'),
+        ('government', 'Government / GOCC'),
+        ('other', 'Other'),
+    ]
+    SUPPLIER_TAXPAYER_TYPE_CHOICES = [
+        ('any', 'Any Supplier Type'),
+        ('sole_proprietor', 'Sole Proprietor'),
+        ('corporation', 'Corporation'),
+    ]
+    SUPPLIER_TAX_CLASSIFICATION_CHOICES = [
+        ('any', 'Any Tax Classification'),
+        ('vat', 'VAT'),
+        ('non_vat', 'Non-VAT'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='withholding_tax_classes',
+    )
+    code = models.CharField(max_length=40)
+    name = models.CharField(max_length=255)
+    tax_family = models.CharField(
+        max_length=40,
+        choices=TAX_FAMILY_CHOICES,
+        default='expanded_withholding_tax',
+    )
+    atc = models.CharField(max_length=30, blank=True)
+    rate = models.DecimalField(max_digits=7, decimal_places=4, default=MONEY_ZERO)
+    basis = models.CharField(max_length=30, choices=BASIS_CHOICES, default='gross_payment')
+    payor_type = models.CharField(max_length=40, choices=PAYOR_TYPE_CHOICES, default='any')
+    supplier_taxpayer_type = models.CharField(
+        max_length=30,
+        choices=SUPPLIER_TAXPAYER_TYPE_CHOICES,
+        default='any',
+    )
+    supplier_tax_classification = models.CharField(
+        max_length=20,
+        choices=SUPPLIER_TAX_CLASSIFICATION_CHOICES,
+        default='any',
+    )
+    bir_reference = models.CharField(max_length=255, blank=True)
+    effective_from = models.DateField(null=True, blank=True)
+    effective_to = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['entity', 'tax_family', 'code', 'name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['entity', 'code'],
+                name='accounting_unique_withholding_tax_class_code',
+            ),
+        ]
+
+    def clean(self):
+        if self.effective_from and self.effective_to and self.effective_to < self.effective_from:
+            raise ValidationError('Withholding tax class end date cannot be before start date.')
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
 class CustomerWithholdingTaxClaim(models.Model):
     STATUS_CHOICES = [
         ('customer_claimed', 'Customer Claimed'),
@@ -512,6 +594,13 @@ class CustomerWithholdingTaxClaim(models.Model):
     )
     payment = models.ForeignKey(
         'billing.Payment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='customer_withholding_claims',
+    )
+    withholding_class = models.ForeignKey(
+        WithholdingTaxClass,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

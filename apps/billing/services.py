@@ -921,10 +921,12 @@ def record_payment_with_allocation(subscriber, amount, method='cash', reference=
         )
 
         entity = AccountingEntity.objects.filter(is_active=True).first()
+        withholding_class = withholding_data.get('withholding_class')
         withholding_claim = CustomerWithholdingTaxClaim(
             entity=entity,
             subscriber=subscriber,
             payment=payment,
+            withholding_class=withholding_class,
             gross_amount=Decimal(
                 str(withholding_data.get('gross_amount') or (Decimal(str(amount)) + withholding_amount))
             ),

@@ -1,5 +1,5 @@
 from django import forms
-from apps.accounting.models import IncomeRecord, ExpenseRecord, JournalEntry
+from apps.accounting.models import ExpenseRecord, IncomeRecord, JournalEntry, WithholdingTaxClass
 from apps.accounting.services import available_coa_templates
 
 
@@ -42,3 +42,29 @@ class ExpenseForm(forms.ModelForm):
         model = ExpenseRecord
         fields = ['category', 'description', 'amount', 'reference', 'vendor', 'recorded_by', 'date']
         widgets = {'date': forms.DateInput(attrs={'type': 'date'})}
+
+
+class WithholdingTaxClassForm(forms.ModelForm):
+    class Meta:
+        model = WithholdingTaxClass
+        fields = [
+            'code',
+            'name',
+            'tax_family',
+            'atc',
+            'rate',
+            'basis',
+            'payor_type',
+            'supplier_taxpayer_type',
+            'supplier_tax_classification',
+            'bir_reference',
+            'effective_from',
+            'effective_to',
+            'is_active',
+            'notes',
+        ]
+        widgets = {
+            'effective_from': forms.DateInput(attrs={'type': 'date'}),
+            'effective_to': forms.DateInput(attrs={'type': 'date'}),
+            'notes': forms.Textarea(attrs={'rows': 3}),
+        }

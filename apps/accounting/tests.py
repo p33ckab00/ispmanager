@@ -13,6 +13,7 @@ from apps.accounting.models import (
     CustomerWithholdingTaxClaim,
     JournalLine,
     SourceDocumentLink,
+    WithholdingTaxClass,
 )
 from apps.accounting.services import (
     create_accounting_foundation,
@@ -250,3 +251,16 @@ class AccountingV2SourcePostingTests(TestCase):
 
         posting = AccountingSourcePosting.objects.get(source_model='Invoice.invoice', source_id=str(invoice.pk))
         self.assertEqual(posting.status, 'posted')
+
+    def test_withholding_tax_class_blocks_invalid_effective_date_range(self):
+        entity = self._foundation()
+        tax_class = WithholdingTaxClass(
+            entity=entity,
+            code='BAD-DATES',
+            name='Bad date range',
+            effective_from=date(2026, 12, 31),
+            effective_to=date(2026, 1, 1),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'end date cannot be before start date'):
+            tax_class.full_clean()

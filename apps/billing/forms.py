@@ -22,6 +22,11 @@ class PaymentForm(forms.Form):
         widget=forms.DateTimeInput(attrs={'type': 'datetime-local'}),
     )
     has_withholding = forms.BooleanField(required=False)
+    withholding_class = forms.ModelChoiceField(
+        queryset=None,
+        required=False,
+        empty_label='Manual / no class',
+    )
     withholding_amount = forms.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -56,6 +61,17 @@ class PaymentForm(forms.Form):
         self.open_balance = kwargs.pop('open_balance', None)
         subscriber = kwargs.pop('subscriber', None)
         super().__init__(*args, **kwargs)
+        from apps.accounting.models import AccountingEntity, WithholdingTaxClass
+
+        entity = AccountingEntity.objects.filter(is_active=True).first()
+        withholding_classes = WithholdingTaxClass.objects.filter(is_active=True)
+        if entity:
+            withholding_classes = withholding_classes.filter(entity=entity)
+        self.fields['withholding_class'].queryset = withholding_classes.order_by(
+            'tax_family',
+            'code',
+            'name',
+        )
         if subscriber and not self.initial.get('payor_name'):
             self.initial['payor_name'] = subscriber.display_name
 
@@ -98,10 +114,19 @@ class PaymentForm(forms.Form):
         if tax_withheld <= Decimal('0.00'):
             return None
         return {
+            'withholding_class': self.cleaned_data.get('withholding_class'),
             'gross_amount': (self.cleaned_data.get('amount') or Decimal('0.00')) + tax_withheld,
             'tax_withheld': tax_withheld,
-            'withholding_rate': self.cleaned_data.get('withholding_rate') or Decimal('0.0000'),
-            'atc': self.cleaned_data.get('atc') or '',
+            'withholding_rate': (
+                self.cleaned_data.get('withholding_rate')
+                or getattr(self.cleaned_data.get('withholding_class'), 'rate', Decimal('0.0000'))
+                or Decimal('0.0000')
+            ),
+            'atc': (
+                self.cleaned_data.get('atc')
+                or getattr(self.cleaned_data.get('withholding_class'), 'atc', '')
+                or ''
+            ),
             'period_from': self.cleaned_data.get('period_from'),
             'period_to': self.cleaned_data.get('period_to'),
             'payor_tin': self.cleaned_data.get('payor_tin') or '',

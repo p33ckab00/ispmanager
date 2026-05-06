@@ -73,6 +73,9 @@ EWT/CWT claim tracking for BIR Form 2307 follow-up.
 Slice 1C-B adds the guided payment workflow for customer EWT/CWT, withholding
 allocations against invoice balances, and the `/accounting/withholding/2307/`
 follow-up schedule.
+Slice 1C-C adds Accounting-owned withholding tax classes so customer 2307/CWT
+claims can be tied to explicit optional classifications instead of being treated
+as an automatic payment behavior.
 
 ## 2. Locked Decisions
 

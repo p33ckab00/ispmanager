@@ -17,8 +17,15 @@ from apps.accounting.models import (
     ExpenseRecord,
     IncomeRecord,
     JournalEntry,
+    WithholdingTaxClass,
 )
-from apps.accounting.forms import AccountingSetupForm, IncomeForm, ExpenseForm, JournalEntryHeaderForm
+from apps.accounting.forms import (
+    AccountingSetupForm,
+    ExpenseForm,
+    IncomeForm,
+    JournalEntryHeaderForm,
+    WithholdingTaxClassForm,
+)
 from apps.accounting.services import (
     create_accounting_foundation,
     create_manual_journal_entry,
@@ -62,6 +69,7 @@ def _accounting_context():
         'draft_journal_count': JournalEntry.objects.filter(entity=entity, status='draft').count() if entity else 0,
         'source_draft_count': AccountingSourcePosting.objects.filter(entity=entity, status='draft').count() if entity else 0,
         'source_blocked_count': AccountingSourcePosting.objects.filter(Q(entity=entity) | Q(entity__isnull=True), status='blocked').count() if entity else 0,
+        'withholding_class_count': WithholdingTaxClass.objects.filter(entity=entity, is_active=True).count() if entity else 0,
         'withholding_pending_count': CustomerWithholdingTaxClaim.objects.filter(
             Q(entity=entity) | Q(entity__isnull=True),
             status__in=['customer_claimed', 'pending_2307'],
@@ -385,7 +393,7 @@ def withholding_2307_list(request):
     qs = (
         CustomerWithholdingTaxClaim.objects
         .filter(Q(entity=entity) | Q(entity__isnull=True))
-        .select_related('subscriber', 'payment')
+        .select_related('subscriber', 'payment', 'withholding_class')
         .prefetch_related('allocations__invoice')
         .order_by('-received_date', '-created_at')
     )
@@ -413,6 +421,99 @@ def withholding_2307_list(request):
         'status_choices': CustomerWithholdingTaxClaim.STATUS_CHOICES,
         'gross_total': totals['gross_total'] or Decimal('0.00'),
         'withheld_total': totals['withheld_total'] or Decimal('0.00'),
+    })
+
+
+@login_required
+def withholding_class_list(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_withholdingtaxclass')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    qs = WithholdingTaxClass.objects.filter(entity=entity).order_by('tax_family', 'code', 'name')
+    return render(request, 'accounting/withholding_class_list.html', {
+        'entity': entity,
+        'classes': qs,
+    })
+
+
+@login_required
+def withholding_class_add(request):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.add_withholdingtaxclass',
+        'accounting-withholding-class-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    if request.method == 'POST':
+        form = WithholdingTaxClassForm(request.POST)
+        if form.is_valid():
+            obj = form.save(commit=False)
+            obj.entity = entity
+            try:
+                obj.full_clean()
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+                return render(request, 'accounting/withholding_class_form.html', {
+                    'entity': entity,
+                    'form': form,
+                    'title': 'Add Withholding Class',
+                })
+            obj.save()
+            AuditLog.log('create', 'accounting', f"Withholding tax class created: {obj.code}", user=request.user)
+            messages.success(request, 'Withholding tax class saved.')
+            return redirect('accounting-withholding-class-list')
+    else:
+        form = WithholdingTaxClassForm(initial={'rate': Decimal('0.0000'), 'is_active': True})
+    return render(request, 'accounting/withholding_class_form.html', {
+        'entity': entity,
+        'form': form,
+        'title': 'Add Withholding Class',
+    })
+
+
+@login_required
+def withholding_class_edit(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.change_withholdingtaxclass',
+        'accounting-withholding-class-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    obj = get_object_or_404(WithholdingTaxClass, entity=entity, pk=pk)
+    if request.method == 'POST':
+        form = WithholdingTaxClassForm(request.POST, instance=obj)
+        if form.is_valid():
+            try:
+                obj = form.save()
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+                return render(request, 'accounting/withholding_class_form.html', {
+                    'entity': entity,
+                    'form': form,
+                    'title': 'Edit Withholding Class',
+                    'withholding_class': obj,
+                })
+            AuditLog.log('update', 'accounting', f"Withholding tax class updated: {obj.code}", user=request.user)
+            messages.success(request, 'Withholding tax class updated.')
+            return redirect('accounting-withholding-class-list')
+    else:
+        form = WithholdingTaxClassForm(instance=obj)
+    return render(request, 'accounting/withholding_class_form.html', {
+        'entity': entity,
+        'form': form,
+        'title': 'Edit Withholding Class',
+        'withholding_class': obj,
     })
 
 
