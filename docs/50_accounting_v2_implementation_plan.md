@@ -1,0 +1,439 @@
+# Accounting v2 Implementation Plan
+
+This document turns the Accounting, BIR, and NTC compliance concept into an
+implementation plan for the Accounting v2 upgrade. It preserves the locked
+product decisions, the complete release direction, and the next buildable slice
+so the work can be implemented without rereading the planning conversation.
+
+## 1. Summary
+
+Build Accounting v2 as one production-oriented release, internally phased but
+delivered as a complete subsystem. The first release will use:
+
+- draft-then-approve posting
+- backfill and reconciliation cutover
+- template-selectable taxpayer setup
+- BIR loose-leaf and eBIRForms guide mode only
+
+Current billing PDFs remain billing statements, not official BIR invoices.
+
+Regulatory boundary: v1 will generate books, worksheets, schedules, archives,
+and filing guides. It will not claim CAS/CBA/EIS readiness or direct BIR/NTC
+submission.
+
+## 2. Locked Decisions
+
+- Accounting v2 is a complete subsystem, not a small extension of the current
+  income and expense tracker.
+- Existing `IncomeRecord` and `ExpenseRecord` remain readable for legacy review,
+  migration, and reconciliation.
+- The first release uses draft-then-approve journal posting.
+- Billing/payment/expense events may create draft accounting entries, but they
+  do not affect official GL reports until approved and posted.
+- Historical data uses a backfill and reconciliation cutover, not a blind hard
+  migration.
+- Taxpayer setup is selected from templates rather than hard-coded to one
+  entity type.
+- BIR v1 output is loose-leaf books and eBIRForms encoding guides only.
+- Current billing statement PDFs remain non-BIR billing statements in v1.
+- CAS/CBA/EIS-related fields may exist for future readiness but are not enabled
+  as official operating modes in v1.
+- Single accounting entity is shown in the UI for now, while models stay
+  tenant-ready through `AccountingEntity`.
+
+## 3. Key Implementation Changes
+
+Replace the lightweight accounting surface with an Accounting v2 workspace while
+keeping `IncomeRecord` and `ExpenseRecord` readable for migration and
+reconciliation.
+
+Add accounting-owned setup:
+
+- `AccountingEntity`
+- `AccountingSettings`
+- `TaxProfile`
+- `AccountingPolicy`
+- `DocumentSeries`
+- `TaxCode`
+
+Seed four chart-of-accounts templates:
+
+- ISP Non-VAT Sole Proprietor
+- ISP VAT Sole Proprietor
+- ISP Non-VAT Corporation
+- ISP VAT Corporation
+
+Require the setup wizard before Accounting v2 posting or reporting is marked
+live.
+
+Add ledger core:
+
+- `ChartOfAccount`
+- `AccountingPeriod`
+- `JournalEntry`
+- `JournalLine`
+- `SourceDocumentLink`
+
+Journal states:
+
+- `draft`
+- `posted`
+- `reviewed`
+- `locked`
+- `reversed`
+- `voided`
+
+Draft journal entries must balance before approval. Posted entries cannot be
+edited after period lock.
+
+Add source-document posting:
+
+- Billing invoice creates draft `Dr AR / Cr Revenue / Cr Output VAT if
+  applicable`.
+- Payment creates draft `Dr Cash/Bank/Wallet Clearing / Cr AR` or customer
+  advance logic.
+- Expense creates draft AP/cash/input VAT entries.
+- Refund, waiver, bad debt, credit forfeiture, and advance application get
+  explicit posting services.
+
+Add cutover workflow:
+
+- `OpeningBalanceImport`
+- `OpeningBalanceLine`
+- import and reconcile AR per subscriber, credits, cash/bank/wallet balances,
+  AP, inventory, fixed assets, taxes, loans, and equity
+- block Accounting v2 go-live until GL control accounts reconcile with
+  subledgers
+
+Add approval workflow:
+
+- Draft source journals are created automatically but do not hit official GL
+  reports until approved and posted.
+- Add review queues for unapproved, unbalanced, unmapped, and period-blocked
+  entries.
+- Corrections after lock use reversal or adjustment entries only.
+
+Add financial statements:
+
+- Trial Balance
+- General Ledger
+- Balance Sheet
+- Income Statement
+- Cash Flow
+- Changes in Equity
+
+Add ISP schedules:
+
+- AR aging
+- subscriber deposits
+- customer advances
+- revenue by service and area
+- network assets
+- depreciation
+- CPE inventory
+- VAT
+- withholding
+- bad debts and waivers
+
+Add reconciliation:
+
+- `PaymentSettlementBatch`
+- `BankStatementImport`
+- `BankReconciliation`
+- track cash, bank, GCash, Maya, and gateway clearing from recorded payment to
+  settlement
+- support gateway fees, duplicate references, reversals, chargebacks, and
+  refunds
+
+Add BIR compliance:
+
+- Loose-leaf books: General Journal, General Ledger, Cash Receipts, Cash
+  Disbursements, Sales Journal, Purchase/Expense Journal, Sales Invoice
+  Register, Collection Register, AR/AP subsidiary ledgers, VAT ledgers, and
+  asset/inventory ledgers.
+- `BirFormMapping` powers versioned eBIRForms guides for 2550Q, 2551Q,
+  1701/1701Q, and 1702/1702Q as applicable.
+- Add schedules for 2307/CWT, SAWT/MAP/QAP/SLSP if enabled, annual inventory
+  list, depreciation, and VAT reconciliation.
+- Finalized exports include manifest, page counts, file hashes,
+  prepared/reviewed metadata, and immutable archive.
+
+Add NTC compliance:
+
+- `NtcReportTemplate`
+- report runs
+- filing checklist
+- fee tracker
+- archive record
+- generate quarterly VAS-style packs, annual finances/operations pack,
+  subscriber counts, revenue by service type, service area,
+  facilities/network summary, QoS, incident, and complaint summaries
+- keep templates configurable because NTC office/report layouts may vary
+
+Add compliance calendar:
+
+- `ComplianceCalendarItem` tracks BIR/NTC due dates, preparation, review, filed
+  date, filing channel, reference number, attachments, and amended status.
+
+Exports and interfaces:
+
+- Server-rendered Accounting UI follows the existing Django template style.
+- PDF uses the existing `xhtml2pdf`/ReportLab path.
+- Add `openpyxl` dependency for `.xlsx` workbooks.
+- Keep REST API minimal/read-only for v1 reports unless an existing page
+  requires async data.
+- Add Data Exchange exports for COA, journals, trial balance, GL, BIR books,
+  and compliance package manifests.
+
+## 4. Slice Roadmap
+
+### Slice 1 - Accounting v2 Foundation
+
+Build setup wizard, accounting entity, accounting settings, COA templates,
+periods, manual draft journals, post approval, permissions, and trial balance.
+
+No billing auto-posting, no BIR/NTC exports, no official BIR invoices, and no
+CAS/EIS claims.
+
+### Slice 2 - Billing and Payment Draft Posting
+
+Create draft journals from billing invoices, payments, payment allocations,
+customer advances, waivers, refunds, bad debts, and credit forfeitures.
+
+Add diagnostics for unmapped, unapproved, unbalanced, and period-blocked source
+documents.
+
+### Slice 3 - Cutover and Opening Balances
+
+Add opening balance import, subscriber AR reconciliation, credit reconciliation,
+cash/bank/wallet opening balances, AP, inventory, fixed assets, taxes, loans,
+equity, and go-live readiness checks.
+
+### Slice 4 - Financial Statements and Subledgers
+
+Add General Ledger, Balance Sheet, Income Statement, Cash Flow, Changes in
+Equity, AR aging, AP aging, VAT ledger, fixed asset schedule, depreciation
+schedule, and CPE/inventory schedule.
+
+### Slice 5 - BIR Books and Guides
+
+Add loose-leaf books, BIR form guide registry, VAT and percentage-tax schedules,
+withholding/2307 schedules, annual inventory list support, PDF/XLSX exports,
+manifest, file hashes, and immutable package archives.
+
+### Slice 6 - NTC Compliance Packs
+
+Add NTC profile, configurable templates, quarterly VAS-style packs, annual
+finances/operations pack, subscriber/service-area schedules, network/facility
+schedules, QoS/incident/complaint summaries, filing checklist, and archive
+records.
+
+### Slice 7 - Reconciliation, Calendar, and Hardening
+
+Add bank/wallet/gateway reconciliation, settlement batches, compliance
+calendar, filing status workflow, amendment workflow, archive verification,
+multi-tenant hardening, and full compliance diagnostics.
+
+## 5. Next Slice: Accounting v2 Foundation
+
+### Summary
+
+Build the first implementation slice as the durable foundation for Accounting
+v2. After this slice, an admin can set up an accounting entity, choose an ISP
+COA template, manage accounting periods, create balanced draft journal entries,
+approve/post them, and view a basic trial balance.
+
+Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
+later migration.
+
+### Key Changes
+
+Add Accounting v2 models under `apps/accounting`:
+
+- `AccountingEntity`: single active company for now; tenant-ready
+- `AccountingSettings`: compliance mode, fiscal year, currency, setup status
+- `AccountingPeriod`: monthly periods with `open`, `closed`, `locked`
+- `ChartOfAccount`: account code, name, account type, normal balance, active
+  flag
+- `JournalEntry`: `draft`, `posted`, `reviewed`, `reversed`, `voided`
+- `JournalLine`: debit/credit lines linked to accounts
+- `SourceDocumentLink`: reserved bridge for later billing/payment/expense
+  posting
+
+Seed selectable ISP COA templates:
+
+- ISP Non-VAT Sole Proprietor
+- ISP VAT Sole Proprietor
+- ISP Non-VAT Corporation
+- ISP VAT Corporation
+
+Add Accounting setup wizard:
+
+- company/taxpayer basics
+- VAT/non-VAT template selection
+- fiscal/calendar year start
+- create monthly accounting periods for current year
+- seed chart of accounts once only
+
+Add journal workflow:
+
+- manual journal entry create/edit while draft
+- validate total debits equal total credits
+- post action moves draft to posted
+- posted entries are read-only
+- locked periods block posting
+
+Add first report:
+
+- Trial Balance by period/date range
+- includes debit, credit, and ending balance by account
+- totals must balance
+
+Add UI routes:
+
+- `/accounting/setup/`
+- `/accounting/chart/`
+- `/accounting/periods/`
+- `/accounting/journals/`
+- `/accounting/journals/add/`
+- `/accounting/journals/<id>/`
+- `/accounting/trial-balance/`
+
+Update Accounting dashboard:
+
+- show setup status
+- show open period
+- show draft journal count
+- link to chart, journals, and trial balance
+- keep legacy income/expense links labelled as legacy
+
+Add permissions and role presets:
+
+- view/manage chart of accounts
+- add/change/post journal entries
+- view trial balance
+- manage accounting setup
+- ISP Admin gets all
+- cashier gets view-only accounting plus existing expense permission unless
+  already broader
+
+### Implementation Notes
+
+- Use `Decimal` for all amounts.
+- Enforce exactly one side per journal line: debit or credit, not both.
+- Account normal balance:
+  - debit: assets, expenses, contra-liability/equity/revenue if later needed
+  - credit: liabilities, equity, revenue
+- Account types for this slice:
+  - `asset`
+  - `liability`
+  - `equity`
+  - `revenue`
+  - `direct_cost`
+  - `expense`
+  - `other_income`
+  - `other_expense`
+- Draft journals may be edited/deleted.
+- Posted journals cannot be edited/deleted.
+- Reversal is not required in this slice, but status/model fields must allow it
+  later.
+- Do not wire billing invoice/payment services yet.
+- Do not generate official BIR invoices.
+- Do not remove current income/expense summaries.
+
+## 6. Full Release Test Plan
+
+### Ledger integrity
+
+- balanced draft journal required before posting
+- posted journal cannot be edited after lock
+- reversal creates equal/opposite entry
+- trial balance debits equal credits
+
+### Source document scenarios
+
+- VAT invoice full payment
+- VAT invoice partial payment
+- non-VAT invoice with percentage-tax guide
+- advance payment before invoice
+- customer credit applied to later invoice
+- waiver/service credit
+- bad debt write-off
+- refund of customer advance
+- input VAT expense
+- fixed asset purchase and depreciation
+- inventory purchase and CPE issuance
+
+### Reconciliation
+
+- AR aging equals GL AR control account
+- AP aging equals GL AP control account
+- VAT schedule equals VAT ledgers
+- wallet/gateway settlement with fees reconciles to bank/clearing
+- duplicate/reversed payment remains flagged until resolved
+
+### Compliance outputs
+
+- loose-leaf PDF and XLSX include cover, pages, manifest, hashes
+- archived compliance package cannot be overwritten
+- BIR form guide uses correct active mapping version
+- NTC report template can be generated and archived
+- compliance calendar moves through due, prepared, reviewed, filed, amended
+
+### Migration
+
+- opening balances import validates debits/credits
+- historical billing AR reconciles to subscriber subledger and GL control
+- legacy income/expense records remain accessible after cutover
+
+## 7. Next Slice Test Plan
+
+### Model tests
+
+- COA template seeds expected required accounts.
+- setup wizard creates one active accounting entity.
+- setup cannot seed duplicate accounts for the same entity.
+- accounting periods are created for all 12 months.
+
+### Journal tests
+
+- balanced draft journal can be posted.
+- unbalanced draft journal cannot be posted.
+- journal line cannot have both debit and credit.
+- posted journal is read-only.
+- posting into locked period is blocked.
+
+### Trial balance tests
+
+- posted entries appear in trial balance.
+- draft entries do not appear.
+- total debits equal total credits.
+- account balances follow normal balance correctly.
+
+### Permission tests
+
+- unauthorized users cannot manage setup/chart/journals.
+- read-only auditor can view but not post.
+- admin can complete setup and post journals.
+
+### Regression tests
+
+- existing payment-to-income mirror still works.
+- existing accounting dashboard still loads before setup and redirects/prompts
+  correctly after setup.
+
+## 8. Assumptions and Defaults
+
+- One Accounting v2 release, implemented internally in phases: foundation,
+  posting, cutover, statements, BIR, NTC, reconciliation, hardening.
+- First slice creates ledger foundation only; billing-to-ledger automation is
+  Slice 2.
+- One active `AccountingEntity` in UI for now, but all new tables include entity
+  foreign keys.
+- Default BIR mode is `loose_leaf_guides`; CAS/EIS modes are stored as future
+  settings but disabled in UI.
+- Current billing statement PDFs remain non-BIR billing statements in v1.
+- Accounting v2 creates draft journals automatically; accountant/admin approval
+  posts them to GL.
+- Existing dirty OTP/settings worktree changes are unrelated and must not be
+  touched during this documentation or implementation work.

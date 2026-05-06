@@ -6,6 +6,10 @@ a Philippine ISP-focused double-entry accounting subsystem that supports BIR
 books, BIR tax form encoding guides, NTC report packs, financial statements,
 and future multi-tenant production use.
 
+Implementation planning is continued in
+`docs/50_accounting_v2_implementation_plan.md`, which locks the delivery
+decisions, release slices, and next buildable Accounting v2 foundation slice.
+
 ## 1. Conversation Summary
 
 The accounting module must move beyond the current income and expense tracker.
