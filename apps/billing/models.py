@@ -181,6 +181,7 @@ class AccountCreditAdjustment(models.Model):
         ('completed', 'Completed'),
         ('canceled', 'Canceled'),
     ]
+    SETTLEMENT_METHOD_CHOICES = Payment.METHOD_CHOICES
 
     subscriber = models.ForeignKey(
         'subscribers.Subscriber',
@@ -192,6 +193,11 @@ class AccountCreditAdjustment(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     reason = models.TextField(blank=True)
     reference = models.CharField(max_length=255, blank=True)
+    settlement_method = models.CharField(
+        max_length=20,
+        choices=SETTLEMENT_METHOD_CHOICES,
+        blank=True,
+    )
     expense_record = models.OneToOneField(
         'accounting.ExpenseRecord',
         on_delete=models.SET_NULL,

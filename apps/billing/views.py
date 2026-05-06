@@ -619,6 +619,7 @@ def complete_refund(request, pk):
                     completed_by=request.user.username,
                     paid_at=form.cleaned_data['paid_at'],
                     create_expense=form.cleaned_data['create_expense'],
+                    refund_method=form.cleaned_data['refund_method'],
                 )
             except ValueError as exc:
                 messages.error(request, str(exc))

@@ -585,12 +585,14 @@ class DisconnectedCreditPolicyTests(TestCase):
             completed_by='cashier',
             paid_at=timezone.now(),
             create_expense=True,
+            refund_method='gcash',
         )
 
         completed.refresh_from_db()
         self.assertEqual(completed.adjustment_type, 'refund_paid')
         self.assertEqual(completed.status, 'completed')
         self.assertEqual(completed.reference, 'GCASH-123')
+        self.assertEqual(completed.settlement_method, 'gcash')
         self.assertEqual(completed.expense_record, expense)
         self.assertEqual(expense.amount, Decimal('300.00'))
         self.assertEqual(expense.category, 'other')

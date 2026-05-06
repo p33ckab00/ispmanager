@@ -332,6 +332,7 @@ POSTING_ACCOUNT_CODES = {
     'customer_advances': '2100',
     'refunds_payable': '2110',
     'internet_revenue': '4000',
+    'other_income': '7000',
 }
 
 PAYMENT_METHOD_ACCOUNT_KEYS = {
@@ -781,6 +782,138 @@ def create_payment_allocation_advance_application_draft(allocation):
         create,
         amount=allocation.amount_allocated,
         document_date=entry_date,
+    )
+
+
+def _credit_adjustment_date(adjustment):
+    return _document_date_from_datetime(adjustment.effective_at)
+
+
+def create_refund_due_source_draft(adjustment):
+    entry_date = _credit_adjustment_date(adjustment)
+
+    def create(entity):
+        if adjustment.adjustment_type != 'refund_due':
+            raise ValidationError('Only refund-due credit adjustments can create refund-due drafts.')
+        return _create_source_journal(
+            entity,
+            adjustment,
+            'refund_due',
+            entry_date,
+            f"Refund due - {adjustment.subscriber.username}",
+            [
+                {
+                    'account': _posting_account(entity, 'customer_advances'),
+                    'debit': adjustment.amount,
+                    'description': 'Reserve customer advance for refund',
+                },
+                {
+                    'account': _posting_account(entity, 'refunds_payable'),
+                    'credit': adjustment.amount,
+                    'description': 'Refund payable to subscriber',
+                },
+            ],
+            source_type='adjustment',
+            reference=adjustment.reference,
+        )
+
+    return _source_posting_fail_soft(
+        adjustment,
+        'refund_due',
+        create,
+        amount=adjustment.amount,
+        document_date=entry_date,
+    )
+
+
+def create_refund_paid_source_draft(adjustment):
+    entry_date = _credit_adjustment_date(adjustment)
+
+    def create(entity):
+        if adjustment.adjustment_type != 'refund_paid':
+            raise ValidationError('Only refund-paid credit adjustments can create refund-paid drafts.')
+        refund_method = getattr(adjustment, 'settlement_method', '') or 'bank'
+        return _create_source_journal(
+            entity,
+            adjustment,
+            'refund_paid',
+            entry_date,
+            f"Refund paid - {adjustment.subscriber.username}",
+            [
+                {
+                    'account': _posting_account(entity, 'refunds_payable'),
+                    'debit': adjustment.amount,
+                    'description': 'Settle refund payable',
+                },
+                {
+                    'account': _payment_cash_account(entity, refund_method),
+                    'credit': adjustment.amount,
+                    'description': adjustment.reference or 'Refund paid',
+                },
+            ],
+            source_type='adjustment',
+            reference=adjustment.reference,
+        )
+
+    return _source_posting_fail_soft(
+        adjustment,
+        'refund_paid',
+        create,
+        amount=adjustment.amount,
+        document_date=entry_date,
+    )
+
+
+def create_credit_forfeiture_source_draft(adjustment):
+    entry_date = _credit_adjustment_date(adjustment)
+
+    def create(entity):
+        if adjustment.adjustment_type != 'forfeit':
+            raise ValidationError('Only forfeited credit adjustments can create forfeiture drafts.')
+        return _create_source_journal(
+            entity,
+            adjustment,
+            'credit_forfeit',
+            entry_date,
+            f"Credit forfeiture - {adjustment.subscriber.username}",
+            [
+                {
+                    'account': _posting_account(entity, 'customer_advances'),
+                    'debit': adjustment.amount,
+                    'description': 'Forfeited customer advance',
+                },
+                {
+                    'account': _posting_account(entity, 'other_income'),
+                    'credit': adjustment.amount,
+                    'description': 'Credit forfeiture income',
+                },
+            ],
+            source_type='adjustment',
+            reference=adjustment.reference,
+        )
+
+    return _source_posting_fail_soft(
+        adjustment,
+        'credit_forfeit',
+        create,
+        amount=adjustment.amount,
+        document_date=entry_date,
+    )
+
+
+def create_credit_adjustment_source_draft(adjustment):
+    if adjustment.adjustment_type == 'refund_due':
+        return create_refund_due_source_draft(adjustment)
+    if adjustment.adjustment_type == 'refund_paid':
+        return create_refund_paid_source_draft(adjustment)
+    if adjustment.adjustment_type == 'forfeit':
+        return create_credit_forfeiture_source_draft(adjustment)
+    return _block_source_posting(
+        adjustment,
+        adjustment.adjustment_type or 'credit_adjustment',
+        f"Unsupported credit adjustment type: {adjustment.adjustment_type}.",
+        amount=adjustment.amount,
+        document_date=_credit_adjustment_date(adjustment),
     )
 
 

@@ -83,14 +83,24 @@ Slice 1C-C makes withholding classification explicit and optional:
 - the system does not auto-seed official BIR rates/classes; accountants should
   maintain active classes based on current BIR references and taxpayer facts.
 
-Remaining Slice 1C gaps after Slice 1C-C:
+Slice 1C-D adds draft posting for customer credit adjustments:
+
+- refund due creates `Dr 2100 Customer Advances / Cr 2110 Refunds Payable`.
+- refund paid captures settlement method and creates
+  `Dr 2110 Refunds Payable / Cr Cash/Bank/Wallet Clearing`.
+- credit forfeiture creates `Dr 2100 Customer Advances / Cr 7000 Other Income`.
+- source links use separate posting identities for `refund_due`, `refund_paid`,
+  and `credit_forfeit` so the workflow stays idempotent.
+- existing legacy `ExpenseRecord` creation on refund completion remains legacy
+  only; Accounting v2 Trial Balance still uses posted journals only.
+
+Remaining Slice 1C gaps after Slice 1C-D:
 
 - VAT invoice posting is still blocked until invoice tax breakdown or explicit
   VAT posting settings are added.
 - 2307 upload attachments and finalized SAWT/2307 export schedules are not yet
   implemented.
-- refund-due, refund-paid, credit forfeiture, waiver, and void posting services
-  are still pending.
+- waiver and void posting services are still pending.
 - retry blocked source posting and backfill management commands are still
   pending.
 

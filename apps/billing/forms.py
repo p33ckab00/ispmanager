@@ -140,6 +140,13 @@ class PaymentForm(forms.Form):
 
 
 class RefundCompletionForm(forms.Form):
+    refund_method = forms.ChoiceField(
+        choices=PaymentForm.METHOD_CHOICES,
+        initial='bank',
+        widget=forms.Select(attrs={
+            'class': 'w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500',
+        }),
+    )
     reference = forms.CharField(
         max_length=255,
         required=False,

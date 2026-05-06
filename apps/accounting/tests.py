@@ -17,12 +17,13 @@ from apps.accounting.models import (
 )
 from apps.accounting.services import (
     create_accounting_foundation,
+    create_credit_adjustment_source_draft,
     create_invoice_source_draft,
     create_manual_journal_entry,
     create_payment_source_draft,
     post_journal_entry,
 )
-from apps.billing.models import Invoice, Payment, PaymentAllocation
+from apps.billing.models import AccountCreditAdjustment, Invoice, Payment, PaymentAllocation
 from apps.subscribers.models import Subscriber
 
 
@@ -264,3 +265,68 @@ class AccountingV2SourcePostingTests(TestCase):
 
         with self.assertRaisesMessage(ValidationError, 'end date cannot be before start date'):
             tax_class.full_clean()
+
+    def test_refund_due_source_posting_creates_customer_advance_reclass(self):
+        entity = self._foundation()
+        subscriber = self._subscriber()
+        adjustment = AccountCreditAdjustment.objects.create(
+            subscriber=subscriber,
+            adjustment_type='refund_due',
+            status='pending',
+            amount=Decimal('300.00'),
+            recorded_by='tester',
+            effective_at=timezone.now(),
+        )
+
+        journal_entry = create_credit_adjustment_source_draft(adjustment)
+
+        self.assertTrue(journal_entry.is_balanced())
+        posting = AccountingSourcePosting.objects.get(
+            source_model='AccountCreditAdjustment.refund_due',
+            source_id=str(adjustment.pk),
+        )
+        self.assertEqual(posting.entity, entity)
+        self.assertEqual(posting.status, 'draft')
+        lines = {line.account.code: line for line in journal_entry.lines.select_related('account')}
+        self.assertEqual(lines['2100'].debit, Decimal('300.00'))
+        self.assertEqual(lines['2110'].credit, Decimal('300.00'))
+
+    def test_refund_paid_source_posting_uses_settlement_method(self):
+        self._foundation()
+        subscriber = self._subscriber()
+        adjustment = AccountCreditAdjustment.objects.create(
+            subscriber=subscriber,
+            adjustment_type='refund_paid',
+            status='completed',
+            amount=Decimal('300.00'),
+            reference='MAYA-REFUND',
+            settlement_method='maya',
+            recorded_by='tester',
+            effective_at=timezone.now(),
+        )
+
+        journal_entry = create_credit_adjustment_source_draft(adjustment)
+
+        self.assertTrue(journal_entry.is_balanced())
+        lines = {line.account.code: line for line in journal_entry.lines.select_related('account')}
+        self.assertEqual(lines['2110'].debit, Decimal('300.00'))
+        self.assertEqual(lines['1020'].credit, Decimal('300.00'))
+
+    def test_credit_forfeiture_source_posting_recognizes_other_income(self):
+        self._foundation()
+        subscriber = self._subscriber()
+        adjustment = AccountCreditAdjustment.objects.create(
+            subscriber=subscriber,
+            adjustment_type='forfeit',
+            status='completed',
+            amount=Decimal('250.00'),
+            recorded_by='tester',
+            effective_at=timezone.now(),
+        )
+
+        journal_entry = create_credit_adjustment_source_draft(adjustment)
+
+        self.assertTrue(journal_entry.is_balanced())
+        lines = {line.account.code: line for line in journal_entry.lines.select_related('account')}
+        self.assertEqual(lines['2100'].debit, Decimal('250.00'))
+        self.assertEqual(lines['7000'].credit, Decimal('250.00'))

@@ -443,6 +443,11 @@ def apply_disconnected_credit_policy(subscriber, policy=None, disconnected_by='a
             reason='Auto-marked for refund: subscriber marked disconnected',
             recorded_by=disconnected_by,
         )
+        try:
+            from apps.accounting.services import create_credit_adjustment_source_draft
+            create_credit_adjustment_source_draft(adjustment)
+        except Exception:
+            logger.exception('Accounting v2 refund-due draft failed for credit adjustment %s.', adjustment.pk)
         result['adjustment'] = adjustment
         result['message'] = f"Refund due recorded for PHP {available_credit}."
         return result
@@ -456,6 +461,11 @@ def apply_disconnected_credit_policy(subscriber, policy=None, disconnected_by='a
             reason='Auto-forfeited: subscriber marked disconnected',
             recorded_by=disconnected_by,
         )
+        try:
+            from apps.accounting.services import create_credit_adjustment_source_draft
+            create_credit_adjustment_source_draft(adjustment)
+        except Exception:
+            logger.exception('Accounting v2 credit-forfeit draft failed for credit adjustment %s.', adjustment.pk)
         result['adjustment'] = adjustment
         result['message'] = f"Account credit PHP {available_credit} forfeited."
         return result
@@ -468,7 +478,7 @@ def apply_disconnected_credit_policy(subscriber, policy=None, disconnected_by='a
 @transaction.atomic
 def complete_refund_credit_adjustment(adjustment, reference='', notes='',
                                       completed_by='admin', paid_at=None,
-                                      create_expense=True):
+                                      create_expense=True, refund_method='bank'):
     if adjustment.adjustment_type != 'refund_due' or adjustment.status != 'pending':
         raise ValueError('Only pending refund-due credit adjustments can be completed.')
 
@@ -498,6 +508,7 @@ def complete_refund_credit_adjustment(adjustment, reference='', notes='',
     adjustment.adjustment_type = 'refund_paid'
     adjustment.status = 'completed'
     adjustment.reference = reference
+    adjustment.settlement_method = refund_method
     adjustment.reason = '\n'.join(note_parts)
     adjustment.recorded_by = completed_by
     adjustment.effective_at = paid_at
@@ -506,12 +517,19 @@ def complete_refund_credit_adjustment(adjustment, reference='', notes='',
         'adjustment_type',
         'status',
         'reference',
+        'settlement_method',
         'reason',
         'recorded_by',
         'effective_at',
         'expense_record',
         'updated_at',
     ])
+
+    try:
+        from apps.accounting.services import create_credit_adjustment_source_draft
+        create_credit_adjustment_source_draft(adjustment)
+    except Exception:
+        logger.exception('Accounting v2 refund-paid draft failed for credit adjustment %s.', adjustment.pk)
 
     return adjustment, expense
 

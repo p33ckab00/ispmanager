@@ -76,6 +76,8 @@ follow-up schedule.
 Slice 1C-C adds Accounting-owned withholding tax classes so customer 2307/CWT
 claims can be tied to explicit optional classifications instead of being treated
 as an automatic payment behavior.
+Slice 1C-D adds draft source posting for refund due, refund paid, and customer
+credit forfeiture adjustments.
 
 ## 2. Locked Decisions
 
