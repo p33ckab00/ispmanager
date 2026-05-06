@@ -6,12 +6,18 @@ draft journal entries only. It must not auto-post to the official GL and must
 not break existing billing, payment allocation, or legacy income/expense
 behavior.
 
+Compliance reference used for the EWT/CWT gap: BIR Form 2307 is the
+Certificate of Creditable Tax Withheld at Source and captures payee, payor,
+income payment, ATC, and tax withheld details for the covered period.
+
 ## Summary
 
 Slice 1C adds source-driven draft journals for:
 
 - invoices
 - payments
+- customer expanded withholding tax or creditable withholding tax claimed
+  through BIR Form 2307
 - customer advance application
 - refund-due and refund-paid credit adjustments
 - credit forfeiture
@@ -41,6 +47,11 @@ The current billing module has these source objects:
 
 Slice 1C must post from `Invoice`, `Payment`, `PaymentAllocation`, and
 `AccountCreditAdjustment`. It must not post from `BillingSnapshot`.
+
+Current gap: `Payment.amount` currently represents the recorded collection
+amount and is mirrored to legacy `IncomeRecord`. It does not separately track
+cash received versus tax withheld by a customer. Slice 1C must not overload
+`Payment.amount` as gross settlement when a customer withholds EWT/CWT.
 
 ## Gap Review And Resolutions
 
@@ -78,6 +89,84 @@ Resolution:
 - If legacy allocation timing is ambiguous, flag it in the review queue rather
   than guessing.
 
+### Gap: customer EWT/CWT and BIR Form 2307 are not represented
+
+Some customers, especially corporate or government customers that are
+withholding agents, may pay the invoice net of expanded withholding tax and
+issue BIR Form 2307, Certificate of Creditable Tax Withheld at Source. This is
+not a discount, waiver, VAT reduction, or bad debt. It is a creditable income
+tax withheld by the customer and should become an accounting asset supported by
+the 2307 certificate.
+
+Resolution:
+
+- Add an accounting-owned `CustomerWithholdingTaxClaim` or
+  `CreditableWithholdingTaxCertificate` model.
+- Keep `Payment.amount` as actual cash/bank/wallet received.
+- Add separate withholding amount and certificate details so gross AR
+  settlement can equal:
+  `cash received + EWT/CWT withheld`.
+- Add allocation tracking for withholding claims, either through a dedicated
+  `CustomerWithholdingAllocation` model or through a settlement service that
+  links the withholding claim to invoices.
+- Do not include pending or unverified 2307 amounts in SAWT/2307 compliance
+  schedules as final certificates.
+- Do track pending customer-claimed EWT separately so the operator can follow up
+  for the actual 2307.
+- EWT/CWT must not reduce output VAT. VAT, if applicable, remains based on the
+  invoice tax treatment; the withholding is an income-tax credit asset.
+
+Required fields for the withholding record:
+
+- accounting entity
+- subscriber/customer
+- related payment, if the customer paid net cash
+- related invoice or allocation lines
+- income payment amount or gross invoice amount covered
+- tax withheld amount
+- withholding rate
+- ATC, if known
+- BIR Form 2307 period from/to
+- payor/customer TIN
+- payor/customer registered name
+- payor/customer address
+- certificate number or reference
+- certificate date
+- received date
+- attachment/file reference, if uploaded
+- status: `customer_claimed`, `pending_2307`, `received`, `validated`,
+  `applied_to_return`, `disallowed`, `canceled`
+- notes and validation warnings
+
+Default account mapping:
+
+- CWT/EWT receivable: add `1210 Creditable Withholding Tax Receivable` to the
+  Accounting v2 COA templates and posting map.
+- If the implementation needs a stricter control account, add a child account
+  such as `1211 CWT Receivable - Pending 2307`.
+
+Collection entry when 2307/EWT is claimed:
+
+```text
+Dr Cash/Bank/Wallet Clearing              net cash received
+Dr 1210 Creditable Withholding Tax Receivable
+Cr 1100 Accounts Receivable - Subscribers gross AR settled
+```
+
+If the customer claims EWT but the 2307 is not yet received:
+
+- create the draft journal only if the operator explicitly records the pending
+  claim
+- status the withholding record as `pending_2307`
+- show it in the review queue and 2307 follow-up list
+- exclude it from finalized SAWT/2307 received schedules until received or
+  validated
+
+If the customer short-pays and no EWT claim is recorded:
+
+- leave the invoice partially unpaid
+- do not silently create CWT receivable
+
 ### Gap: VAT cannot be computed reliably from current invoices
 
 Current `Invoice` stores a gross amount and does not store tax code, VATable
@@ -108,6 +197,8 @@ Resolution:
   - Cash: `1000 Cash on Hand`
   - Bank: `1010 Bank Accounts`
   - Wallet/gateway clearing: `1020 E-Wallet and Gateway Clearing`
+  - Creditable Withholding Tax Receivable: add `1210 Creditable Withholding Tax
+    Receivable`
   - Customer Advances: `2100 Customer Advances`
   - Subscriber Deposits: `2200 Subscriber Deposits`
   - Internet Revenue: `4000 Internet Service Revenue`
@@ -220,6 +311,8 @@ Amount basis:
 
 Source: `Payment`
 
+Payment without EWT/CWT:
+
 For allocated portion:
 
 ```text
@@ -241,6 +334,39 @@ Cash-side account mapping by method:
 - `gcash` -> `1020 E-Wallet and Gateway Clearing`
 - `maya` -> `1020 E-Wallet and Gateway Clearing`
 - `other` -> `1020 E-Wallet and Gateway Clearing` unless configured otherwise
+
+### Payment With Customer EWT/CWT Claim
+
+Sources:
+
+- `Payment`
+- `CustomerWithholdingTaxClaim` or
+  `CreditableWithholdingTaxCertificate`
+
+For an invoice where the customer pays net cash and withholds EWT:
+
+```text
+Dr Cash/Bank/Wallet Clearing
+Dr 1210 Creditable Withholding Tax Receivable
+Cr 1100 Accounts Receivable - Subscribers
+```
+
+The credit to AR is the gross amount settled. The cash debit is the net amount
+received. The CWT debit is the tax withheld supported by, or pending receipt of,
+BIR Form 2307.
+
+Do not post EWT as:
+
+- sales discount
+- waiver
+- bad debt
+- output VAT reduction
+- negative revenue
+
+If EWT exceeds the open AR being settled, block the source posting for review.
+If EWT is claimed on an invoice whose revenue draft is missing or blocked, allow
+the collection draft only if AR exists from opening balances or a posted invoice
+journal; otherwise block for review.
 
 ### Advance Application
 
@@ -319,13 +445,18 @@ VAT reversal waits for tax breakdown support.
    - create source draft
    - mark blocked source posting
 3. Add account mapping helper with seeded default account codes.
-4. Add draft posting service for `Invoice`.
-5. Add draft posting service for `Payment`.
-6. Add advance application service for later `PaymentAllocation`.
-7. Add credit adjustment posting for refund due, refund paid, and forfeiture.
-8. Refactor waiver/void service paths to capture affected invoices and create
+4. Add CWT/EWT receivable account to the seeded COA templates or create it
+   idempotently during Slice 1C setup/backfill.
+5. Add customer withholding tax claim/certificate model and allocation support.
+6. Add payment form/service support for net cash plus EWT/CWT claimed.
+7. Add draft posting service for `Invoice`.
+8. Add draft posting service for `Payment`.
+9. Add draft posting service for payment with EWT/CWT claim.
+10. Add advance application service for later `PaymentAllocation`.
+11. Add credit adjustment posting for refund due, refund paid, and forfeiture.
+12. Refactor waiver/void service paths to capture affected invoices and create
    reviewable source drafts.
-9. Add Accounting review queue:
+13. Add Accounting review queue:
    - source type
    - source number
    - subscriber
@@ -334,8 +465,9 @@ VAT reversal waits for tax breakdown support.
    - status
    - blocked reason
    - linked journal
-10. Add dashboard count for source drafts and blocked postings.
-11. Add management command to backfill draft source journals for recent billing
+14. Add dashboard count for source drafts and blocked postings.
+15. Add 2307/CWT follow-up and received-certificate schedule.
+16. Add management command to backfill draft source journals for recent billing
     data without posting them.
 
 ## UI Plan
@@ -343,8 +475,10 @@ VAT reversal waits for tax breakdown support.
 Add:
 
 - `/accounting/review/`
+- `/accounting/withholding/2307/`
 - filter by source type, status, blocked reason, and period
 - links to source invoice/payment/refund where available
+- links to customer 2307/CWT records where available
 - link to draft journal detail
 - button to retry blocked source posting after setup/mapping is fixed
 
@@ -369,6 +503,19 @@ Existing journal detail remains the posting screen for balanced drafts.
 - GCash and Maya use wallet clearing account
 - rerunning payment posting is idempotent
 - legacy `IncomeRecord` mirror still exists and is not included in Trial Balance
+
+### EWT/CWT and 2307 tests
+
+- customer can record net cash received plus EWT/CWT withheld
+- `Payment.amount` remains the actual cash received
+- gross AR settlement equals cash received plus withholding claim
+- draft journal debits cash and CWT receivable, then credits AR
+- pending 2307 is listed in the follow-up schedule
+- received/validated 2307 is included in the 2307 received schedule
+- pending 2307 is excluded from finalized SAWT/2307 compliance exports
+- EWT does not reduce output VAT or revenue
+- EWT greater than open AR blocks source posting
+- missing CWT receivable account blocks source posting
 
 ### Advance application tests
 
@@ -407,6 +554,7 @@ Slice 1C does not include:
 - BIR loose-leaf books
 - NTC report packs
 - complete VAT implementation without tax breakdown
+- finalized SAWT generation beyond a received/validated 2307 schedule
 - bank settlement reconciliation
 - opening balance import
 
@@ -415,9 +563,15 @@ Slice 1C does not include:
 Slice 1C is complete when:
 
 - billing and payment events can create or reuse draft journals
+- customer EWT/CWT claims can settle AR as CWT receivable with 2307 tracking
 - source posting is idempotent
 - Accounting review queue shows draft and blocked source postings
 - billing does not fail when Accounting v2 setup is incomplete
 - Trial Balance includes source journals only after posting
 - legacy income/expense pages still load
 - documentation reflects any implementation deviations
+
+## Reference Links
+
+- BIR Form 2307 PDF:
+  `https://bir-cdn.bir.gov.ph/local/pdf/2307%20Jan%202018%20ENCS%20v3.pdf`

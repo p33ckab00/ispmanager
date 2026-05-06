@@ -65,7 +65,8 @@ dashboard status links, and read-only ledger role preset permissions.
 Slice 1C billing/payment draft posting is planned in
 `docs/53_accounting_v2_slice_1c_billing_payment_draft_posting.md`. That plan
 documents the source-event gaps, resolved posting rules, idempotency behavior,
-review queue, and tests needed before implementation.
+customer EWT/2307 handling, review queue, and tests needed before
+implementation.
 
 ## 2. Locked Decisions
 
@@ -295,7 +296,9 @@ multi-tenant hardening, and full compliance diagnostics.
 Build the source-posting portion of the first Accounting v2 release. After
 Slice 1C, billing invoices, payments, allocations, refunds, waivers, voids, and
 credit forfeitures can create or reuse Accounting v2 draft journal entries for
-review.
+review. Customer EWT/CWT claimed through BIR Form 2307 is tracked separately
+from cash receipts so gross AR can be settled by net cash plus creditable
+withholding tax receivable.
 
 Existing `IncomeRecord` and `ExpenseRecord` stay intact as legacy records for
 later migration.
@@ -323,6 +326,8 @@ Add billing/payment draft posting:
   `Dr Cash/Bank/Wallet Clearing / Cr Customer Advances`
 - payment allocation creates/reuses a draft application entry only when needed
   by the customer advance workflow
+- customer EWT/CWT claimed through BIR Form 2307 creates/reuses a CWT receivable
+  draft line and does not reduce VAT, revenue, discount, waiver, or bad debt
 - refund completion creates/reuses a draft refund journal entry
 - waiver, bad debt, and credit forfeiture create/reuse explicit draft journal
   entries
@@ -374,6 +379,10 @@ Add permissions and role presets:
   posting without breaking invoice/payment creation.
 - VAT draft posting must not guess Output VAT from gross invoices until tax
   breakdown or explicit VAT posting settings exist.
+- EWT/CWT withheld by customers must not reduce Output VAT. It is an
+  income-tax credit asset supported by received or pending BIR Form 2307.
+- Keep `Payment.amount` as actual cash received; record customer withholding in
+  a separate Accounting v2 withholding/certificate record.
 - Keep the existing `IncomeRecord` payment mirror during this slice, but mark it
   as legacy reporting; official Accounting v2 reports must use posted
   `JournalEntry` rows only.
@@ -452,6 +461,8 @@ below keeps the roadmap-level checks visible.
 - rerunning invoice generation reuses the existing source journal.
 - recorded payment creates one draft source journal.
 - overpayment creates a customer advance draft journal.
+- customer EWT/CWT collection debits cash for net receipt, debits CWT
+  receivable for tax withheld, and credits AR for gross settlement.
 - payment allocation against a later invoice creates/reuses the required
   customer advance application draft journal.
 - refund completion creates one draft refund journal.

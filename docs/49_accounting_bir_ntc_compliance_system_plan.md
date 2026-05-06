@@ -700,6 +700,8 @@ The system should support schedules that may be needed depending on the
 taxpayer's registration and transactions:
 
 - 2307 and creditable withholding tax received schedule
+- customer-claimed EWT/CWT follow-up list for invoices paid net of withholding
+  but still awaiting the actual BIR Form 2307
 - SAWT, MAP, or QAP support where applicable
 - SLSP or summary list support where applicable
 - withholding tax schedules for suppliers, rent, contractors, and employees
@@ -707,6 +709,11 @@ taxpayer's registration and transactions:
 - fixed asset and depreciation schedules
 - VAT reconciliation between sales, collections, receivables, purchases, and
   payables
+
+Customer EWT/CWT must be treated separately from VAT. If a customer withholds
+tax and issues or promises BIR Form 2307, the withheld amount is a creditable
+withholding tax receivable or pending certificate item. It should not reduce
+sales, output VAT, waiver, discount, or bad debt.
 
 These should be configuration-driven. A small ISP should not see irrelevant
 reports unless the taxpayer profile says they apply.
