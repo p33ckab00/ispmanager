@@ -10,23 +10,31 @@ from apps.accounting.models import (
     AccountingSourcePosting,
     AlphanumericTaxCode,
     ChartOfAccount,
+    CutoverPlan,
     CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
     JournalLine,
+    OpeningBalanceImport,
+    OpeningBalanceLine,
     SourceDocumentLink,
     WithholdingTaxClass,
 )
 from apps.accounting.services import (
+    build_cutover_readiness,
     create_accounting_foundation,
+    create_cutover_plan,
     create_credit_adjustment_source_draft,
     create_invoice_source_draft,
     create_invoice_void_source_draft,
     create_invoice_waiver_source_draft,
     create_manual_journal_entry,
+    create_opening_balance_journal,
     create_payment_source_draft,
     post_journal_entry,
+    refresh_opening_balance_totals,
     retry_source_posting,
     seed_bir_atc_codes,
+    validate_opening_balance_import,
 )
 from apps.billing.models import AccountCreditAdjustment, Invoice, Payment, PaymentAllocation
 from apps.subscribers.models import Subscriber
@@ -151,6 +159,118 @@ class AccountingV2FoundationTests(TestCase):
 
         with self.assertRaisesMessage(ValidationError, 'either a debit or a credit'):
             bad_line.full_clean()
+
+
+class AccountingV2CutoverTests(TestCase):
+    def _foundation(self):
+        return create_accounting_foundation(
+            entity_name='Cutover ISP',
+            template_key='isp_non_vat_sole_prop',
+            fiscal_year=2026,
+        )['entity']
+
+    def _plan(self, entity):
+        return create_cutover_plan(entity, date(2026, 1, 1))[0]
+
+    def _import_batch(self, entity, plan):
+        return OpeningBalanceImport.objects.create(
+            entity=entity,
+            cutover_plan=plan,
+            import_type='manual',
+        )
+
+    def test_cutover_plan_updates_single_active_plan(self):
+        entity = self._foundation()
+        plan, created = create_cutover_plan(entity, date(2026, 1, 1), notes='initial')
+
+        updated, second_created = create_cutover_plan(entity, date(2026, 2, 1), notes='updated')
+
+        self.assertTrue(created)
+        self.assertFalse(second_created)
+        self.assertEqual(plan.pk, updated.pk)
+        self.assertEqual(CutoverPlan.objects.filter(entity=entity).exclude(status='voided').count(), 1)
+        self.assertEqual(updated.cutover_date, date(2026, 2, 1))
+        self.assertEqual(updated.notes, 'updated')
+
+    def test_opening_balance_line_requires_exactly_one_amount_side(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        line = OpeningBalanceLine(
+            entity=entity,
+            import_batch=import_batch,
+            account=cash,
+            line_type='cash',
+            debit=Decimal('100.00'),
+            credit=Decimal('100.00'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'either a debit or a credit'):
+            line.full_clean()
+
+    def test_unbalanced_opening_import_cannot_create_journal(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=cash,
+            line_type='cash',
+            debit=Decimal('1000.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=capital,
+            line_type='equity',
+            credit=Decimal('900.00'),
+        )
+
+        validated = validate_opening_balance_import(import_batch)
+
+        self.assertEqual(validated.status, 'draft')
+        self.assertIn('unbalanced', validated.validation_errors)
+        with self.assertRaisesMessage(ValidationError, 'balanced and valid'):
+            create_opening_balance_journal(import_batch)
+
+    def test_balanced_opening_import_creates_draft_opening_journal(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=cash,
+            line_type='cash',
+            debit=Decimal('1000.00'),
+            reference='Cash count',
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=capital,
+            line_type='equity',
+            credit=Decimal('1000.00'),
+            reference='Owner capital',
+        )
+
+        refresh_opening_balance_totals(import_batch)
+        validated = validate_opening_balance_import(import_batch)
+        journal_entry = create_opening_balance_journal(validated)
+        readiness = build_cutover_readiness(entity)
+
+        self.assertEqual(validated.status, 'validated')
+        self.assertEqual(journal_entry.status, 'draft')
+        self.assertEqual(journal_entry.source_type, 'opening_balance')
+        self.assertTrue(journal_entry.is_balanced())
+        self.assertEqual(journal_entry.lines.count(), 2)
+        self.assertTrue(readiness['all_passed'])
 
 
 class AccountingV2SourcePostingTests(TestCase):

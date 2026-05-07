@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Cutover Readiness - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Cutover Readiness</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ entity }}{% if plan %} · {{ plan.cutover_date }}{% endif %}</p>
+  </div>
+  <div class="flex gap-2">
+    <a href="{% url 'accounting-cutover-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Cutover</a>
+    <a href="{% url 'accounting-trial-balance' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Trial Balance</a>
+  </div>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <div class="flex items-center justify-between">
+    <div>
+      <p class="text-xs text-gray-400 uppercase">Overall Status</p>
+      <p class="text-xl font-bold {% if readiness.all_passed %}text-green-600{% else %}text-orange-600{% endif %}">
+        {% if readiness.all_passed %}Ready for accountant review{% else %}Open items remain{% endif %}
+      </p>
+    </div>
+    {% if readiness.opening_journal %}
+    <a href="{% url 'accounting-journal-detail' readiness.opening_journal.pk %}" class="text-sm text-blue-600 hover:underline">{{ readiness.opening_journal.entry_number }}</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Check</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Detail</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for item in readiness.checks %}
+      <tr>
+        <td class="px-4 py-3 font-medium text-gray-800">{{ item.label }}</td>
+        <td class="px-4 py-3 text-gray-500">{{ item.detail }}</td>
+        <td class="px-4 py-3">
+          <span class="text-xs font-semibold px-2 py-1 rounded-full {% if item.passed %}bg-green-50 text-green-700{% elif item.severity == 'warning' %}bg-yellow-50 text-yellow-700{% else %}bg-red-50 text-red-700{% endif %}">
+            {% if item.passed %}Passed{% elif item.severity == 'warning' %}Warning{% else %}Failed{% endif %}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

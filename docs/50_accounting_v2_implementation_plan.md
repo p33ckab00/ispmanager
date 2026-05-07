@@ -91,6 +91,9 @@ Slice 2 planning is recorded in
 `docs/55_accounting_v2_slice_2_cutover_opening_balances_plan.md`. It defines
 the cutover/opening balance roadmap, double-counting controls, readiness
 checks, and the first buildable Slice 2A scope.
+Slice 2A is now implemented as the cutover and opening balance foundation:
+`CutoverPlan`, `OpeningBalanceImport`, `OpeningBalanceLine`, manual entry UI,
+validation, draft opening journal generation, and a readiness page.
 
 ## 2. Locked Decisions
 
@@ -293,6 +296,9 @@ The detailed Slice 2 implementation plan is in
 
 Slice 2A should start with cutover plan setup, opening balance imports, opening
 balance lines, balanced draft opening journal generation, and a readiness page.
+That Slice 2A foundation is implemented. Remaining Slice 2 work starts with
+subscriber AR and customer credit reconciliation snapshots, then bank/wallet,
+AP, tax, asset, loan, equity schedules, approval, and live gating.
 
 ### Slice 3 - Financial Statements and Subledgers
 

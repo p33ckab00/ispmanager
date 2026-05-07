@@ -5,7 +5,7 @@ from decimal import Decimal
 from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import F, Sum
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
 
@@ -16,15 +16,19 @@ from apps.accounting.models import (
     AccountingSourcePosting,
     AlphanumericTaxCode,
     ChartOfAccount,
+    CutoverPlan,
     CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
     ExpenseRecord,
     IncomeRecord,
     JournalEntry,
     JournalLine,
+    OpeningBalanceImport,
+    OpeningBalanceLine,
     SourceDocumentLink,
 )
-from apps.billing.models import Payment, PaymentAllocation
+from apps.billing.models import Invoice, Payment, PaymentAllocation
+from apps.billing.services import get_account_credit_for_subscriber
 from apps.accounting.atc_seed import DEFAULT_BIR_ATC_CODES
 
 
@@ -342,6 +346,304 @@ def next_journal_entry_number(entity, entry_date=None, prefix='JV'):
                 + 1
             )
     return f"{stem}{sequence:06d}"
+
+
+def get_active_cutover_plan(entity):
+    if not entity:
+        return None
+    return (
+        CutoverPlan.objects
+        .filter(entity=entity)
+        .exclude(status='voided')
+        .order_by('-cutover_date', '-created_at')
+        .first()
+    )
+
+
+@transaction.atomic
+def create_cutover_plan(entity, cutover_date, prepared_by=None, notes='', source_policy='opening_balances_only_pre_cutover'):
+    plan = get_active_cutover_plan(entity)
+    if plan:
+        plan.cutover_date = cutover_date
+        plan.source_policy = source_policy
+        plan.notes = notes
+        if prepared_by and not plan.prepared_by_id:
+            plan.prepared_by = prepared_by
+        plan.full_clean()
+        plan.save(update_fields=[
+            'cutover_date',
+            'source_policy',
+            'notes',
+            'prepared_by',
+            'updated_at',
+        ])
+        return plan, False
+
+    plan = CutoverPlan(
+        entity=entity,
+        cutover_date=cutover_date,
+        source_policy=source_policy,
+        prepared_by=prepared_by,
+        notes=notes,
+    )
+    plan.full_clean()
+    plan.save()
+    return plan, True
+
+
+def refresh_opening_balance_totals(import_batch):
+    totals = import_batch.lines.aggregate(
+        debit_total=Sum('debit'),
+        credit_total=Sum('credit'),
+    )
+    import_batch.total_debit = totals['debit_total'] or Decimal('0.00')
+    import_batch.total_credit = totals['credit_total'] or Decimal('0.00')
+    import_batch.save(update_fields=['total_debit', 'total_credit', 'updated_at'])
+    return import_batch
+
+
+def _validation_message(exc):
+    if hasattr(exc, 'messages'):
+        return '; '.join(exc.messages)
+    return str(exc)
+
+
+@transaction.atomic
+def validate_opening_balance_import(import_batch):
+    import_batch = (
+        OpeningBalanceImport.objects
+        .select_for_update()
+        .select_related('cutover_plan')
+        .get(pk=import_batch.pk)
+    )
+    if import_batch.status in ('journal_created', 'posted', 'voided') or import_batch.journal_entry_id:
+        raise ValidationError('Opening balance imports linked to a journal are read-only.')
+    refresh_opening_balance_totals(import_batch)
+    errors = []
+    lines = list(import_batch.lines.select_related('account', 'subscriber').order_by('id'))
+
+    for line in lines:
+        try:
+            line.full_clean()
+        except ValidationError as exc:
+            message = _validation_message(exc)
+            line.validation_status = 'error'
+            line.validation_message = message
+            line.save(update_fields=['validation_status', 'validation_message', 'updated_at'])
+            errors.append(f"Line {line.pk}: {message}")
+            continue
+
+        if not line.account.is_active:
+            message = f"Account {line.account.code} is inactive."
+            line.validation_status = 'error'
+            line.validation_message = message
+            line.save(update_fields=['validation_status', 'validation_message', 'updated_at'])
+            errors.append(f"Line {line.pk}: {message}")
+            continue
+
+        line.validation_status = 'valid'
+        line.validation_message = ''
+        line.save(update_fields=['validation_status', 'validation_message', 'updated_at'])
+
+    if len(lines) < 2:
+        errors.append('Opening balance import needs at least two lines.')
+    if import_batch.total_debit != import_batch.total_credit:
+        errors.append(
+            f"Opening balance import is unbalanced by {import_batch.difference}."
+        )
+
+    import_batch.validation_errors = '\n'.join(errors)
+    if errors:
+        import_batch.status = 'draft'
+    elif import_batch.journal_entry_id:
+        import_batch.status = 'journal_created'
+    else:
+        import_batch.status = 'validated'
+    import_batch.save(update_fields=[
+        'status',
+        'validation_errors',
+        'total_debit',
+        'total_credit',
+        'updated_at',
+    ])
+    return import_batch
+
+
+@transaction.atomic
+def create_opening_balance_journal(import_batch, created_by=None):
+    import_batch = (
+        OpeningBalanceImport.objects
+        .select_for_update()
+        .select_related('cutover_plan')
+        .get(pk=import_batch.pk)
+    )
+    if import_batch.status == 'voided':
+        raise ValidationError('Voided opening balance imports cannot create journals.')
+    if import_batch.journal_entry_id:
+        return import_batch.journal_entry
+
+    import_batch = validate_opening_balance_import(import_batch)
+    if import_batch.validation_errors or not import_batch.is_balanced:
+        raise ValidationError('Opening balance import must be balanced and valid before journal creation.')
+
+    entry_date = import_batch.cutover_plan.cutover_date
+    period = find_period_for_date(import_batch.entity, entry_date)
+    journal_entry = JournalEntry.objects.create(
+        entity=import_batch.entity,
+        period=period,
+        entry_number=next_journal_entry_number(import_batch.entity, entry_date, prefix='OB'),
+        entry_date=entry_date,
+        description=f"Opening balances as of {entry_date}",
+        reference=f"CUTOVER-{entry_date:%Y%m%d}",
+        source_type='opening_balance',
+        source_document_number=str(import_batch.pk),
+        created_by=created_by,
+    )
+    lines = list(import_batch.lines.select_related('account').order_by('id'))
+    for index, line in enumerate(lines, start=1):
+        journal_line = JournalLine(
+            journal_entry=journal_entry,
+            account=line.account,
+            line_number=index,
+            description=line.description or line.reference or line.get_line_type_display(),
+            debit=line.debit,
+            credit=line.credit,
+        )
+        journal_line.full_clean()
+        journal_line.save()
+
+    import_batch.journal_entry = journal_entry
+    import_batch.status = 'journal_created'
+    import_batch.validation_errors = ''
+    import_batch.save(update_fields=['journal_entry', 'status', 'validation_errors', 'updated_at'])
+    return journal_entry
+
+
+def _open_invoice_total_as_of(cutover_date):
+    invoices = Invoice.objects.filter(
+        created_at__date__lte=cutover_date,
+        status__in=['open', 'partial', 'overdue'],
+    ).select_related('subscriber')
+    return sum((max(invoice.remaining_balance, Decimal('0.00')) for invoice in invoices), Decimal('0.00'))
+
+
+def _customer_advance_total():
+    from apps.subscribers.models import Subscriber
+
+    total = Decimal('0.00')
+    for subscriber in Subscriber.objects.filter(payments__isnull=False).distinct():
+        total += get_account_credit_for_subscriber(subscriber)
+    return total
+
+
+def _opening_line_total(plan, line_types, account_codes=None):
+    qs = OpeningBalanceLine.objects.filter(
+        import_batch__cutover_plan=plan,
+        import_batch__status__in=['validated', 'journal_created', 'posted'],
+        line_type__in=line_types,
+    )
+    if account_codes:
+        qs = qs.filter(account__code__in=account_codes)
+    totals = qs.aggregate(debit_total=Sum('debit'), credit_total=Sum('credit'))
+    return (totals['debit_total'] or Decimal('0.00')) - (totals['credit_total'] or Decimal('0.00'))
+
+
+def build_cutover_readiness(entity):
+    checks = []
+
+    def add(key, label, passed, detail='', severity='error'):
+        checks.append({
+            'key': key,
+            'label': label,
+            'passed': bool(passed),
+            'detail': detail,
+            'severity': severity,
+        })
+
+    add('entity', 'Active accounting entity exists', bool(entity), str(entity) if entity else 'Run Accounting v2 setup first.')
+    if not entity:
+        return {'checks': checks, 'all_passed': False, 'plan': None}
+
+    account_count = ChartOfAccount.objects.filter(entity=entity, is_active=True).count()
+    add('coa', 'Active chart of accounts exists', account_count > 0, f"{account_count} active account(s).")
+
+    plan = get_active_cutover_plan(entity)
+    add('cutover_plan', 'Cutover plan exists', bool(plan), str(plan) if plan else 'Create a cutover plan.')
+    if not plan:
+        return {'checks': checks, 'all_passed': False, 'plan': None}
+
+    period = AccountingPeriod.objects.filter(
+        entity=entity,
+        start_date__lte=plan.cutover_date,
+        end_date__gte=plan.cutover_date,
+    ).first()
+    add('period', 'Accounting period covers cutover date', bool(period), period.name if period else str(plan.cutover_date))
+
+    imports = OpeningBalanceImport.objects.filter(cutover_plan=plan)
+    add('opening_import', 'Opening balance import exists', imports.exists(), f"{imports.count()} import batch(es).")
+
+    balanced_import = imports.filter(
+        status__in=['validated', 'journal_created', 'posted'],
+        total_debit=F('total_credit'),
+    ).first()
+    add(
+        'balanced_import',
+        'Opening balance import is balanced',
+        bool(balanced_import),
+        f"Debit {balanced_import.total_debit} / Credit {balanced_import.total_credit}" if balanced_import else 'Validate a balanced import.',
+    )
+
+    opening_journal = (
+        JournalEntry.objects
+        .filter(entity=entity, source_type='opening_balance', entry_date=plan.cutover_date)
+        .order_by('-created_at')
+        .first()
+    )
+    add(
+        'opening_journal',
+        'Opening journal draft exists',
+        bool(opening_journal),
+        opening_journal.entry_number if opening_journal else 'Create the opening journal from a balanced import.',
+    )
+    add(
+        'opening_journal_balanced',
+        'Opening journal is balanced',
+        bool(opening_journal and opening_journal.is_balanced()),
+        opening_journal.get_status_display() if opening_journal else 'No opening journal yet.',
+    )
+
+    inactive_lines = OpeningBalanceLine.objects.filter(import_batch__cutover_plan=plan, account__is_active=False).count()
+    add('active_accounts', 'Opening lines use active accounts', inactive_lines == 0, f"{inactive_lines} inactive-account line(s).")
+
+    open_ar_total = _open_invoice_total_as_of(plan.cutover_date)
+    opening_ar_total = _opening_line_total(plan, ['subscriber_ar', 'gl_control'], ['1100'])
+    add(
+        'subscriber_ar_present',
+        'Subscriber AR opening line is present when open invoices exist',
+        open_ar_total == Decimal('0.00') or opening_ar_total > Decimal('0.00'),
+        f"Open billing AR {open_ar_total}; opening AR {opening_ar_total}.",
+        severity='warning',
+    )
+
+    customer_advance_total = _customer_advance_total()
+    opening_advance_total = abs(_opening_line_total(plan, ['customer_advance', 'gl_control'], ['2100']))
+    add(
+        'customer_advances_present',
+        'Customer advance opening line is present when credits exist',
+        customer_advance_total == Decimal('0.00') or opening_advance_total > Decimal('0.00'),
+        f"Current customer credits {customer_advance_total}; opening advances {opening_advance_total}.",
+        severity='warning',
+    )
+
+    all_passed = all(item['passed'] for item in checks if item['severity'] == 'error')
+    return {
+        'checks': checks,
+        'all_passed': all_passed,
+        'plan': plan,
+        'opening_journal': opening_journal,
+        'open_ar_total': open_ar_total,
+        'customer_advance_total': customer_advance_total,
+    }
 
 
 def _resolve_account(entity, account):

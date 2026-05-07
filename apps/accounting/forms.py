@@ -1,14 +1,20 @@
-from django import forms
 from decimal import Decimal
+
+from django import forms
 
 from apps.accounting.models import (
     AlphanumericTaxCode,
+    ChartOfAccount,
+    CutoverPlan,
     ExpenseRecord,
     IncomeRecord,
     JournalEntry,
+    OpeningBalanceImport,
+    OpeningBalanceLine,
     WithholdingTaxClass,
 )
 from apps.accounting.services import available_coa_templates
+from apps.subscribers.models import Subscriber
 
 
 class AccountingSetupForm(forms.Form):
@@ -36,6 +42,58 @@ class JournalEntryHeaderForm(forms.ModelForm):
             'description': forms.TextInput(attrs={'placeholder': 'Manual journal description'}),
             'reference': forms.TextInput(attrs={'placeholder': 'Optional reference'}),
         }
+
+
+class CutoverPlanForm(forms.ModelForm):
+    class Meta:
+        model = CutoverPlan
+        fields = ['cutover_date', 'source_policy', 'notes']
+        widgets = {
+            'cutover_date': forms.DateInput(attrs={'type': 'date'}),
+            'notes': forms.Textarea(attrs={'rows': 4}),
+        }
+
+
+class OpeningBalanceImportForm(forms.ModelForm):
+    class Meta:
+        model = OpeningBalanceImport
+        fields = ['import_type', 'source_filename', 'source_hash']
+        widgets = {
+            'source_filename': forms.TextInput(attrs={'placeholder': 'Optional source file or worksheet name'}),
+            'source_hash': forms.TextInput(attrs={'placeholder': 'Optional checksum or file hash'}),
+        }
+
+
+class OpeningBalanceLineForm(forms.ModelForm):
+    class Meta:
+        model = OpeningBalanceLine
+        fields = [
+            'line_type',
+            'account',
+            'debit',
+            'credit',
+            'subscriber',
+            'vendor_name',
+            'reference',
+            'description',
+        ]
+        widgets = {
+            'vendor_name': forms.TextInput(attrs={'placeholder': 'Required for AP vendor lines'}),
+            'reference': forms.TextInput(attrs={'placeholder': 'Statement, invoice, subscriber, or schedule reference'}),
+            'description': forms.TextInput(attrs={'placeholder': 'Opening balance description'}),
+        }
+
+    def __init__(self, *args, entity=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['account'].queryset = ChartOfAccount.objects.none()
+        if entity:
+            self.fields['account'].queryset = ChartOfAccount.objects.filter(
+                entity=entity,
+                is_active=True,
+            ).order_by('code')
+        self.fields['subscriber'].queryset = Subscriber.objects.order_by('username')
+        self.fields['subscriber'].required = False
+        self.fields['subscriber'].empty_label = 'No subscriber'
 
 
 class IncomeForm(forms.ModelForm):

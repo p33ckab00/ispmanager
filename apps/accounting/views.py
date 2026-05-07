@@ -14,27 +14,38 @@ from apps.accounting.models import (
     AccountingSourcePosting,
     AlphanumericTaxCode,
     ChartOfAccount,
+    CutoverPlan,
     CustomerWithholdingTaxClaim,
     ExpenseRecord,
     IncomeRecord,
     JournalEntry,
+    OpeningBalanceImport,
     WithholdingTaxClass,
 )
 from apps.accounting.forms import (
     AccountingSetupForm,
+    CutoverPlanForm,
     ExpenseForm,
     IncomeForm,
     JournalEntryHeaderForm,
+    OpeningBalanceImportForm,
+    OpeningBalanceLineForm,
     WithholdingTaxClassForm,
 )
 from apps.accounting.services import (
+    build_cutover_readiness,
     create_accounting_foundation,
+    create_cutover_plan,
     create_manual_journal_entry,
+    create_opening_balance_journal,
+    get_active_cutover_plan,
     post_journal_entry,
+    refresh_opening_balance_totals,
     retry_source_posting,
     sync_payments_to_income,
     get_monthly_summary,
     get_totals,
+    validate_opening_balance_import,
 )
 from apps.core.models import AuditLog
 
@@ -76,6 +87,7 @@ def _accounting_context():
             Q(entity=entity) | Q(entity__isnull=True),
             status__in=['customer_claimed', 'pending_2307'],
         ).count() if entity else 0,
+        'active_cutover_plan': get_active_cutover_plan(entity) if entity else None,
         'open_period': open_period,
     }
 
@@ -422,6 +434,269 @@ def source_posting_retry(request, pk):
     except ValidationError as exc:
         messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
     return redirect('accounting-source-review')
+
+
+@login_required
+def cutover_dashboard(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_cutoverplan')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+
+    plan = get_active_cutover_plan(entity)
+    imports = OpeningBalanceImport.objects.none()
+    if plan:
+        imports = (
+            OpeningBalanceImport.objects
+            .filter(cutover_plan=plan)
+            .select_related('journal_entry')
+            .order_by('-created_at')
+        )
+    readiness = build_cutover_readiness(entity)
+    return render(request, 'accounting/cutover_dashboard.html', {
+        'entity': entity,
+        'plan': plan,
+        'imports': imports,
+        'readiness': readiness,
+    })
+
+
+@login_required
+def cutover_setup(request):
+    permission_check = _require_accounting_perm(request, 'accounting.manage_cutoverplan', 'accounting-cutover-dashboard')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    plan = get_active_cutover_plan(entity)
+
+    if request.method == 'POST':
+        form = CutoverPlanForm(request.POST, instance=plan)
+        if form.is_valid():
+            try:
+                plan, created = create_cutover_plan(
+                    entity,
+                    form.cleaned_data['cutover_date'],
+                    prepared_by=request.user,
+                    notes=form.cleaned_data['notes'],
+                    source_policy=form.cleaned_data['source_policy'],
+                )
+                AuditLog.log(
+                    'create' if created else 'update',
+                    'accounting',
+                    f"Cutover plan {'created' if created else 'updated'}: {plan.cutover_date}",
+                    user=request.user,
+                )
+                messages.success(request, 'Cutover plan saved.')
+                return redirect('accounting-cutover-dashboard')
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        form = CutoverPlanForm(instance=plan, initial={'cutover_date': date.today()})
+
+    return render(request, 'accounting/cutover_setup.html', {
+        'entity': entity,
+        'plan': plan,
+        'form': form,
+    })
+
+
+@login_required
+def opening_balance_import_add(request):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_openingbalanceimport',
+        'accounting-cutover-dashboard',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    plan = get_active_cutover_plan(entity)
+    if not plan:
+        messages.info(request, 'Create a cutover plan before entering opening balances.')
+        return redirect('accounting-cutover-setup')
+
+    if request.method == 'POST':
+        form = OpeningBalanceImportForm(request.POST)
+        if form.is_valid():
+            import_batch = form.save(commit=False)
+            import_batch.entity = entity
+            import_batch.cutover_plan = plan
+            import_batch.created_by = request.user
+            try:
+                import_batch.full_clean()
+                import_batch.save()
+                AuditLog.log(
+                    'create',
+                    'accounting',
+                    f"Opening balance import created for {plan.cutover_date}",
+                    user=request.user,
+                )
+                messages.success(request, 'Opening balance import created.')
+                return redirect('accounting-opening-balance-import-detail', pk=import_batch.pk)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        form = OpeningBalanceImportForm(initial={'import_type': 'manual'})
+
+    return render(request, 'accounting/opening_balance_import_form.html', {
+        'entity': entity,
+        'plan': plan,
+        'form': form,
+    })
+
+
+@login_required
+def opening_balance_import_detail(request, pk):
+    permission_check = _require_accounting_perm(request, 'accounting.view_openingbalanceimport')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    import_batch = get_object_or_404(
+        OpeningBalanceImport.objects.select_related('cutover_plan', 'journal_entry'),
+        entity=entity,
+        pk=pk,
+    )
+    lines = import_batch.lines.select_related('account', 'subscriber').order_by('id')
+    return render(request, 'accounting/opening_balance_import_detail.html', {
+        'entity': entity,
+        'import_batch': import_batch,
+        'plan': import_batch.cutover_plan,
+        'lines': lines,
+        'can_edit': not import_batch.journal_entry_id and import_batch.status not in ('journal_created', 'posted', 'voided'),
+    })
+
+
+@login_required
+def opening_balance_line_add(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_openingbalanceimport',
+        'accounting-cutover-dashboard',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    import_batch = get_object_or_404(
+        OpeningBalanceImport.objects.select_related('cutover_plan', 'journal_entry'),
+        entity=entity,
+        pk=pk,
+    )
+    if import_batch.journal_entry_id or import_batch.status in ('journal_created', 'posted', 'voided'):
+        messages.error(request, 'This opening balance import is read-only.')
+        return redirect('accounting-opening-balance-import-detail', pk=import_batch.pk)
+
+    if request.method == 'POST':
+        form = OpeningBalanceLineForm(request.POST, entity=entity)
+        if form.is_valid():
+            line = form.save(commit=False)
+            line.import_batch = import_batch
+            line.entity = entity
+            try:
+                line.full_clean()
+                line.save()
+                refresh_opening_balance_totals(import_batch)
+                AuditLog.log(
+                    'create',
+                    'accounting',
+                    f"Opening balance line added: {line.account.code}",
+                    user=request.user,
+                )
+                messages.success(request, 'Opening balance line added.')
+                return redirect('accounting-opening-balance-import-detail', pk=import_batch.pk)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        form = OpeningBalanceLineForm(entity=entity)
+
+    return render(request, 'accounting/opening_balance_line_form.html', {
+        'entity': entity,
+        'plan': import_batch.cutover_plan,
+        'import_batch': import_batch,
+        'form': form,
+    })
+
+
+@login_required
+def opening_balance_import_validate(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_openingbalanceimport',
+        'accounting-cutover-dashboard',
+    )
+    if permission_check is not True:
+        return permission_check
+    if request.method != 'POST':
+        return redirect('accounting-opening-balance-import-detail', pk=pk)
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    import_batch = get_object_or_404(OpeningBalanceImport, entity=entity, pk=pk)
+    try:
+        validate_opening_balance_import(import_batch)
+        import_batch.refresh_from_db()
+        if import_batch.validation_errors:
+            messages.warning(request, 'Opening balance import still has validation issues.')
+        else:
+            messages.success(request, 'Opening balance import is balanced and validated.')
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-opening-balance-import-detail', pk=pk)
+
+
+@login_required
+def opening_balance_import_create_journal(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_openingbalanceimport',
+        'accounting-cutover-dashboard',
+    )
+    if permission_check is not True:
+        return permission_check
+    if request.method != 'POST':
+        return redirect('accounting-opening-balance-import-detail', pk=pk)
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    import_batch = get_object_or_404(OpeningBalanceImport, entity=entity, pk=pk)
+    try:
+        journal_entry = create_opening_balance_journal(import_batch, created_by=request.user)
+        AuditLog.log(
+            'create',
+            'accounting',
+            f"Opening balance journal created: {journal_entry.entry_number}",
+            user=request.user,
+        )
+        messages.success(request, 'Draft opening journal created.')
+        return redirect('accounting-journal-detail', pk=journal_entry.pk)
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-opening-balance-import-detail', pk=pk)
+
+
+@login_required
+def cutover_readiness(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_cutoverplan')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    readiness = build_cutover_readiness(entity)
+    return render(request, 'accounting/cutover_readiness.html', {
+        'entity': entity,
+        'readiness': readiness,
+        'plan': readiness.get('plan'),
+    })
 
 
 @login_required

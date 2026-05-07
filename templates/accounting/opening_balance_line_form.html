@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Opening Balance Line - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <a href="{% url 'accounting-opening-balance-import-detail' import_batch.pk %}" class="text-sm text-blue-600 hover:underline"><i class="fa fa-arrow-left mr-1"></i> Back to Opening Balances</a>
+</div>
+<div class="mb-6">
+  <h2 class="text-2xl font-bold text-gray-800">Add Opening Balance Line</h2>
+  <p class="text-gray-500 text-sm mt-1">Cutover date: {{ plan.cutover_date }}</p>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-5xl">
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="bg-red-50 border border-red-100 rounded-lg p-3 text-sm text-red-700">{{ form.non_field_errors }}</div>
+    {% endif %}
+    <div class="grid gap-4 md:grid-cols-2">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.line_type.label }}</label>
+        {{ form.line_type }}
+        {% if form.line_type.errors %}<p class="text-red-500 text-xs mt-1">{{ form.line_type.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.account.label }}</label>
+        {{ form.account }}
+        {% if form.account.errors %}<p class="text-red-500 text-xs mt-1">{{ form.account.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.debit.label }}</label>
+        {{ form.debit }}
+        {% if form.debit.errors %}<p class="text-red-500 text-xs mt-1">{{ form.debit.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.credit.label }}</label>
+        {{ form.credit }}
+        {% if form.credit.errors %}<p class="text-red-500 text-xs mt-1">{{ form.credit.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.subscriber.label }}</label>
+        {{ form.subscriber }}
+        {% if form.subscriber.errors %}<p class="text-red-500 text-xs mt-1">{{ form.subscriber.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.vendor_name.label }}</label>
+        {{ form.vendor_name }}
+        {% if form.vendor_name.errors %}<p class="text-red-500 text-xs mt-1">{{ form.vendor_name.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.reference.label }}</label>
+        {{ form.reference }}
+        {% if form.reference.errors %}<p class="text-red-500 text-xs mt-1">{{ form.reference.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.description.label }}</label>
+        {{ form.description }}
+        {% if form.description.errors %}<p class="text-red-500 text-xs mt-1">{{ form.description.errors.0 }}</p>{% endif %}
+      </div>
+    </div>
+    <div class="flex gap-3">
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm">Add Line</button>
+      <a href="{% url 'accounting-opening-balance-import-detail' import_batch.pk %}" class="text-sm text-gray-500 px-3 py-2">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Cutover Setup - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <a href="{% url 'accounting-cutover-dashboard' %}" class="text-sm text-blue-600 hover:underline"><i class="fa fa-arrow-left mr-1"></i> Back to Cutover</a>
+</div>
+<div class="mb-6">
+  <h2 class="text-2xl font-bold text-gray-800">Cutover Setup</h2>
+  <p class="text-gray-500 text-sm mt-1">{{ entity }}</p>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 max-w-3xl">
+  <form method="post" class="space-y-4">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="bg-red-50 border border-red-100 rounded-lg p-3 text-sm text-red-700">{{ form.non_field_errors }}</div>
+    {% endif %}
+    <div class="grid gap-4 md:grid-cols-2">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.cutover_date.label }}</label>
+        {{ form.cutover_date }}
+        {% if form.cutover_date.errors %}<p class="text-red-500 text-xs mt-1">{{ form.cutover_date.errors.0 }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.source_policy.label }}</label>
+        {{ form.source_policy }}
+        {% if form.source_policy.errors %}<p class="text-red-500 text-xs mt-1">{{ form.source_policy.errors.0 }}</p>{% endif %}
+      </div>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">{{ form.notes.label }}</label>
+      {{ form.notes }}
+      {% if form.notes.errors %}<p class="text-red-500 text-xs mt-1">{{ form.notes.errors.0 }}</p>{% endif %}
+    </div>
+    <div class="flex gap-3">
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm">Save Cutover Plan</button>
+      <a href="{% url 'accounting-cutover-dashboard' %}" class="text-sm text-gray-500 px-3 py-2">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -487,6 +487,303 @@ class AccountingSourcePosting(models.Model):
         return f"{self.source_app}.{self.source_model}:{self.source_id} - {self.status}"
 
 
+class CutoverPlan(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('reconciling', 'Reconciling'),
+        ('ready_for_review', 'Ready for Review'),
+        ('approved', 'Approved'),
+        ('live', 'Live'),
+        ('voided', 'Voided'),
+    ]
+    SOURCE_POLICY_CHOICES = [
+        ('opening_balances_only_pre_cutover', 'Opening balances only before cutover'),
+        ('source_backfill_review_only', 'Pre-cutover source backfill for review only'),
+        ('manual', 'Manual policy'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='cutover_plans',
+    )
+    cutover_date = models.DateField()
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='draft')
+    source_policy = models.CharField(
+        max_length=50,
+        choices=SOURCE_POLICY_CHOICES,
+        default='opening_balances_only_pre_cutover',
+    )
+    prepared_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='prepared_cutover_plans',
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_cutover_plans',
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_cutover_plans',
+    )
+    notes = models.TextField(blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    live_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-cutover_date', '-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['entity'],
+                condition=~Q(status='voided'),
+                name='accounting_one_active_cutover_plan',
+            ),
+        ]
+        permissions = [
+            ('manage_cutoverplan', 'Can manage Accounting v2 cutover plan'),
+        ]
+
+    def clean(self):
+        if self.approved_at and self.status not in ('approved', 'live'):
+            raise ValidationError('Only approved or live cutover plans can have an approval timestamp.')
+        if self.live_at and self.status != 'live':
+            raise ValidationError('Only live cutover plans can have a live timestamp.')
+
+    def __str__(self):
+        return f"{self.entity} cutover {self.cutover_date}"
+
+
+class OpeningBalanceImport(models.Model):
+    IMPORT_TYPE_CHOICES = [
+        ('manual', 'Manual Entry'),
+        ('csv', 'CSV Upload'),
+        ('xlsx', 'XLSX Upload'),
+        ('system_snapshot', 'System Snapshot'),
+    ]
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('validated', 'Validated'),
+        ('journal_created', 'Journal Created'),
+        ('posted', 'Posted'),
+        ('voided', 'Voided'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='opening_balance_imports',
+    )
+    cutover_plan = models.ForeignKey(
+        CutoverPlan,
+        on_delete=models.PROTECT,
+        related_name='opening_balance_imports',
+    )
+    journal_entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='opening_balance_imports',
+    )
+    import_type = models.CharField(max_length=30, choices=IMPORT_TYPE_CHOICES, default='manual')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='draft')
+    source_filename = models.CharField(max_length=255, blank=True)
+    source_hash = models.CharField(max_length=128, blank=True)
+    total_debit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    total_credit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    validation_errors = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_opening_balance_imports',
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_opening_balance_imports',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        permissions = [
+            ('manage_openingbalanceimport', 'Can manage opening balance imports'),
+        ]
+
+    @property
+    def difference(self):
+        return (self.total_debit or MONEY_ZERO) - (self.total_credit or MONEY_ZERO)
+
+    @property
+    def is_balanced(self):
+        return self.lines.exists() and self.difference == MONEY_ZERO
+
+    @property
+    def has_locked_journal(self):
+        return (
+            self.journal_entry_id
+            and self.journal_entry.status in JournalEntry.IMMUTABLE_STATUSES
+        )
+
+    def clean(self):
+        if self.cutover_plan_id and self.entity_id and self.cutover_plan.entity_id != self.entity_id:
+            raise ValidationError('Opening balance import must use the same entity as the cutover plan.')
+        if self.journal_entry_id and self.entity_id and self.journal_entry.entity_id != self.entity_id:
+            raise ValidationError('Opening balance journal must belong to the same entity.')
+        if self.status == 'posted' and not self.journal_entry_id:
+            raise ValidationError('Posted opening balance imports must be linked to a journal entry.')
+
+    def _assert_mutable(self):
+        if not self.pk:
+            return
+        old = (
+            OpeningBalanceImport.objects
+            .select_related('journal_entry')
+            .filter(pk=self.pk)
+            .first()
+        )
+        if old and (old.status in ('journal_created', 'posted', 'voided') or old.journal_entry_id):
+            raise ValidationError('Opening balance imports linked to a journal are read-only.')
+
+    def save(self, *args, **kwargs):
+        self._assert_mutable()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.status in ('journal_created', 'posted', 'voided') or self.journal_entry_id:
+            raise ValidationError('Opening balance imports linked to a journal cannot be deleted.')
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.get_import_type_display()} opening balances for {self.cutover_plan.cutover_date}"
+
+
+class OpeningBalanceLine(models.Model):
+    LINE_TYPE_CHOICES = [
+        ('gl_control', 'GL Control'),
+        ('subscriber_ar', 'Subscriber AR'),
+        ('customer_advance', 'Customer Advance'),
+        ('cash', 'Cash'),
+        ('bank', 'Bank'),
+        ('wallet_gateway', 'Wallet / Gateway'),
+        ('ap_vendor', 'AP Vendor'),
+        ('inventory', 'Inventory'),
+        ('fixed_asset', 'Fixed Asset'),
+        ('accumulated_depreciation', 'Accumulated Depreciation'),
+        ('tax', 'Tax'),
+        ('loan', 'Loan'),
+        ('equity', 'Equity'),
+        ('other', 'Other'),
+    ]
+    VALIDATION_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('valid', 'Valid'),
+        ('warning', 'Warning'),
+        ('error', 'Error'),
+    ]
+
+    import_batch = models.ForeignKey(
+        OpeningBalanceImport,
+        on_delete=models.CASCADE,
+        related_name='lines',
+    )
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='opening_balance_lines',
+    )
+    account = models.ForeignKey(
+        ChartOfAccount,
+        on_delete=models.PROTECT,
+        related_name='opening_balance_lines',
+    )
+    line_type = models.CharField(max_length=40, choices=LINE_TYPE_CHOICES, default='gl_control')
+    debit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    credit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    subscriber = models.ForeignKey(
+        'subscribers.Subscriber',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='opening_balance_lines',
+    )
+    vendor_name = models.CharField(max_length=255, blank=True)
+    reference = models.CharField(max_length=255, blank=True)
+    description = models.CharField(max_length=255, blank=True)
+    source_object_type = models.CharField(max_length=80, blank=True)
+    source_object_id = models.CharField(max_length=80, blank=True)
+    validation_status = models.CharField(
+        max_length=20,
+        choices=VALIDATION_STATUS_CHOICES,
+        default='pending',
+    )
+    validation_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['import_batch', 'id']
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    Q(debit__gt=0, credit=MONEY_ZERO)
+                    | Q(credit__gt=0, debit=MONEY_ZERO)
+                ),
+                name='accounting_opening_balance_line_one_side',
+            ),
+        ]
+
+    def clean(self):
+        debit = self.debit or MONEY_ZERO
+        credit = self.credit or MONEY_ZERO
+        if (debit > MONEY_ZERO and credit > MONEY_ZERO) or (debit <= MONEY_ZERO and credit <= MONEY_ZERO):
+            raise ValidationError('Opening balance line must have either a debit or a credit amount, not both.')
+        if self.import_batch_id and self.entity_id and self.import_batch.entity_id != self.entity_id:
+            raise ValidationError('Opening balance line must use the same entity as the import batch.')
+        if self.account_id and self.entity_id and self.account.entity_id != self.entity_id:
+            raise ValidationError('Opening balance line account must belong to the same entity.')
+        if self.line_type in ('subscriber_ar', 'customer_advance') and not self.subscriber_id:
+            raise ValidationError('Subscriber AR and customer advance opening lines require a subscriber.')
+        if self.line_type == 'ap_vendor' and not self.vendor_name:
+            raise ValidationError('AP vendor opening lines require a vendor name.')
+
+    def _assert_import_mutable(self):
+        if not self.import_batch_id:
+            return
+        import_batch = OpeningBalanceImport.objects.select_related('journal_entry').get(pk=self.import_batch_id)
+        if import_batch.status in ('journal_created', 'posted', 'voided') or import_batch.journal_entry_id:
+            raise ValidationError('Opening balance lines linked to a journal are read-only.')
+
+    def save(self, *args, **kwargs):
+        self._assert_import_mutable()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._assert_import_mutable()
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        side = 'Dr' if self.debit else 'Cr'
+        amount = self.debit or self.credit
+        return f"{side} {self.account.code} {amount}"
+
+
 class AlphanumericTaxCode(models.Model):
     TAX_FAMILY_CHOICES = [
         ('expanded_withholding_tax', 'Expanded Withholding Tax'),

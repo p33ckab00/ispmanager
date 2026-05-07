@@ -42,13 +42,14 @@
       <a href="{% url 'accounting-chart-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Chart</a>
       <a href="{% url 'accounting-journal-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Journals</a>
       <a href="{% url 'accounting-source-review' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Review</a>
+      <a href="{% url 'accounting-cutover-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Cutover</a>
       <a href="{% url 'accounting-withholding-2307' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">2307</a>
       <a href="{% url 'accounting-withholding-class-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">WHT Classes</a>
       <a href="{% url 'accounting-trial-balance' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Trial Balance</a>
     </div>
   </div>
   {% if accounting_entity %}
-  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mt-5 text-center">
+  <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mt-5 text-center">
     <div class="rounded-lg bg-gray-50 p-3">
       <p class="text-xs text-gray-400 uppercase">Accounts</p>
       <p class="text-xl font-bold text-gray-800">{{ account_count }}</p>
@@ -76,6 +77,10 @@
     <div class="rounded-lg bg-gray-50 p-3">
       <p class="text-xs text-gray-400 uppercase">WHT Classes</p>
       <p class="text-xl font-bold text-gray-800">{{ withholding_class_count }}</p>
+    </div>
+    <div class="rounded-lg bg-gray-50 p-3">
+      <p class="text-xs text-gray-400 uppercase">Cutover</p>
+      <p class="text-sm font-bold text-gray-800">{% if active_cutover_plan %}{{ active_cutover_plan.cutover_date }}{% else %}Not Set{% endif %}</p>
     </div>
   </div>
   {% endif %}

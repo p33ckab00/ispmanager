@@ -27,6 +27,8 @@ class RolePresetTests(TestCase):
         self.assertIn('add_payment', permission_codenames)
         self.assertIn('change_accountcreditadjustment', permission_codenames)
         self.assertIn('add_expenserecord', permission_codenames)
+        self.assertIn('view_cutoverplan', permission_codenames)
+        self.assertIn('view_openingbalanceimport', permission_codenames)
 
     def test_read_only_auditor_gets_only_view_permissions(self):
         sync_permission_group_presets(replace=True)

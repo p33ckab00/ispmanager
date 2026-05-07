@@ -19,6 +19,44 @@ one controlled approach per balance:
 The first buildable implementation should be **Slice 2A: Opening Balance and
 Cutover Foundation**.
 
+## Implementation Status
+
+Slice 2A has been implemented as the cutover/opening balance foundation.
+
+Implemented:
+
+- `CutoverPlan` with one non-voided active plan per accounting entity.
+- `OpeningBalanceImport` batches for manual, CSV, XLSX, and future system
+  snapshot sources.
+- `OpeningBalanceLine` with entity/account validation, line categories,
+  optional subscriber/vendor references, validation status, and a database
+  check that only debit or credit can be entered.
+- Cutover setup page at `/accounting/cutover/setup/`.
+- Cutover dashboard at `/accounting/cutover/`.
+- Opening balance import creation and detail pages.
+- Manual opening balance line entry.
+- Import validation that refreshes debit/credit totals, marks invalid lines,
+  blocks unbalanced batches, and stores validation errors.
+- Draft opening journal generation using source type `opening_balance`.
+- Readiness page at `/accounting/cutover/readiness/`.
+- Accounting dashboard link and cutover status card.
+- Cashier/read-only accounting role presets can view cutover and opening
+  balance records; management actions remain restricted to accounting setup
+  permissions.
+- Focused tests for active plan updates, line one-side validation, unbalanced
+  import blocking, balanced opening journal creation, and readiness.
+
+Still not included in Slice 2A:
+
+- CSV/XLSX upload parsing, even though import source types are reserved.
+- Subscriber AR snapshot records and per-subscriber reconciliation.
+- Customer advance snapshot records based on a frozen cutover calculation.
+- Bank, wallet, AP, inventory, fixed asset, depreciation, tax, loan, and equity
+  detail schedules.
+- Cutover approval/live transition.
+- Post-cutover blocking of pre-cutover source posting double counts.
+- VAT invoice tax breakdown and final VAT cutover reconciliation.
+
 ## Locked Decisions
 
 - Accounting v2 cutover is explicit. No automatic go-live happens just because
@@ -452,17 +490,26 @@ Regression tests:
 
 ## Gaps Found Before Implementation
 
-- No opening balance models exist yet.
-- No cutover date/status exists in `AccountingSettings`.
+Resolved in Slice 2A:
+
+- Opening balance models now exist.
+- Cutover date/status exists in `CutoverPlan`.
+- Manual opening balance batches can validate totals and generate draft opening
+  journals.
+- Readiness checks exist for the foundation, balanced import, draft opening
+  journal, active accounts, and basic AR/credit presence.
+
+Remaining gaps:
+
 - No account mapping table exists beyond service-level default posting codes.
-- No formal subledger snapshot model exists for AR or customer advances.
+- No formal frozen subledger snapshot model exists for AR or customer advances.
 - No bank/wallet statement or settlement model exists yet.
 - No AP, inventory, fixed asset, loan, or depreciation modules exist yet.
 - VAT invoice tax breakdown is still blocked, so VAT cutover can only start
   with manual tax opening balances.
 - 2307 attachments and finalized SAWT/2307 exports are not yet implemented.
 - Source posting backfill now exists, but Slice 2 must prevent pre-cutover
-  backfill from becoming duplicate official GL history.
+  backfill from becoming duplicate official GL history after cutover is live.
 - PostgreSQL test database creation is blocked in the current environment, so
   implementation verification still needs rollback smokes unless DB privileges
   are updated.
@@ -479,3 +526,7 @@ Regression tests:
 - readiness page shows clear pass/fail items
 - docs identify remaining Slice 2B-2E work
 - no existing billing/accounting pages break
+
+Slice 2A completion note: this definition of done is implemented except CSV
+upload parsing, which remains intentionally deferred to a later import-specific
+slice because manual entry is enough for the first cutover foundation.
