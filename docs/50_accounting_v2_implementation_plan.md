@@ -87,6 +87,10 @@ historical source posting.
 Slice 1C-G adds an Accounting-owned BIR ATC catalog seeded from the supplied
 Taxumo screenshot cross-check and BIR RMO references. Withholding classes and
 customer 2307 claims can now link to catalog ATC codes.
+Slice 2 planning is recorded in
+`docs/55_accounting_v2_slice_2_cutover_opening_balances_plan.md`. It defines
+the cutover/opening balance roadmap, double-counting controls, readiness
+checks, and the first buildable Slice 2A scope.
 
 ## 2. Locked Decisions
 
@@ -283,6 +287,12 @@ balance cutover, and no financial statements beyond Trial Balance.
 Add opening balance import, subscriber AR reconciliation, credit reconciliation,
 cash/bank/wallet opening balances, AP, inventory, fixed assets, taxes, loans,
 equity, and go-live readiness checks.
+
+The detailed Slice 2 implementation plan is in
+`docs/55_accounting_v2_slice_2_cutover_opening_balances_plan.md`.
+
+Slice 2A should start with cutover plan setup, opening balance imports, opening
+balance lines, balanced draft opening journal generation, and a readiness page.
 
 ### Slice 3 - Financial Statements and Subledgers
 

@@ -15,6 +15,8 @@ The first browser workspace slice is recorded in
 `docs/52_accounting_v2_slice_1b_workspace_ui.md`.
 The billing/payment draft posting plan is recorded in
 `docs/53_accounting_v2_slice_1c_billing_payment_draft_posting.md`.
+The cutover/opening balances implementation plan is recorded in
+`docs/55_accounting_v2_slice_2_cutover_opening_balances_plan.md`.
 
 ## 1. Conversation Summary
 
