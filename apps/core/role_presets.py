@@ -32,6 +32,8 @@ ROLE_GROUP_PRESETS = {
             ('accounting', 'view_journalline'),
             ('accounting', 'view_accountingsourceposting'),
             ('accounting', 'view_cutoverplan'),
+            ('accounting', 'view_cutoverreconciliationsnapshot'),
+            ('accounting', 'view_cutoversubscriberbalanceline'),
             ('accounting', 'view_openingbalanceimport'),
             ('accounting', 'view_openingbalanceline'),
             ('accounting', 'view_customerwithholdingallocation'),

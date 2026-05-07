@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -11,6 +11,7 @@ from apps.accounting.models import (
     AlphanumericTaxCode,
     ChartOfAccount,
     CutoverPlan,
+    CutoverSubscriberBalanceLine,
     CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
     JournalLine,
@@ -30,6 +31,7 @@ from apps.accounting.services import (
     create_manual_journal_entry,
     create_opening_balance_journal,
     create_payment_source_draft,
+    generate_cutover_reconciliation_snapshot,
     post_journal_entry,
     refresh_opening_balance_totals,
     retry_source_posting,
@@ -271,6 +273,217 @@ class AccountingV2CutoverTests(TestCase):
         self.assertTrue(journal_entry.is_balanced())
         self.assertEqual(journal_entry.lines.count(), 2)
         self.assertTrue(readiness['all_passed'])
+
+
+class AccountingV2CutoverReconciliationTests(TestCase):
+    def _foundation(self):
+        return create_accounting_foundation(
+            entity_name='Reconciliation ISP',
+            template_key='isp_non_vat_sole_prop',
+            fiscal_year=2026,
+        )['entity']
+
+    def _subscriber(self, username='recon-client'):
+        return Subscriber.objects.create(
+            username=username,
+            full_name='Reconciliation Client',
+            status='active',
+            is_billable=True,
+        )
+
+    def _aware(self, year, month, day):
+        return timezone.make_aware(datetime(year, month, day, 12, 0, 0))
+
+    def _invoice(self, subscriber, amount, status='open', created_at=None, period_start=None):
+        invoice = Invoice.objects.create(
+            subscriber=subscriber,
+            period_start=period_start or date(2025, 12, 1),
+            period_end=date(2025, 12, 31),
+            due_date=date(2026, 1, 5),
+            amount=Decimal(str(amount)),
+            rate_snapshot=Decimal(str(amount)),
+            status=status,
+        )
+        if created_at:
+            Invoice.objects.filter(pk=invoice.pk).update(created_at=created_at)
+            invoice.refresh_from_db()
+        return invoice
+
+    def _allocate(self, subscriber, invoice, amount, paid_at, allocated_at=None):
+        payment = Payment.objects.create(
+            subscriber=subscriber,
+            amount=Decimal(str(amount)),
+            method='cash',
+            reference=f'PAY-{invoice.pk}-{amount}',
+            paid_at=paid_at,
+        )
+        allocation = PaymentAllocation.objects.create(
+            payment=payment,
+            invoice=invoice,
+            amount_allocated=Decimal(str(amount)),
+        )
+        PaymentAllocation.objects.filter(pk=allocation.pk).update(created_at=allocated_at or paid_at)
+        return payment, allocation
+
+    def _opening_import(self, entity, plan):
+        return OpeningBalanceImport.objects.create(
+            entity=entity,
+            cutover_plan=plan,
+            import_type='manual',
+        )
+
+    def test_reconciliation_snapshot_matches_ar_and_customer_advances(self):
+        entity = self._foundation()
+        plan = create_cutover_plan(entity, date(2026, 1, 1))[0]
+        subscriber = self._subscriber()
+        invoice = self._invoice(
+            subscriber,
+            Decimal('100.00'),
+            status='partial',
+            created_at=self._aware(2025, 12, 15),
+        )
+        self._allocate(subscriber, invoice, Decimal('30.00'), self._aware(2025, 12, 20))
+        Payment.objects.create(
+            subscriber=subscriber,
+            amount=Decimal('50.00'),
+            method='gcash',
+            reference='ADV-50',
+            paid_at=self._aware(2025, 12, 21),
+        )
+        import_batch = self._opening_import(entity, plan)
+        ar = ChartOfAccount.objects.get(entity=entity, code='1100')
+        advances = ChartOfAccount.objects.get(entity=entity, code='2100')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=ar,
+            line_type='subscriber_ar',
+            subscriber=subscriber,
+            debit=Decimal('70.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=advances,
+            line_type='customer_advance',
+            subscriber=subscriber,
+            credit=Decimal('50.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=capital,
+            line_type='equity',
+            credit=Decimal('20.00'),
+        )
+        refresh_opening_balance_totals(import_batch)
+        validate_opening_balance_import(import_batch)
+
+        snapshot = generate_cutover_reconciliation_snapshot(plan)
+
+        self.assertEqual(snapshot.status, 'reconciled')
+        self.assertEqual(snapshot.ar_source_total, Decimal('70.00'))
+        self.assertEqual(snapshot.ar_opening_total, Decimal('70.00'))
+        self.assertEqual(snapshot.advance_source_total, Decimal('50.00'))
+        self.assertEqual(snapshot.advance_opening_total, Decimal('50.00'))
+        self.assertEqual(
+            set(snapshot.subscriber_lines.values_list('status', flat=True)),
+            {'matched'},
+        )
+
+    def test_reconciliation_snapshot_flags_missing_opening_balance(self):
+        entity = self._foundation()
+        plan = create_cutover_plan(entity, date(2026, 1, 1))[0]
+        subscriber = self._subscriber(username='missing-opening')
+        self._invoice(
+            subscriber,
+            Decimal('100.00'),
+            status='open',
+            created_at=self._aware(2025, 12, 15),
+        )
+
+        snapshot = generate_cutover_reconciliation_snapshot(plan)
+        line = CutoverSubscriberBalanceLine.objects.get(
+            snapshot=snapshot,
+            subscriber=subscriber,
+            balance_type='subscriber_ar',
+        )
+
+        self.assertEqual(snapshot.status, 'generated')
+        self.assertEqual(line.status, 'missing_opening')
+        self.assertEqual(line.source_balance, Decimal('100.00'))
+        self.assertEqual(line.opening_balance, Decimal('0.00'))
+
+    def test_reconciliation_uses_cutover_as_of_dates(self):
+        entity = self._foundation()
+        plan = create_cutover_plan(entity, date(2026, 1, 1))[0]
+        subscriber = self._subscriber(username='as-of-client')
+        invoice = self._invoice(
+            subscriber,
+            Decimal('100.00'),
+            status='paid',
+            created_at=self._aware(2025, 12, 15),
+        )
+        self._allocate(
+            subscriber,
+            invoice,
+            Decimal('100.00'),
+            paid_at=self._aware(2026, 1, 5),
+            allocated_at=self._aware(2026, 1, 5),
+        )
+
+        snapshot = generate_cutover_reconciliation_snapshot(plan)
+        line = CutoverSubscriberBalanceLine.objects.get(
+            snapshot=snapshot,
+            subscriber=subscriber,
+            balance_type='subscriber_ar',
+        )
+
+        self.assertEqual(line.source_balance, Decimal('100.00'))
+        self.assertEqual(line.status, 'missing_opening')
+
+    def test_reconciliation_requires_subscriber_level_matches_not_only_total_match(self):
+        entity = self._foundation()
+        plan = create_cutover_plan(entity, date(2026, 1, 1))[0]
+        source_subscriber = self._subscriber(username='source-only')
+        opening_subscriber = self._subscriber(username='opening-only')
+        self._invoice(
+            source_subscriber,
+            Decimal('100.00'),
+            status='open',
+            created_at=self._aware(2025, 12, 15),
+        )
+        import_batch = self._opening_import(entity, plan)
+        ar = ChartOfAccount.objects.get(entity=entity, code='1100')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=ar,
+            line_type='subscriber_ar',
+            subscriber=opening_subscriber,
+            debit=Decimal('100.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=capital,
+            line_type='equity',
+            credit=Decimal('100.00'),
+        )
+        refresh_opening_balance_totals(import_batch)
+        validate_opening_balance_import(import_batch)
+
+        snapshot = generate_cutover_reconciliation_snapshot(plan)
+
+        self.assertEqual(snapshot.ar_difference, Decimal('0.00'))
+        self.assertEqual(snapshot.status, 'generated')
+        self.assertFalse(snapshot.all_matched)
+        self.assertEqual(
+            set(snapshot.subscriber_lines.values_list('status', flat=True)),
+            {'missing_opening', 'missing_source'},
+        )
 
 
 class AccountingV2SourcePostingTests(TestCase):

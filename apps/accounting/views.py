@@ -15,6 +15,7 @@ from apps.accounting.models import (
     AlphanumericTaxCode,
     ChartOfAccount,
     CutoverPlan,
+    CutoverReconciliationSnapshot,
     CustomerWithholdingTaxClaim,
     ExpenseRecord,
     IncomeRecord,
@@ -38,7 +39,9 @@ from apps.accounting.services import (
     create_cutover_plan,
     create_manual_journal_entry,
     create_opening_balance_journal,
+    generate_cutover_reconciliation_snapshot,
     get_active_cutover_plan,
+    get_latest_cutover_reconciliation_snapshot,
     post_journal_entry,
     refresh_opening_balance_totals,
     retry_source_posting,
@@ -697,6 +700,80 @@ def cutover_readiness(request):
         'readiness': readiness,
         'plan': readiness.get('plan'),
     })
+
+
+@login_required
+def cutover_reconciliation(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_cutoverreconciliationsnapshot')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    plan = get_active_cutover_plan(entity)
+    snapshots = CutoverReconciliationSnapshot.objects.none()
+    latest_snapshot = None
+    lines = []
+    balance_type = request.GET.get('type', '')
+    status = request.GET.get('status', '')
+    if plan:
+        snapshots = (
+            CutoverReconciliationSnapshot.objects
+            .filter(cutover_plan=plan)
+            .exclude(status='voided')
+            .order_by('-generated_at', '-id')
+        )
+        latest_snapshot = get_latest_cutover_reconciliation_snapshot(plan)
+        if latest_snapshot:
+            lines = latest_snapshot.subscriber_lines.select_related('subscriber').order_by('balance_type', 'subscriber__username')
+            if balance_type:
+                lines = lines.filter(balance_type=balance_type)
+            if status:
+                lines = lines.filter(status=status)
+    return render(request, 'accounting/cutover_reconciliation.html', {
+        'entity': entity,
+        'plan': plan,
+        'snapshots': snapshots,
+        'latest_snapshot': latest_snapshot,
+        'lines': lines,
+        'balance_type': balance_type,
+        'status': status,
+    })
+
+
+@login_required
+def cutover_reconciliation_generate(request):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cutoverreconciliationsnapshot',
+        'accounting-cutover-reconciliation',
+    )
+    if permission_check is not True:
+        return permission_check
+    if request.method != 'POST':
+        return redirect('accounting-cutover-reconciliation')
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    plan = get_active_cutover_plan(entity)
+    if not plan:
+        messages.info(request, 'Create a cutover plan before generating reconciliation snapshots.')
+        return redirect('accounting-cutover-setup')
+    try:
+        snapshot = generate_cutover_reconciliation_snapshot(plan, generated_by=request.user)
+        AuditLog.log(
+            'create',
+            'accounting',
+            f"Cutover reconciliation snapshot generated: {snapshot.pk}",
+            user=request.user,
+        )
+        if snapshot.all_matched:
+            messages.success(request, 'Subscriber AR and customer advances are reconciled.')
+        else:
+            messages.warning(request, 'Reconciliation snapshot generated with differences to review.')
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-cutover-reconciliation')
 
 
 @login_required

@@ -784,6 +784,120 @@ class OpeningBalanceLine(models.Model):
         return f"{side} {self.account.code} {amount}"
 
 
+class CutoverReconciliationSnapshot(models.Model):
+    STATUS_CHOICES = [
+        ('generated', 'Generated'),
+        ('reconciled', 'Reconciled'),
+        ('voided', 'Voided'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='cutover_reconciliation_snapshots',
+    )
+    cutover_plan = models.ForeignKey(
+        CutoverPlan,
+        on_delete=models.PROTECT,
+        related_name='reconciliation_snapshots',
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='generated')
+    ar_source_total = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    ar_opening_total = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    ar_difference = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    advance_source_total = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    advance_opening_total = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    advance_difference = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    source_invoice_count = models.PositiveIntegerField(default=0)
+    source_credit_subscriber_count = models.PositiveIntegerField(default=0)
+    generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='generated_cutover_reconciliation_snapshots',
+    )
+    generated_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-generated_at', '-id']
+        permissions = [
+            ('manage_cutoverreconciliationsnapshot', 'Can manage Accounting v2 cutover reconciliation snapshots'),
+        ]
+
+    @property
+    def all_matched(self):
+        totals_match = self.ar_difference == MONEY_ZERO and self.advance_difference == MONEY_ZERO
+        if not self.pk:
+            return totals_match
+        return totals_match and not self.subscriber_lines.exclude(status='matched').exists()
+
+    def clean(self):
+        if self.cutover_plan_id and self.entity_id and self.cutover_plan.entity_id != self.entity_id:
+            raise ValidationError('Cutover reconciliation snapshot must use the same entity as the cutover plan.')
+
+    def __str__(self):
+        generated_at = self.generated_at.strftime('%Y-%m-%d %H:%M') if self.generated_at else 'unsaved'
+        return f"{self.entity} reconciliation snapshot {generated_at}"
+
+
+class CutoverSubscriberBalanceLine(models.Model):
+    BALANCE_TYPE_CHOICES = [
+        ('subscriber_ar', 'Subscriber AR'),
+        ('customer_advance', 'Customer Advance'),
+    ]
+    STATUS_CHOICES = [
+        ('matched', 'Matched'),
+        ('missing_opening', 'Missing Opening Balance'),
+        ('missing_source', 'Opening Without Source'),
+        ('difference', 'Difference'),
+    ]
+
+    snapshot = models.ForeignKey(
+        CutoverReconciliationSnapshot,
+        on_delete=models.CASCADE,
+        related_name='subscriber_lines',
+    )
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='cutover_subscriber_balance_lines',
+    )
+    subscriber = models.ForeignKey(
+        'subscribers.Subscriber',
+        on_delete=models.CASCADE,
+        related_name='cutover_balance_lines',
+    )
+    balance_type = models.CharField(max_length=30, choices=BALANCE_TYPE_CHOICES)
+    source_balance = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    opening_balance = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    difference = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    source_count = models.PositiveIntegerField(default=0)
+    opening_line_count = models.PositiveIntegerField(default=0)
+    source_references = models.TextField(blank=True)
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='matched')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['balance_type', 'subscriber__username', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['snapshot', 'subscriber', 'balance_type'],
+                name='accounting_unique_cutover_subscriber_balance_line',
+            ),
+        ]
+
+    def clean(self):
+        if self.snapshot_id and self.entity_id and self.snapshot.entity_id != self.entity_id:
+            raise ValidationError('Subscriber balance line must use the same entity as the snapshot.')
+
+    def __str__(self):
+        return f"{self.get_balance_type_display()} {self.subscriber}: {self.difference}"
+
+
 class AlphanumericTaxCode(models.Model):
     TAX_FAMILY_CHOICES = [
         ('expanded_withholding_tax', 'Expanded Withholding Tax'),

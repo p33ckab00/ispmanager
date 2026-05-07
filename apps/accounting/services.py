@@ -5,7 +5,7 @@ from decimal import Decimal
 from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F, Sum
+from django.db.models import F, Q, Sum
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
 
@@ -17,6 +17,8 @@ from apps.accounting.models import (
     AlphanumericTaxCode,
     ChartOfAccount,
     CutoverPlan,
+    CutoverReconciliationSnapshot,
+    CutoverSubscriberBalanceLine,
     CustomerWithholdingAllocation,
     CustomerWithholdingTaxClaim,
     ExpenseRecord,
@@ -27,8 +29,7 @@ from apps.accounting.models import (
     OpeningBalanceLine,
     SourceDocumentLink,
 )
-from apps.billing.models import Invoice, Payment, PaymentAllocation
-from apps.billing.services import get_account_credit_for_subscriber
+from apps.billing.models import AccountCreditAdjustment, Invoice, Payment, PaymentAllocation
 from apps.accounting.atc_seed import DEFAULT_BIR_ATC_CODES
 
 
@@ -519,21 +520,117 @@ def create_opening_balance_journal(import_batch, created_by=None):
     return journal_entry
 
 
-def _open_invoice_total_as_of(cutover_date):
+def _local_date(value):
+    if not value:
+        return None
+    return timezone.localtime(value).date()
+
+
+def _invoice_excluded_as_of(invoice, cutover_date):
+    if invoice.status not in ('voided', 'waived'):
+        return False
+    voided_date = _local_date(invoice.voided_at)
+    return not voided_date or voided_date <= cutover_date
+
+
+def _subscriber_ar_source_map(cutover_date):
+    balances = {}
     invoices = Invoice.objects.filter(
         created_at__date__lte=cutover_date,
-        status__in=['open', 'partial', 'overdue'],
     ).select_related('subscriber')
-    return sum((max(invoice.remaining_balance, Decimal('0.00')) for invoice in invoices), Decimal('0.00'))
+    included_count = 0
+    for invoice in invoices:
+        if _invoice_excluded_as_of(invoice, cutover_date):
+            continue
+        paid_as_of = (
+            PaymentAllocation.objects
+            .filter(
+                invoice=invoice,
+                created_at__date__lte=cutover_date,
+                payment__paid_at__date__lte=cutover_date,
+            )
+            .aggregate(total=Sum('amount_allocated'))['total']
+            or Decimal('0.00')
+        )
+        balance = max((invoice.amount or Decimal('0.00')) - paid_as_of, Decimal('0.00'))
+        if balance <= Decimal('0.00'):
+            continue
+        included_count += 1
+        item = balances.setdefault(invoice.subscriber_id, {
+            'subscriber': invoice.subscriber,
+            'source_balance': Decimal('0.00'),
+            'source_count': 0,
+            'source_references': [],
+        })
+        item['source_balance'] += balance
+        item['source_count'] += 1
+        item['source_references'].append(f"{invoice.invoice_number}: PHP {balance}")
+    return balances, included_count
 
 
-def _customer_advance_total():
+def _subscriber_ar_total_as_of(cutover_date):
+    balances, _ = _subscriber_ar_source_map(cutover_date)
+    return sum((item['source_balance'] for item in balances.values()), Decimal('0.00'))
+
+
+def _customer_advance_source_map(cutover_date):
     from apps.subscribers.models import Subscriber
 
-    total = Decimal('0.00')
-    for subscriber in Subscriber.objects.filter(payments__isnull=False).distinct():
-        total += get_account_credit_for_subscriber(subscriber)
-    return total
+
+    balances = {}
+    subscribers = (
+        Subscriber.objects
+        .filter(payments__paid_at__date__lte=cutover_date)
+        .distinct()
+        .order_by('username')
+    )
+    for subscriber in subscribers:
+        payments = Payment.objects.filter(
+            subscriber=subscriber,
+            paid_at__date__lte=cutover_date,
+        )
+        payment_total = payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+        allocated_total = (
+            PaymentAllocation.objects
+            .filter(
+                payment__subscriber=subscriber,
+                payment__paid_at__date__lte=cutover_date,
+                created_at__date__lte=cutover_date,
+            )
+            .aggregate(total=Sum('amount_allocated'))['total']
+            or Decimal('0.00')
+        )
+        adjusted_total = (
+            AccountCreditAdjustment.objects
+            .filter(
+                subscriber=subscriber,
+                status__in=['pending', 'completed'],
+                effective_at__date__lte=cutover_date,
+            )
+            .aggregate(total=Sum('amount'))['total']
+            or Decimal('0.00')
+        )
+        balance = max(payment_total - allocated_total - adjusted_total, Decimal('0.00'))
+        if balance <= Decimal('0.00'):
+            continue
+        references = list(
+            payments
+            .exclude(reference='')
+            .order_by('paid_at', 'id')
+            .values_list('reference', flat=True)[:10]
+        )
+        balances[subscriber.pk] = {
+            'subscriber': subscriber,
+            'source_balance': balance,
+            'source_count': payments.count(),
+            'source_references': references,
+        }
+    return balances
+
+
+def _customer_advance_total_as_of(cutover_date):
+    balances = _customer_advance_source_map(cutover_date)
+    return sum((item['source_balance'] for item in balances.values()), Decimal('0.00'))
 
 
 def _opening_line_total(plan, line_types, account_codes=None):
@@ -546,6 +643,146 @@ def _opening_line_total(plan, line_types, account_codes=None):
         qs = qs.filter(account__code__in=account_codes)
     totals = qs.aggregate(debit_total=Sum('debit'), credit_total=Sum('credit'))
     return (totals['debit_total'] or Decimal('0.00')) - (totals['credit_total'] or Decimal('0.00'))
+
+
+def _subscriber_opening_balance_map(plan, balance_type):
+    if balance_type == 'subscriber_ar':
+        qs = OpeningBalanceLine.objects.filter(
+            Q(line_type='subscriber_ar') | Q(account__code='1100'),
+            import_batch__cutover_plan=plan,
+            import_batch__status__in=['validated', 'journal_created', 'posted'],
+            subscriber__isnull=False,
+        )
+        sign = 'debit'
+    elif balance_type == 'customer_advance':
+        qs = OpeningBalanceLine.objects.filter(
+            Q(line_type='customer_advance') | Q(account__code='2100'),
+            import_batch__cutover_plan=plan,
+            import_batch__status__in=['validated', 'journal_created', 'posted'],
+            subscriber__isnull=False,
+        )
+        sign = 'credit'
+    else:
+        raise ValidationError(f"Unsupported subscriber opening balance type: {balance_type}.")
+
+    balances = {}
+    for line in qs.select_related('subscriber', 'account').order_by('subscriber__username', 'id'):
+        item = balances.setdefault(line.subscriber_id, {
+            'subscriber': line.subscriber,
+            'opening_balance': Decimal('0.00'),
+            'opening_line_count': 0,
+        })
+        if sign == 'debit':
+            item['opening_balance'] += (line.debit or Decimal('0.00')) - (line.credit or Decimal('0.00'))
+        else:
+            item['opening_balance'] += (line.credit or Decimal('0.00')) - (line.debit or Decimal('0.00'))
+        item['opening_line_count'] += 1
+    return balances
+
+
+def _reconciliation_line_status(source_balance, opening_balance):
+    if source_balance == opening_balance:
+        return 'matched'
+    if source_balance > Decimal('0.00') and opening_balance == Decimal('0.00'):
+        return 'missing_opening'
+    if source_balance == Decimal('0.00') and opening_balance > Decimal('0.00'):
+        return 'missing_source'
+    return 'difference'
+
+
+def _snapshot_subscriber_lines(snapshot, source_map, opening_map, balance_type):
+    subscriber_ids = sorted(
+        set(source_map.keys()) | set(opening_map.keys()),
+        key=lambda value: (
+            (source_map.get(value) or opening_map.get(value))['subscriber'].username,
+            value,
+        ),
+    )
+    line_objects = []
+    for subscriber_id in subscriber_ids:
+        source = source_map.get(subscriber_id, {})
+        opening = opening_map.get(subscriber_id, {})
+        subscriber = source.get('subscriber') or opening.get('subscriber')
+        source_balance = source.get('source_balance', Decimal('0.00'))
+        opening_balance = opening.get('opening_balance', Decimal('0.00'))
+        difference = source_balance - opening_balance
+        source_refs = source.get('source_references', [])
+        line_objects.append(CutoverSubscriberBalanceLine(
+            snapshot=snapshot,
+            entity=snapshot.entity,
+            subscriber=subscriber,
+            balance_type=balance_type,
+            source_balance=source_balance,
+            opening_balance=opening_balance,
+            difference=difference,
+            source_count=source.get('source_count', 0),
+            opening_line_count=opening.get('opening_line_count', 0),
+            source_references='\n'.join(source_refs),
+            status=_reconciliation_line_status(source_balance, opening_balance),
+        ))
+    CutoverSubscriberBalanceLine.objects.bulk_create(line_objects)
+    return line_objects
+
+
+def get_latest_cutover_reconciliation_snapshot(plan):
+    if not plan:
+        return None
+    return (
+        CutoverReconciliationSnapshot.objects
+        .filter(cutover_plan=plan)
+        .exclude(status='voided')
+        .order_by('-generated_at', '-id')
+        .first()
+    )
+
+
+@transaction.atomic
+def generate_cutover_reconciliation_snapshot(plan, generated_by=None, notes=''):
+    plan = CutoverPlan.objects.select_for_update().get(pk=plan.pk)
+    if plan.status == 'voided':
+        raise ValidationError('Voided cutover plans cannot generate reconciliation snapshots.')
+
+    ar_source_map, invoice_count = _subscriber_ar_source_map(plan.cutover_date)
+    advance_source_map = _customer_advance_source_map(plan.cutover_date)
+    ar_opening_map = _subscriber_opening_balance_map(plan, 'subscriber_ar')
+    advance_opening_map = _subscriber_opening_balance_map(plan, 'customer_advance')
+
+    snapshot = CutoverReconciliationSnapshot.objects.create(
+        entity=plan.entity,
+        cutover_plan=plan,
+        status='generated',
+        source_invoice_count=invoice_count,
+        source_credit_subscriber_count=len(advance_source_map),
+        generated_by=generated_by,
+        notes=notes,
+    )
+    ar_lines = _snapshot_subscriber_lines(snapshot, ar_source_map, ar_opening_map, 'subscriber_ar')
+    advance_lines = _snapshot_subscriber_lines(snapshot, advance_source_map, advance_opening_map, 'customer_advance')
+
+    snapshot.ar_source_total = sum((line.source_balance for line in ar_lines), Decimal('0.00'))
+    snapshot.ar_opening_total = sum((line.opening_balance for line in ar_lines), Decimal('0.00'))
+    snapshot.ar_difference = snapshot.ar_source_total - snapshot.ar_opening_total
+    snapshot.advance_source_total = sum((line.source_balance for line in advance_lines), Decimal('0.00'))
+    snapshot.advance_opening_total = sum((line.opening_balance for line in advance_lines), Decimal('0.00'))
+    snapshot.advance_difference = snapshot.advance_source_total - snapshot.advance_opening_total
+    if (
+        snapshot.ar_difference == Decimal('0.00')
+        and snapshot.advance_difference == Decimal('0.00')
+        and all(line.status == 'matched' for line in [*ar_lines, *advance_lines])
+    ):
+        snapshot.status = 'reconciled'
+    snapshot.full_clean()
+    snapshot.save(update_fields=[
+        'status',
+        'ar_source_total',
+        'ar_opening_total',
+        'ar_difference',
+        'advance_source_total',
+        'advance_opening_total',
+        'advance_difference',
+        'updated_at',
+    ])
+    return snapshot
 
 
 def build_cutover_readiness(entity):
@@ -615,7 +852,7 @@ def build_cutover_readiness(entity):
     inactive_lines = OpeningBalanceLine.objects.filter(import_batch__cutover_plan=plan, account__is_active=False).count()
     add('active_accounts', 'Opening lines use active accounts', inactive_lines == 0, f"{inactive_lines} inactive-account line(s).")
 
-    open_ar_total = _open_invoice_total_as_of(plan.cutover_date)
+    open_ar_total = _subscriber_ar_total_as_of(plan.cutover_date)
     opening_ar_total = _opening_line_total(plan, ['subscriber_ar', 'gl_control'], ['1100'])
     add(
         'subscriber_ar_present',
@@ -625,7 +862,7 @@ def build_cutover_readiness(entity):
         severity='warning',
     )
 
-    customer_advance_total = _customer_advance_total()
+    customer_advance_total = _customer_advance_total_as_of(plan.cutover_date)
     opening_advance_total = abs(_opening_line_total(plan, ['customer_advance', 'gl_control'], ['2100']))
     add(
         'customer_advances_present',
@@ -635,6 +872,40 @@ def build_cutover_readiness(entity):
         severity='warning',
     )
 
+    latest_snapshot = get_latest_cutover_reconciliation_snapshot(plan)
+    has_reconciliation_basis = any([
+        open_ar_total > Decimal('0.00'),
+        opening_ar_total > Decimal('0.00'),
+        customer_advance_total > Decimal('0.00'),
+        opening_advance_total > Decimal('0.00'),
+    ])
+    add(
+        'subscriber_reconciliation_snapshot',
+        'Subscriber AR and advance reconciliation snapshot exists',
+        not has_reconciliation_basis or bool(latest_snapshot),
+        latest_snapshot.generated_at if latest_snapshot else 'Generate a Slice 2B reconciliation snapshot.',
+    )
+    if latest_snapshot:
+        line_difference_count = latest_snapshot.subscriber_lines.exclude(status='matched').count()
+        add(
+            'subscriber_ar_reconciled',
+            'Subscriber AR source total matches opening subscriber AR',
+            latest_snapshot.ar_difference == Decimal('0.00'),
+            f"Source {latest_snapshot.ar_source_total}; opening {latest_snapshot.ar_opening_total}; difference {latest_snapshot.ar_difference}.",
+        )
+        add(
+            'customer_advances_reconciled',
+            'Customer advance source total matches opening customer advances',
+            latest_snapshot.advance_difference == Decimal('0.00'),
+            f"Source {latest_snapshot.advance_source_total}; opening {latest_snapshot.advance_opening_total}; difference {latest_snapshot.advance_difference}.",
+        )
+        add(
+            'subscriber_reconciliation_lines_matched',
+            'Every subscriber reconciliation line is matched',
+            line_difference_count == 0,
+            f"{line_difference_count} subscriber line(s) need review.",
+        )
+
     all_passed = all(item['passed'] for item in checks if item['severity'] == 'error')
     return {
         'checks': checks,
@@ -643,6 +914,7 @@ def build_cutover_readiness(entity):
         'opening_journal': opening_journal,
         'open_ar_total': open_ar_total,
         'customer_advance_total': customer_advance_total,
+        'reconciliation_snapshot': latest_snapshot,
     }
 
 

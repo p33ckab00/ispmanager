@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Cutover Reconciliation - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Subscriber Reconciliation</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ entity }}{% if plan %} · Cutover {{ plan.cutover_date }}{% endif %}</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    <a href="{% url 'accounting-cutover-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Cutover</a>
+    {% if plan and perms.accounting.manage_cutoverreconciliationsnapshot %}
+    <form method="post" action="{% url 'accounting-cutover-reconciliation-generate' %}">
+      {% csrf_token %}
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Generate Snapshot</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% include "partials/messages.html" %}
+
+{% if not plan %}
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6 text-center text-gray-500">
+  Create a cutover plan before generating subscriber reconciliation snapshots.
+</div>
+{% else %}
+<div class="grid gap-4 md:grid-cols-4 mb-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Snapshot</p>
+    <p class="font-semibold text-gray-800">{% if latest_snapshot %}{{ latest_snapshot.generated_at }}{% else %}Not generated{% endif %}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">AR Difference</p>
+    <p class="font-semibold {% if latest_snapshot and latest_snapshot.ar_difference == 0 %}text-green-600{% else %}text-orange-600{% endif %}">
+      {% if latest_snapshot %}PHP {{ latest_snapshot.ar_difference }}{% else %}-{% endif %}
+    </p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Advance Difference</p>
+    <p class="font-semibold {% if latest_snapshot and latest_snapshot.advance_difference == 0 %}text-green-600{% else %}text-orange-600{% endif %}">
+      {% if latest_snapshot %}PHP {{ latest_snapshot.advance_difference }}{% else %}-{% endif %}
+    </p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Status</p>
+    <p class="font-semibold {% if latest_snapshot and latest_snapshot.all_matched %}text-green-600{% else %}text-orange-600{% endif %}">
+      {% if latest_snapshot %}{{ latest_snapshot.get_status_display }}{% else %}Pending{% endif %}
+    </p>
+  </div>
+</div>
+
+{% if latest_snapshot %}
+<div class="grid gap-4 md:grid-cols-2 mb-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <h3 class="text-lg font-semibold text-gray-800 mb-3">Subscriber AR</h3>
+    <div class="grid grid-cols-3 gap-3 text-sm">
+      <div>
+        <p class="text-xs text-gray-400 uppercase">Source</p>
+        <p class="font-semibold">PHP {{ latest_snapshot.ar_source_total }}</p>
+      </div>
+      <div>
+        <p class="text-xs text-gray-400 uppercase">Opening</p>
+        <p class="font-semibold">PHP {{ latest_snapshot.ar_opening_total }}</p>
+      </div>
+      <div>
+        <p class="text-xs text-gray-400 uppercase">Invoices</p>
+        <p class="font-semibold">{{ latest_snapshot.source_invoice_count }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <h3 class="text-lg font-semibold text-gray-800 mb-3">Customer Advances</h3>
+    <div class="grid grid-cols-3 gap-3 text-sm">
+      <div>
+        <p class="text-xs text-gray-400 uppercase">Source</p>
+        <p class="font-semibold">PHP {{ latest_snapshot.advance_source_total }}</p>
+      </div>
+      <div>
+        <p class="text-xs text-gray-400 uppercase">Opening</p>
+        <p class="font-semibold">PHP {{ latest_snapshot.advance_opening_total }}</p>
+      </div>
+      <div>
+        <p class="text-xs text-gray-400 uppercase">Subscribers</p>
+        <p class="font-semibold">{{ latest_snapshot.source_credit_subscriber_count }}</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6">
+  <form method="get" class="flex flex-wrap items-end gap-3">
+    <div>
+      <label class="block text-xs font-medium text-gray-500 mb-1">Type</label>
+      <select name="type" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        <option value="">All</option>
+        <option value="subscriber_ar" {% if balance_type == 'subscriber_ar' %}selected{% endif %}>Subscriber AR</option>
+        <option value="customer_advance" {% if balance_type == 'customer_advance' %}selected{% endif %}>Customer Advance</option>
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-gray-500 mb-1">Status</label>
+      <select name="status" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        <option value="">All</option>
+        <option value="matched" {% if status == 'matched' %}selected{% endif %}>Matched</option>
+        <option value="missing_opening" {% if status == 'missing_opening' %}selected{% endif %}>Missing Opening</option>
+        <option value="missing_source" {% if status == 'missing_source' %}selected{% endif %}>Opening Without Source</option>
+        <option value="difference" {% if status == 'difference' %}selected{% endif %}>Difference</option>
+      </select>
+    </div>
+    <button type="submit" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Filter</button>
+  </form>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Subscriber</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Type</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Source</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Opening</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Difference</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">References</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for line in lines %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3">
+          <p class="font-medium">{{ line.subscriber.username }}</p>
+          <p class="text-xs text-gray-400">{{ line.subscriber.display_name }}</p>
+        </td>
+        <td class="px-4 py-3">{{ line.get_balance_type_display }}</td>
+        <td class="px-4 py-3 text-right">PHP {{ line.source_balance }}</td>
+        <td class="px-4 py-3 text-right">PHP {{ line.opening_balance }}</td>
+        <td class="px-4 py-3 text-right {% if line.status == 'matched' %}text-green-600{% else %}text-red-600{% endif %}">PHP {{ line.difference }}</td>
+        <td class="px-4 py-3">
+          <span class="text-xs font-semibold px-2 py-1 rounded-full {% if line.status == 'matched' %}bg-green-50 text-green-700{% else %}bg-red-50 text-red-700{% endif %}">{{ line.get_status_display }}</span>
+        </td>
+        <td class="px-4 py-3 text-gray-500 whitespace-pre-line">{{ line.source_references|default:"-" }}</td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="7" class="px-4 py-8 text-center text-gray-500">No subscriber reconciliation differences for this filter.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-6 text-center text-gray-500">
+  Generate a snapshot to freeze subscriber AR and customer advance balances as of cutover.
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

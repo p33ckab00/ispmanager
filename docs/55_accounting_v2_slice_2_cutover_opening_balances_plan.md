@@ -49,13 +49,46 @@ Implemented:
 Still not included in Slice 2A:
 
 - CSV/XLSX upload parsing, even though import source types are reserved.
-- Subscriber AR snapshot records and per-subscriber reconciliation.
-- Customer advance snapshot records based on a frozen cutover calculation.
 - Bank, wallet, AP, inventory, fixed asset, depreciation, tax, loan, and equity
   detail schedules.
 - Cutover approval/live transition.
 - Post-cutover blocking of pre-cutover source posting double counts.
 - VAT invoice tax breakdown and final VAT cutover reconciliation.
+
+Slice 2B has also been implemented for subscriber-facing reconciliation.
+
+Implemented:
+
+- `CutoverReconciliationSnapshot` for frozen cutover reconciliation runs.
+- `CutoverSubscriberBalanceLine` for per-subscriber AR and customer advance
+  differences.
+- Subscriber AR source snapshot based on invoices created on or before cutover,
+  less allocations recorded on or before cutover.
+- Paid-after-cutover invoices remain AR in the cutover snapshot.
+- Voided or waived invoices are excluded only when the void/waiver happened on
+  or before cutover.
+- Customer advance source snapshot based on payments received on or before
+  cutover, less allocations and credit adjustments effective on or before
+  cutover.
+- Opening balance comparison against subscriber-level `subscriber_ar` and
+  `customer_advance` opening lines.
+- Reconciliation page at `/accounting/cutover/reconciliation/`.
+- Generate snapshot action that preserves prior snapshots instead of rewriting
+  them.
+- Readiness checks for latest subscriber reconciliation snapshot and AR/advance
+  total differences.
+- Snapshot status requires subscriber-level lines to match; aggregate totals
+  cannot hide offsetting subscriber differences.
+
+Still not included in Slice 2B:
+
+- Formal frozen source-detail tables for each invoice/payment record represented
+  in the snapshot.
+- CSV/XLSX export of reconciliation differences.
+- Account-level drilldown for one GL control line without subscriber-level
+  opening detail.
+- Cash, bank, wallet, AP, tax, asset, loan, and equity schedules.
+- Final cutover approval/live gate.
 
 ## Locked Decisions
 
@@ -99,13 +132,12 @@ Reconcile subscriber-facing balances against GL control accounts.
 
 Deliverables:
 
-- AR per subscriber snapshot at cutover date
-- customer advances/unallocated credits snapshot
-- excluded invoice rules for paid, waived, voided, and zero-balance invoices
-- reconciliation report:
-  - AR subledger total vs opening AR line
-  - customer advances total vs opening customer advances line
-  - blocked differences with drill-down
+- AR per subscriber snapshot at cutover date: implemented.
+- customer advances/unallocated credits snapshot: implemented.
+- excluded invoice rules for paid, waived, voided, and zero-balance invoices:
+  implemented for cutover as-of logic.
+- reconciliation report: implemented for subscriber AR and customer advances.
+- Remaining improvement: add CSV/XLSX export and richer source-detail drilldown.
 
 ### Slice 2C - Cash, Bank, Wallet, AP, and Tax Reconciliation
 
@@ -499,10 +531,19 @@ Resolved in Slice 2A:
 - Readiness checks exist for the foundation, balanced import, draft opening
   journal, active accounts, and basic AR/credit presence.
 
+Resolved in Slice 2B:
+
+- Frozen subscriber AR and customer advance reconciliation snapshots now exist.
+- Cutover readiness can detect missing or mismatched subscriber reconciliation.
+- Paid-after-cutover invoices are not lost from opening AR snapshots.
+- Customer advances use cutover as-of payment/allocation/adjustment dates
+  instead of the live current account credit helper.
+
 Remaining gaps:
 
 - No account mapping table exists beyond service-level default posting codes.
-- No formal frozen subledger snapshot model exists for AR or customer advances.
+- No formal frozen source-detail table exists for every invoice/payment row
+  represented by the subscriber balance snapshot.
 - No bank/wallet statement or settlement model exists yet.
 - No AP, inventory, fixed asset, loan, or depreciation modules exist yet.
 - VAT invoice tax breakdown is still blocked, so VAT cutover can only start

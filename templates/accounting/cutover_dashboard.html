@@ -8,6 +8,7 @@
   </div>
   <div class="flex flex-wrap gap-2">
     <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Accounting</a>
+    <a href="{% url 'accounting-cutover-reconciliation' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Reconciliation</a>
     {% if perms.accounting.manage_cutoverplan %}
     <a href="{% url 'accounting-cutover-setup' %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Setup Cutover</a>
     {% endif %}

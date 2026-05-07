@@ -94,6 +94,9 @@ checks, and the first buildable Slice 2A scope.
 Slice 2A is now implemented as the cutover and opening balance foundation:
 `CutoverPlan`, `OpeningBalanceImport`, `OpeningBalanceLine`, manual entry UI,
 validation, draft opening journal generation, and a readiness page.
+Slice 2B is now implemented for subscriber-facing reconciliation snapshots:
+frozen AR/customer advance source balances are compared to subscriber-level
+opening balance lines, with a reconciliation page and readiness checks.
 
 ## 2. Locked Decisions
 
@@ -297,8 +300,7 @@ The detailed Slice 2 implementation plan is in
 Slice 2A should start with cutover plan setup, opening balance imports, opening
 balance lines, balanced draft opening journal generation, and a readiness page.
 That Slice 2A foundation is implemented. Remaining Slice 2 work starts with
-subscriber AR and customer credit reconciliation snapshots, then bank/wallet,
-AP, tax, asset, loan, equity schedules, approval, and live gating.
+bank/wallet, AP, tax, asset, loan, equity schedules, approval, and live gating.
 
 ### Slice 3 - Financial Statements and Subledgers
 
