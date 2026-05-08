@@ -814,8 +814,26 @@ Implementation notes:
 - Diagnostics should warn when encrypted backups are enabled but OpenSSL or the
   passphrase environment variable is missing.
 - Remote copy should remain disabled until the deployment has a concrete backend,
-  credentials, and off-host retention policy. Do not add ad hoc remote copy
-  commands that could leak backup files or secrets.
+  credentials, and off-host retention policy.
+- The first implemented remote backend is SFTP through the server `sftp`
+  command. It is disabled by default and uses environment variables instead of
+  database-stored secrets:
+  - `BACKUP_REMOTE_SFTP_HOST`
+  - `BACKUP_REMOTE_SFTP_USER`
+  - `BACKUP_REMOTE_SFTP_DIR`
+  - optional `BACKUP_REMOTE_SFTP_PORT`
+  - optional `BACKUP_REMOTE_SFTP_KEY`
+  - optional `BACKUP_REMOTE_SFTP_KNOWN_HOSTS`
+- The remote directory must already exist and be writable by the configured SFTP
+  user.
+- The app uses strict host-key checking for SFTP remote copy. Prepare
+  `known_hosts` for the app service user or set `BACKUP_REMOTE_SFTP_KNOWN_HOSTS`
+  to a controlled known-hosts file.
+- Remote copy runs after the local backup artifact is finalized. If encryption
+  is enabled, the remote copy sends the `.dump.enc` artifact.
+- A failed remote copy does not delete or invalidate the completed local backup.
+  The backup job records `remote_copy.status = failed`, writes an audit log
+  entry, and Diagnostics raises a remote-copy alert.
 
 ### Slice 11: Test Restore
 

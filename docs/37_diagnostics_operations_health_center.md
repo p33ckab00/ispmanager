@@ -168,6 +168,8 @@ This replaces the older loose approach where the dashboard inferred health from 
 - backup root exists/writable checks
 - backup filesystem free-space guard visibility
 - encrypted backup readiness when encryption is enabled
+- SFTP remote-copy readiness when remote copy is enabled
+- failed remote-copy attempts in the last 7 days
 
 ## Alerts model
 
@@ -191,6 +193,8 @@ Examples:
 - failed database backup jobs
 - backup storage path or free-space problems
 - encrypted backups enabled without OpenSSL or the passphrase environment variable
+- remote backup copy enabled without complete SFTP configuration
+- recent local backups whose off-host SFTP copy failed
 
 These alerts roll up into:
 

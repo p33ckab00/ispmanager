@@ -15,7 +15,7 @@ from django_apscheduler.models import DjangoJob, DjangoJobExecution
 
 from apps.accounting.models import ExpenseRecord, IncomeRecord
 from apps.backups.models import BackupJob
-from apps.backups.services import BackupError, encryption_status, resolve_pg_dump_path
+from apps.backups.services import BackupError, encryption_status, remote_copy_status, resolve_pg_dump_path
 from apps.billing.models import BillingSnapshot, Invoice, Payment
 from apps.core.models import AuditLog
 from apps.data_exchange.models import DataExchangeJob
@@ -427,6 +427,34 @@ def get_incident_resolution_context(incident):
                 'sudo systemctl restart ispmanager-web ispmanager-scheduler',
             ],
             links=[{'label': 'Backup settings', 'href': '/settings/backup/'}],
+        ),
+        'backups.remote.not_ready': _manual_guide(
+            'Complete remote backup copy setup',
+            'SFTP remote copy is enabled but the server process cannot confirm the command and environment configuration.',
+            steps=[
+                'Open Backup & Restore settings and confirm remote backend is SFTP.',
+                'Set the SFTP host, user, remote directory, and optional key or known_hosts path in the production environment file.',
+                'Restart the web and scheduler services so both processes receive the environment variables.',
+                'Run a manual backup and confirm the remote copy status in backup job history.',
+            ],
+            commands=[
+                'sudo systemctl restart ispmanager-web ispmanager-scheduler',
+            ],
+            links=[{'label': 'Backup settings', 'href': '/settings/backup/'}],
+        ),
+        'backups.remote.failed_recently': _manual_guide(
+            'Investigate failed remote backup copy',
+            'The local database backup completed, but at least one recent off-host SFTP copy failed.',
+            steps=[
+                'Open Backups and inspect recent completed jobs for remote-copy failure details.',
+                'Confirm the remote directory exists and the configured SFTP user can write to it.',
+                'Check SSH key permissions and known_hosts for the app service user.',
+                'Run a new manual backup after fixing remote access.',
+            ],
+            links=[
+                {'label': 'Backups', 'href': '/backups/'},
+                {'label': 'Backup settings', 'href': '/settings/backup/'},
+            ],
         ),
     }
 
@@ -1304,6 +1332,7 @@ def _get_backup_health(now):
         pg_dump_ok = False
         pg_dump_error = str(exc)
     backup_encryption_status = encryption_status()
+    backup_remote_status = remote_copy_status(backup_settings)
     latest_success = BackupJob.objects.filter(
         job_type='export',
         status='completed',
@@ -1355,6 +1384,13 @@ def _get_backup_health(now):
         'manual_enabled': backup_settings.manual_backups_enabled,
         'partial_enabled': backup_settings.partial_backups_enabled,
         'scheduled_enabled': backup_settings.scheduled_backups_enabled,
+        'remote_copy_enabled': backup_settings.remote_copy_enabled,
+        'remote_backend': backup_settings.remote_backend,
+        'remote_copy_ready': backup_remote_status['ready'],
+        'remote_copy_error': backup_remote_status['error'],
+        'remote_copy_host': backup_remote_status['host'],
+        'remote_copy_user': backup_remote_status['user'],
+        'remote_copy_dir': backup_remote_status['remote_dir'],
         'encryption_enabled': backup_settings.encryption_enabled,
         'encryption_ready': backup_encryption_status['ok'],
         'encryption_error': backup_encryption_status['error'],
@@ -1390,6 +1426,12 @@ def _get_backup_health(now):
             job_type='import_validation',
             status='failed',
             created_at__gte=now - timedelta(days=7),
+        ).count(),
+        'remote_copy_failures_last_7d': BackupJob.objects.filter(
+            job_type='export',
+            status='completed',
+            created_at__gte=now - timedelta(days=7),
+            summary_json__remote_copy__status='failed',
         ).count(),
     }
 
@@ -1576,6 +1618,15 @@ def _build_alerts(snapshot):
             href='/settings/backup/',
             source='backups',
         ))
+    if backups['remote_copy_enabled'] and not backups['remote_copy_ready']:
+        alerts.append(_make_alert(
+            'backups.remote.not_ready',
+            'warning',
+            'Remote backup copy is enabled but not ready',
+            backups['remote_copy_error'],
+            href='/settings/backup/',
+            source='backups',
+        ))
     if backups['configured'] and backups['low_space']:
         alerts.append(_make_alert(
             'backups.storage.low_space',
@@ -1600,6 +1651,15 @@ def _build_alerts(snapshot):
             'warning',
             'Recent database backup failure found',
             f"{backups['failed_last_7d']} backup export job(s) failed in the last 7 days.",
+            href='/backups/',
+            source='backups',
+        ))
+    if backups['remote_copy_failures_last_7d'] > 0:
+        alerts.append(_make_alert(
+            'backups.remote.failed_recently',
+            'warning',
+            'Recent remote backup copy failure found',
+            f"{backups['remote_copy_failures_last_7d']} completed backup job(s) had failed remote copy in the last 7 days.",
             href='/backups/',
             source='backups',
         ))

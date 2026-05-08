@@ -178,8 +178,8 @@ install_packages() {
   apt-get install -y \
     python3 python3-venv python3-dev \
     build-essential libpq-dev \
-    git rsync curl nginx \
-    postgresql postgresql-contrib \
+    git rsync curl nginx openssl openssh-client \
+    postgresql postgresql-contrib postgresql-client \
     certbot python3-certbot-nginx
 }
 

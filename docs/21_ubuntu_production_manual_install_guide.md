@@ -123,7 +123,7 @@ sudo apt update
 sudo apt install -y \
   python3 python3-venv python3-dev \
   build-essential libpq-dev \
-  git rsync curl nginx openssl \
+  git rsync curl nginx openssl openssh-client \
   postgresql postgresql-contrib postgresql-client \
   certbot python3-certbot-nginx
 ```
@@ -166,6 +166,44 @@ sudo systemctl restart ispmanager-web ispmanager-scheduler
 
 Encrypted backup files are stored as `.dump.enc`. The app removes the temporary
 unencrypted `.dump` after encryption succeeds.
+
+### Optional SFTP Remote Backup Copy
+
+If `Enable remote copy` is enabled in `Settings > Backup & Restore`, set the
+backend to `SFTP` and configure the remote target in the production environment
+file used by both the web and scheduler services:
+
+```bash
+BACKUP_REMOTE_SFTP_HOST=backup.example.com
+BACKUP_REMOTE_SFTP_USER=ispmanager-backup
+BACKUP_REMOTE_SFTP_DIR=/srv/backups/ispmanager/db
+BACKUP_REMOTE_SFTP_PORT=22
+BACKUP_REMOTE_SFTP_KEY=/etc/ispmanager/backup_sftp_key
+BACKUP_REMOTE_SFTP_KNOWN_HOSTS=/etc/ispmanager/backup_known_hosts
+```
+
+`BACKUP_REMOTE_SFTP_PORT`, `BACKUP_REMOTE_SFTP_KEY`, and
+`BACKUP_REMOTE_SFTP_KNOWN_HOSTS` are optional. If no key or known-hosts file is
+set, OpenSSH uses the service user's default SSH configuration. The remote
+directory must already exist and be writable by the SFTP user.
+
+Prepare host-key trust before enabling remote copy. Example:
+
+```bash
+sudo mkdir -p /etc/ispmanager
+ssh-keyscan -H backup.example.com | sudo tee /etc/ispmanager/backup_known_hosts
+sudo chown root:ispmanager /etc/ispmanager/backup_known_hosts
+sudo chmod 640 /etc/ispmanager/backup_known_hosts
+```
+
+Then restart:
+
+```bash
+sudo systemctl restart ispmanager-web ispmanager-scheduler
+```
+
+The app copies the finalized local artifact. If encrypted backups are enabled,
+the remote file is the encrypted `.dump.enc` file.
 
 ## Recommended Runtime Paths
 

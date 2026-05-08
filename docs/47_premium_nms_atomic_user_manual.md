@@ -262,7 +262,8 @@ Use Backups for PostgreSQL-native database export and backup validation.
 7. Use partial backup presets only for controlled export or inspection.
 8. Use import validation to inspect backup files without restoring them.
 9. Enable encrypted backups only after `BACKUP_ENCRYPTION_PASSPHRASE` is configured.
-10. Check Diagnostics for stale backup, failed backup, encryption, and storage warnings.
+10. Enable SFTP remote copy only after the SFTP environment variables, SSH key, remote directory, and known_hosts are ready.
+11. Check Diagnostics for stale backup, failed backup, remote-copy, encryption, and storage warnings.
 
 NMS impact:
 

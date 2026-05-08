@@ -31,6 +31,8 @@ Confirm:
 - Backup & Restore `pg_dump path` is absolute, usually `/usr/bin/pg_dump`
 - Backup & Restore root exists, is writable by the app service user, and is not public web storage
 - encrypted backups have `BACKUP_ENCRYPTION_PASSPHRASE` configured if encryption is enabled
+- SFTP remote copy has host, user, remote directory, key, and known_hosts configured through environment variables if remote copy is enabled
+- remote backup copy is tested and Diagnostics shows no remote-copy warning
 - manual full database backup completes successfully
 - backup checksum verification succeeds
 - restore workflow has been tested

@@ -21,6 +21,12 @@ class BackupError(Exception):
 
 VALIDATION_UPLOAD_MAX_BYTES = 10 * 1024 * 1024 * 1024
 ENCRYPTION_PASSPHRASE_ENV = 'BACKUP_ENCRYPTION_PASSPHRASE'
+REMOTE_SFTP_HOST_ENV = 'BACKUP_REMOTE_SFTP_HOST'
+REMOTE_SFTP_USER_ENV = 'BACKUP_REMOTE_SFTP_USER'
+REMOTE_SFTP_DIR_ENV = 'BACKUP_REMOTE_SFTP_DIR'
+REMOTE_SFTP_PORT_ENV = 'BACKUP_REMOTE_SFTP_PORT'
+REMOTE_SFTP_KEY_ENV = 'BACKUP_REMOTE_SFTP_KEY'
+REMOTE_SFTP_KNOWN_HOSTS_ENV = 'BACKUP_REMOTE_SFTP_KNOWN_HOSTS'
 
 
 PARTIAL_BACKUP_PROFILES = {
@@ -190,6 +196,128 @@ def encryption_status():
     }
 
 
+def _resolve_sftp_path():
+    found = shutil.which('sftp')
+    if found:
+        return found
+
+    for candidate in [Path('/usr/bin/sftp'), Path('/usr/local/bin/sftp')]:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    raise BackupError('OpenSSH sftp was not found. Install openssh-client before enabling SFTP remote copy.')
+
+
+def _clean_env_value(name):
+    value = (os.environ.get(name) or '').strip()
+    if any(char in value for char in ('\x00', '\n', '\r')):
+        raise BackupError(f'{name} contains an unsupported control character.')
+    return value
+
+
+def _sftp_batch_quote(value):
+    if any(char in value for char in ('\x00', '\n', '\r')):
+        raise BackupError('SFTP path contains an unsupported control character.')
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def remote_copy_status(backup_settings=None):
+    backup_settings = backup_settings or BackupSettings.get_settings()
+    status = {
+        'enabled': backup_settings.remote_copy_enabled,
+        'backend': backup_settings.remote_backend,
+        'ok': False,
+        'ready': False,
+        'error': '',
+        'sftp_path': '',
+        'host': '',
+        'user': '',
+        'remote_dir': '',
+        'port': '',
+        'key_configured': False,
+        'known_hosts_configured': False,
+        'env_vars': {
+            'host': REMOTE_SFTP_HOST_ENV,
+            'user': REMOTE_SFTP_USER_ENV,
+            'remote_dir': REMOTE_SFTP_DIR_ENV,
+            'port': REMOTE_SFTP_PORT_ENV,
+            'key': REMOTE_SFTP_KEY_ENV,
+            'known_hosts': REMOTE_SFTP_KNOWN_HOSTS_ENV,
+        },
+    }
+
+    if not backup_settings.remote_copy_enabled:
+        status.update({'ok': True, 'error': 'Remote copy is disabled.'})
+        return status
+    if backup_settings.remote_backend == 'none':
+        status['error'] = 'Remote copy is enabled but remote backend is set to None.'
+        return status
+    if backup_settings.remote_backend != 'sftp':
+        status['error'] = f"Remote backend {backup_settings.remote_backend} is not implemented yet."
+        return status
+
+    try:
+        sftp_path = _resolve_sftp_path()
+        host = _clean_env_value(REMOTE_SFTP_HOST_ENV)
+        user = _clean_env_value(REMOTE_SFTP_USER_ENV)
+        remote_dir = _clean_env_value(REMOTE_SFTP_DIR_ENV)
+        port_value = _clean_env_value(REMOTE_SFTP_PORT_ENV) or '22'
+        key_path = _clean_env_value(REMOTE_SFTP_KEY_ENV)
+        known_hosts_path = _clean_env_value(REMOTE_SFTP_KNOWN_HOSTS_ENV)
+
+        missing = [
+            env_name
+            for env_name, env_value in [
+                (REMOTE_SFTP_HOST_ENV, host),
+                (REMOTE_SFTP_USER_ENV, user),
+                (REMOTE_SFTP_DIR_ENV, remote_dir),
+            ]
+            if not env_value
+        ]
+        if missing:
+            raise BackupError(f"Missing required SFTP remote copy environment variable(s): {', '.join(missing)}.")
+
+        try:
+            port = int(port_value)
+        except ValueError as exc:
+            raise BackupError(f'{REMOTE_SFTP_PORT_ENV} must be a TCP port number.') from exc
+        if not 1 <= port <= 65535:
+            raise BackupError(f'{REMOTE_SFTP_PORT_ENV} must be between 1 and 65535.')
+
+        key_configured = False
+        if key_path:
+            expanded_key = Path(key_path).expanduser()
+            if not expanded_key.is_file() or not os.access(expanded_key, os.R_OK):
+                raise BackupError(f'{REMOTE_SFTP_KEY_ENV} does not point to a readable key file.')
+            key_configured = True
+            key_path = str(expanded_key)
+
+        known_hosts_configured = False
+        if known_hosts_path:
+            expanded_known_hosts = Path(known_hosts_path).expanduser()
+            if not expanded_known_hosts.is_file() or not os.access(expanded_known_hosts, os.R_OK):
+                raise BackupError(f'{REMOTE_SFTP_KNOWN_HOSTS_ENV} does not point to a readable known_hosts file.')
+            known_hosts_configured = True
+            known_hosts_path = str(expanded_known_hosts)
+
+        status.update({
+            'ok': True,
+            'ready': True,
+            'sftp_path': sftp_path,
+            'host': host,
+            'user': user,
+            'remote_dir': remote_dir,
+            'port': str(port),
+            'key_configured': key_configured,
+            'key_path': key_path,
+            'known_hosts_configured': known_hosts_configured,
+            'known_hosts_path': known_hosts_path,
+        })
+    except BackupError as exc:
+        status['error'] = str(exc)
+    return status
+
+
 def _backup_root(settings):
     root = Path(settings.backup_root).expanduser()
     if not root.is_absolute():
@@ -282,10 +410,10 @@ def _pg_environment(database):
     return env
 
 
-def _safe_process_error(process):
+def _safe_process_error(process, tool_name='pg_dump'):
     text = (process.stderr or process.stdout or '').strip()
     if not text:
-        text = f"pg_dump exited with status {process.returncode}."
+        text = f"{tool_name} exited with status {process.returncode}."
     return text[:4000]
 
 
@@ -317,10 +445,93 @@ def _encrypt_backup_file(source_path, encrypted_temp_path):
         check=False,
     )
     if process.returncode != 0:
-        raise BackupError(_safe_process_error(process))
+        raise BackupError(_safe_process_error(process, tool_name='openssl'))
     if not encrypted_temp_path.exists() or encrypted_temp_path.stat().st_size <= 0:
         raise BackupError('OpenSSL completed but did not produce a non-empty encrypted backup file.')
     return status
+
+
+def _copy_backup_remote(local_path, backup_settings):
+    status = remote_copy_status(backup_settings)
+    started_at = timezone.now()
+    summary = {
+        'enabled': backup_settings.remote_copy_enabled,
+        'backend': backup_settings.remote_backend,
+        'status': 'skipped',
+        'started_at': started_at.isoformat(),
+    }
+    if not backup_settings.remote_copy_enabled:
+        return summary
+    if not status['ok']:
+        raise BackupError(status['error'])
+
+    batch_path = None
+    try:
+        batch = (
+            f"cd {_sftp_batch_quote(status['remote_dir'])}\n"
+            f"put {_sftp_batch_quote(str(local_path))} {_sftp_batch_quote(local_path.name)}\n"
+        )
+        batch_file = tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8',
+            prefix='ispmanager-backup-sftp-',
+            suffix='.batch',
+            delete=False,
+        )
+        batch_path = Path(batch_file.name)
+        with batch_file:
+            batch_file.write(batch)
+        try:
+            batch_path.chmod(0o600)
+        except OSError:
+            pass
+
+        command = [
+            status['sftp_path'],
+            '-o',
+            'BatchMode=yes',
+            '-o',
+            'StrictHostKeyChecking=yes',
+            '-o',
+            'ConnectTimeout=20',
+        ]
+        if status.get('known_hosts_path'):
+            command.extend(['-o', f"UserKnownHostsFile={status['known_hosts_path']}"])
+        if status.get('key_path'):
+            command.extend(['-i', status['key_path'], '-o', 'IdentitiesOnly=yes'])
+        command.extend([
+            '-P',
+            status['port'],
+            '-b',
+            str(batch_path),
+            f"{status['user']}@{status['host']}",
+        ])
+
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        if process.returncode != 0:
+            raise BackupError(_safe_process_error(process, tool_name='sftp'))
+        completed_at = timezone.now()
+        return {
+            **summary,
+            'status': 'completed',
+            'completed_at': completed_at.isoformat(),
+            'host': status['host'],
+            'user': status['user'],
+            'remote_dir': status['remote_dir'],
+            'remote_file': local_path.name,
+            'bytes_sent': local_path.stat().st_size,
+        }
+    except subprocess.TimeoutExpired as exc:
+        raise BackupError('SFTP remote copy timed out after 600 seconds.') from exc
+    finally:
+        if batch_path and batch_path.exists():
+            batch_path.unlink()
 
 
 def _detect_backup_format(sample):
@@ -483,6 +694,30 @@ def run_database_backup(profile='full', user=None, trigger='manual'):
 
         checksum = _sha256_file(final_path)
         size = final_path.stat().st_size
+        remote_copy_summary = {'enabled': False}
+        if backup_settings.remote_copy_enabled:
+            try:
+                remote_copy_summary = _copy_backup_remote(final_path, backup_settings)
+                AuditLog.log(
+                    'system',
+                    'backups',
+                    f"Remote backup copy completed for {filename}",
+                    user=user,
+                )
+            except Exception as exc:
+                remote_copy_summary = {
+                    'enabled': True,
+                    'backend': backup_settings.remote_backend,
+                    'status': 'failed',
+                    'error': str(exc)[:4000],
+                    'completed_at': timezone.now().isoformat(),
+                }
+                AuditLog.log(
+                    'system',
+                    'backups',
+                    f"Remote backup copy failed for {filename}: {str(exc)[:500]}",
+                    user=user,
+                )
         completed_at = timezone.now()
         job.status = 'completed'
         job.file_size_bytes = size
@@ -492,6 +727,7 @@ def run_database_backup(profile='full', user=None, trigger='manual'):
             **job.summary_json,
             'completed_at': completed_at.isoformat(),
             'encryption': encryption_summary,
+            'remote_copy': remote_copy_summary,
         }
         job.save(update_fields=[
             'file_name',

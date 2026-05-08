@@ -159,3 +159,13 @@ class BackupSettingsForm(forms.ModelForm):
         if value < 1:
             raise forms.ValidationError('Stale backup alert threshold must be at least one hour.')
         return value
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if cleaned_data.get('remote_copy_enabled'):
+            remote_backend = cleaned_data.get('remote_backend')
+            if remote_backend == 'none':
+                self.add_error('remote_backend', 'Choose SFTP before enabling remote copy.')
+            elif remote_backend != 'sftp':
+                self.add_error('remote_backend', 'Only SFTP remote copy is implemented in this slice.')
+        return cleaned_data

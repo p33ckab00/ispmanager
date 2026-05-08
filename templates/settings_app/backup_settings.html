@@ -129,6 +129,7 @@
             <option value="{{ value }}" {% if form.remote_backend.value == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
+          {% for error in form.remote_backend.errors %}<p class="text-xs text-red-600 mt-1">{{ error }}</p>{% endfor %}
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Stale alert after hours</label>
@@ -159,14 +160,29 @@
           <span>Allow restore test jobs</span>
         </label>
       </div>
-      <div class="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
-        <p class="font-semibold text-gray-800">Encryption readiness</p>
-        {% if encryption_status.ok %}
-        <p class="mt-1 text-emerald-700">Ready. OpenSSL detected at {{ encryption_status.openssl_path }} and passphrase env is configured.</p>
-        {% else %}
-        <p class="mt-1 text-amber-700">{{ encryption_status.error }}</p>
-        {% endif %}
-        <p class="mt-2">Set {{ encryption_status.env_var }} in the web and scheduler service environment before enabling encrypted backups.</p>
+      <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
+          <p class="font-semibold text-gray-800">Remote copy readiness</p>
+          {% if remote_copy_status.enabled %}
+            {% if remote_copy_status.ready %}
+            <p class="mt-1 text-emerald-700">Ready. SFTP detected at {{ remote_copy_status.sftp_path }} for {{ remote_copy_status.user }}@{{ remote_copy_status.host }}.</p>
+            {% else %}
+            <p class="mt-1 text-amber-700">{{ remote_copy_status.error }}</p>
+            {% endif %}
+          {% else %}
+          <p class="mt-1 text-gray-500">Disabled.</p>
+          {% endif %}
+          <p class="mt-2">SFTP uses {{ remote_copy_status.env_vars.host }}, {{ remote_copy_status.env_vars.user }}, {{ remote_copy_status.env_vars.remote_dir }}, optional {{ remote_copy_status.env_vars.port }}, {{ remote_copy_status.env_vars.key }}, and {{ remote_copy_status.env_vars.known_hosts }}.</p>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
+          <p class="font-semibold text-gray-800">Encryption readiness</p>
+          {% if encryption_status.ok %}
+          <p class="mt-1 text-emerald-700">Ready. OpenSSL detected at {{ encryption_status.openssl_path }} and passphrase env is configured.</p>
+          {% else %}
+          <p class="mt-1 text-amber-700">{{ encryption_status.error }}</p>
+          {% endif %}
+          <p class="mt-2">Set {{ encryption_status.env_var }} in the web and scheduler service environment before enabling encrypted backups.</p>
+        </div>
       </div>
     </section>
 

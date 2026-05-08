@@ -671,7 +671,7 @@
         </div>
         <div>
           <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Backups</p>
-          <p class="mt-2 text-2xl font-bold {% if backups.stale or backups.failed_last_7d or backups.low_space %}text-amber-700{% else %}text-slate-900{% endif %}">
+          <p class="mt-2 text-2xl font-bold {% if backups.stale or backups.failed_last_7d or backups.low_space or backups.remote_copy_failures_last_7d %}text-amber-700{% else %}text-slate-900{% endif %}">
             {% if backups.latest_success %}OK{% else %}None{% endif %}
           </p>
           <p class="mt-1 text-sm text-slate-500">
@@ -710,7 +710,9 @@
               <div class="flex justify-between gap-4"><dt class="text-slate-500">Last successful backup</dt><dd class="font-medium text-slate-900">{% if backups.latest_success %}{{ backups.latest_success.completed_at|timesince }} ago{% else %}Never{% endif %}</dd></div>
               <div class="flex justify-between gap-4"><dt class="text-slate-500">Failed exports last 7 days</dt><dd class="font-medium {% if backups.failed_last_7d %}text-amber-700{% else %}text-slate-900{% endif %}">{{ backups.failed_last_7d }}</dd></div>
               <div class="flex justify-between gap-4"><dt class="text-slate-500">Validation failures last 7 days</dt><dd class="font-medium {% if backups.validation_failures_last_7d %}text-amber-700{% else %}text-slate-900{% endif %}">{{ backups.validation_failures_last_7d }}</dd></div>
+              <div class="flex justify-between gap-4"><dt class="text-slate-500">Remote copy failures last 7 days</dt><dd class="font-medium {% if backups.remote_copy_failures_last_7d %}text-amber-700{% else %}text-slate-900{% endif %}">{{ backups.remote_copy_failures_last_7d }}</dd></div>
               <div class="flex justify-between gap-4"><dt class="text-slate-500">pg_dump</dt><dd class="break-all text-right font-medium {% if backups.pg_dump_ok %}text-slate-900{% else %}text-amber-700{% endif %}">{% if backups.pg_dump_ok %}{{ backups.pg_dump_detected_path }}{% else %}Missing{% endif %}</dd></div>
+              <div class="flex justify-between gap-4"><dt class="text-slate-500">Remote copy</dt><dd class="break-all text-right font-medium {% if backups.remote_copy_enabled and not backups.remote_copy_ready %}text-amber-700{% else %}text-slate-900{% endif %}">{% if backups.remote_copy_enabled %}{% if backups.remote_copy_ready %}Ready{% else %}Not ready{% endif %}{% else %}Disabled{% endif %}</dd></div>
               <div class="flex justify-between gap-4"><dt class="text-slate-500">Encryption</dt><dd class="break-all text-right font-medium {% if backups.encryption_enabled and not backups.encryption_ready %}text-amber-700{% else %}text-slate-900{% endif %}">{% if backups.encryption_enabled %}{% if backups.encryption_ready %}Ready{% else %}Not ready{% endif %}{% else %}Disabled{% endif %}</dd></div>
               <div class="flex justify-between gap-4"><dt class="text-slate-500">Stale threshold</dt><dd class="font-medium text-slate-900">{{ backups.stale_after_hours }} hour(s)</dd></div>
             </dl>
@@ -738,7 +740,11 @@
                 <p class="mt-2 text-xs text-slate-500">
                   {{ job.file_name|default:"No file" }} • {{ job.file_size_bytes|filesizeformat }}
                   {% if job.summary_json.deleted_at %} • deleted{% endif %}
+                  {% if job.summary_json.remote_copy.status == 'completed' %} • remote copied{% elif job.summary_json.remote_copy.status == 'failed' %} • remote copy failed{% endif %}
                 </p>
+                {% if job.summary_json.remote_copy.status == 'failed' %}
+                <p class="mt-2 text-xs leading-6 text-amber-700">{{ job.summary_json.remote_copy.error|truncatechars:140 }}</p>
+                {% endif %}
                 {% if job.error_report %}
                 <p class="mt-2 text-xs leading-6 text-rose-700">{{ job.error_report|truncatechars:140 }}</p>
                 {% endif %}

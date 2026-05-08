@@ -175,6 +175,11 @@
           {% if job.summary_json.deleted_at %}
           <span class="ml-2 rounded-full bg-gray-100 px-2 py-1 text-xs font-sans text-gray-500">Deleted</span>
           {% endif %}
+          {% if job.summary_json.remote_copy.status == 'completed' %}
+          <span class="ml-2 rounded-full bg-emerald-50 px-2 py-1 text-xs font-sans text-emerald-700">Remote copied</span>
+          {% elif job.summary_json.remote_copy.status == 'failed' %}
+          <span class="ml-2 rounded-full bg-amber-50 px-2 py-1 text-xs font-sans text-amber-700" title="{{ job.summary_json.remote_copy.error }}">Remote copy failed</span>
+          {% endif %}
         </td>
         <td class="px-4 py-3 text-right">
           {% if job.status == 'completed' and job.file_path and not job.summary_json.deleted_at %}
