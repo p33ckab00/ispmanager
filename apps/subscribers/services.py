@@ -211,22 +211,42 @@ def sync_ppp_secrets(router):
 
 
 def sync_active_sessions(router):
+    _, _, err = sync_subscriber_mikrotik_status(router)
+    return err
+
+
+def sync_subscriber_mikrotik_status(router):
     try:
         sessions = mikrotik.get_ppp_active(router)
     except Exception as e:
-        return str(e)
+        return 0, 0, str(e)
 
     active_usernames = set()
+    synced_at = timezone.now()
+    online_count = 0
+
     for session in sessions:
         username = session.get('name', '').strip()
         if not username:
             continue
         active_usernames.add(username)
         ip = session.get('address', None)
-        Subscriber.objects.filter(username=username).update(ip_address=ip, mt_status='online')
+        online_count += Subscriber.objects.filter(
+            router=router,
+            username=username,
+        ).update(
+            ip_address=ip,
+            mt_status='online',
+            last_synced=synced_at,
+        )
 
-    Subscriber.objects.filter(router=router).exclude(username__in=active_usernames).update(mt_status='offline')
-    return None
+    offline_count = Subscriber.objects.filter(router=router).exclude(
+        username__in=active_usernames,
+    ).update(
+        mt_status='offline',
+        last_synced=synced_at,
+    )
+    return online_count, offline_count, None
 
 
 # ── MikroTik PPP Suspend / Reconnect ──────────────────────────────────────────

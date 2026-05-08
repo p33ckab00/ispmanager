@@ -8,7 +8,7 @@ from django.contrib.auth.models import Permission, User
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
-from apps.core.models import AuditLog
+from apps.core.models import AuditLog, SystemSetup
 from apps.nms.models import ServiceAttachment
 from apps.routers.models import Router
 from apps.settings_app.models import BillingSettings, SubscriberSettings
@@ -24,7 +24,11 @@ from apps.subscribers.otp import (
     record_portal_otp_request,
     verify_otp_for_subscriber,
 )
-from apps.subscribers.services import audit_subscriber_field_changes, get_subscriber_billing_readiness
+from apps.subscribers.services import (
+    audit_subscriber_field_changes,
+    get_subscriber_billing_readiness,
+    sync_subscriber_mikrotik_status,
+)
 from apps.subscribers.services import set_subscriber_mikrotik_access, transition_subscriber_status
 
 
@@ -156,6 +160,170 @@ class MikroTikServiceAccessTests(SimpleTestCase):
 
         self.assertFalse(ok)
         self.assertIn('Static subscriber auto-suspend is not configured', err)
+
+
+class SubscriberMikroTikStatusSyncTests(TestCase):
+    def _router(self, name='Router 1', status='online', is_active=True):
+        return Router.objects.create(
+            name=name,
+            host='192.0.2.1',
+            username='api',
+            password='secret',
+            status=status,
+            is_active=is_active,
+        )
+
+    def test_status_sync_updates_live_fields_only_for_existing_router_subscribers(self):
+        router = self._router()
+        online_subscriber = Subscriber.objects.create(
+            router=router,
+            username='client-online',
+            status='suspended',
+            mt_status='offline',
+        )
+        offline_subscriber = Subscriber.objects.create(
+            router=router,
+            username='client-offline',
+            status='active',
+            mt_status='online',
+        )
+
+        with patch('apps.subscribers.services.mikrotik.get_ppp_active', return_value=[
+            {'name': 'client-online', 'address': '10.0.0.2'},
+            {'name': 'unknown-client', 'address': '10.0.0.3'},
+        ]):
+            online_count, offline_count, err = sync_subscriber_mikrotik_status(router)
+
+        self.assertEqual(online_count, 1)
+        self.assertEqual(offline_count, 1)
+        self.assertIsNone(err)
+        self.assertFalse(Subscriber.objects.filter(username='unknown-client').exists())
+
+        online_subscriber.refresh_from_db()
+        offline_subscriber.refresh_from_db()
+        self.assertEqual(online_subscriber.status, 'suspended')
+        self.assertEqual(online_subscriber.mt_status, 'online')
+        self.assertEqual(str(online_subscriber.ip_address), '10.0.0.2')
+        self.assertIsNotNone(online_subscriber.last_synced)
+        self.assertEqual(offline_subscriber.status, 'active')
+        self.assertEqual(offline_subscriber.mt_status, 'offline')
+        self.assertIsNotNone(offline_subscriber.last_synced)
+
+    def test_status_sync_keeps_other_router_subscribers_untouched(self):
+        router = self._router()
+        other_router = self._router(name='Router 2')
+        other_subscriber = Subscriber.objects.create(
+            router=other_router,
+            username='other-router-client',
+            mt_status='online',
+        )
+
+        with patch('apps.subscribers.services.mikrotik.get_ppp_active', return_value=[]):
+            sync_subscriber_mikrotik_status(router)
+
+        other_subscriber.refresh_from_db()
+        self.assertEqual(other_subscriber.mt_status, 'online')
+        self.assertIsNone(other_subscriber.last_synced)
+
+
+class SubscriberStatusSchedulerTests(TestCase):
+    def _router(self, name, status='online', is_active=True):
+        return Router.objects.create(
+            name=name,
+            host=f'192.0.2.{Router.objects.count() + 1}',
+            username='api',
+            password='secret',
+            status=status,
+            is_active=is_active,
+        )
+
+    def test_scheduler_skips_mikrotik_calls_when_disabled(self):
+        from apps.core.scheduler import job_sync_subscriber_status
+
+        self._router('Online Router')
+
+        with patch('apps.subscribers.services.sync_subscriber_mikrotik_status') as sync:
+            job_sync_subscriber_status()
+
+        sync.assert_not_called()
+
+    def test_scheduler_processes_online_active_routers_and_tolerates_errors(self):
+        from apps.core.scheduler import job_sync_subscriber_status
+
+        settings = SubscriberSettings.get_settings()
+        settings.mikrotik_status_auto_sync_enabled = True
+        settings.save()
+        online_ok = self._router('Online OK')
+        online_error = self._router('Online Error')
+        self._router('Offline Router', status='offline')
+        self._router('Inactive Router', is_active=False)
+
+        def sync_result(router):
+            if router == online_error:
+                return 0, 0, 'API failed'
+            return 1, 1, None
+
+        with (
+            patch('apps.subscribers.services.sync_subscriber_mikrotik_status') as sync,
+            patch('apps.core.scheduler.logger'),
+        ):
+            sync.side_effect = sync_result
+            job_sync_subscriber_status()
+
+        self.assertEqual(sync.call_count, 2)
+        called_routers = [call_args.args[0] for call_args in sync.call_args_list]
+        self.assertCountEqual(called_routers, [online_ok, online_error])
+
+
+class SubscriberSettingsViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='admin', password='secret')
+        SystemSetup.objects.update_or_create(
+            pk=1,
+            defaults={'is_configured': True, 'isp_name': 'Test ISP'},
+        )
+        self.client.force_login(self.user)
+
+    def _post_settings(self, **overrides):
+        data = {
+            'mikrotik_auto_suspend': 'on',
+            'mikrotik_auto_reconnect': 'on',
+            'disconnected_billing_policy': 'preserve_balance',
+            'disconnected_credit_policy': 'preserve_credit',
+            'archive_after_days': '90',
+            'portal_otp_expiry_minutes': '10',
+            'portal_otp_resend_cooldown_seconds': '60',
+            'portal_otp_max_verify_attempts': '5',
+            'portal_otp_lockout_minutes': '15',
+            'portal_otp_phone_hourly_limit': '5',
+            'portal_otp_ip_hourly_limit': '30',
+            'mikrotik_status_sync_interval_value': '5',
+            'mikrotik_status_sync_interval_unit': 'minutes',
+        }
+        data.update(overrides)
+        return self.client.post('/settings/subscriber/', data)
+
+    def test_subscriber_status_auto_sync_settings_save_hours_and_bounds(self):
+        response = self._post_settings(
+            mikrotik_status_auto_sync_enabled='on',
+            mikrotik_status_sync_interval_value='2',
+            mikrotik_status_sync_interval_unit='hours',
+        )
+
+        self.assertEqual(response.status_code, 302)
+        settings = SubscriberSettings.get_settings()
+        self.assertTrue(settings.mikrotik_status_auto_sync_enabled)
+        self.assertEqual(settings.mikrotik_status_sync_interval_minutes, 120)
+
+        response = self._post_settings(
+            mikrotik_status_sync_interval_value='2000',
+            mikrotik_status_sync_interval_unit='minutes',
+        )
+
+        self.assertEqual(response.status_code, 302)
+        settings.refresh_from_db()
+        self.assertFalse(settings.mikrotik_status_auto_sync_enabled)
+        self.assertEqual(settings.mikrotik_status_sync_interval_minutes, 1440)
 
 
 class SubscriberBillingReadinessTests(TestCase):

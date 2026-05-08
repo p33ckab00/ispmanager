@@ -123,6 +123,42 @@ def job_sample_usage():
         logger.error(f"job_sample_usage error: {e}")
 
 
+def job_sync_subscriber_status():
+    from apps.routers.models import Router
+    from apps.settings_app.models import SubscriberSettings
+    from apps.subscribers.services import sync_subscriber_mikrotik_status
+
+    settings = SubscriberSettings.get_settings()
+    if not settings.mikrotik_status_auto_sync_enabled:
+        return
+
+    routers = Router.objects.filter(is_active=True, status='online')
+    online_total = 0
+    offline_total = 0
+    error_count = 0
+    for router in routers:
+        try:
+            online_count, offline_count, err = sync_subscriber_mikrotik_status(router)
+        except Exception as e:
+            error_count += 1
+            logger.error("job_sync_subscriber_status error on %s: %s", router.name, e)
+            continue
+        if err:
+            error_count += 1
+            logger.warning("Subscriber status sync failed on %s: %s", router.name, err)
+            continue
+        online_total += online_count
+        offline_total += offline_count
+
+    if online_total or offline_total or error_count:
+        logger.info(
+            "Subscriber status sync: %s online, %s offline, %s router error(s)",
+            online_total,
+            offline_total,
+            error_count,
+        )
+
+
 def job_sync_router_status():
     from apps.routers.models import Router
     from apps.routers import mikrotik
@@ -237,13 +273,14 @@ def job_refresh_diagnostics():
 
 
 def start_scheduler():
-    from apps.settings_app.models import UsageSettings, RouterSettings, SMSSettings
+    from apps.settings_app.models import UsageSettings, RouterSettings, SMSSettings, SubscriberSettings
     scheduler = get_scheduler()
     if scheduler.running:
         return
     usage_settings = UsageSettings.get_settings()
     router_settings = RouterSettings.get_settings()
     sms_settings = SMSSettings.get_settings()
+    subscriber_settings = SubscriberSettings.get_settings()
     sms_hour, sms_minute = 8, 0
     try:
         hour_text, minute_text = sms_settings.billing_sms_schedule.split(':', 1)
@@ -293,6 +330,11 @@ def start_scheduler():
     scheduler.add_job(job_sample_usage, IntervalTrigger(minutes=usage_interval),
                       id='sample_usage', name='Sample Subscriber Usage',
                       replace_existing=True, misfire_grace_time=60)
+
+    subscriber_status_interval = max(1, subscriber_settings.mikrotik_status_sync_interval_minutes)
+    scheduler.add_job(job_sync_subscriber_status, IntervalTrigger(minutes=subscriber_status_interval),
+                      id='subscriber_status_sync', name='Sync Subscriber MikroTik Status',
+                      replace_existing=True, misfire_grace_time=max(60, subscriber_status_interval * 60))
 
     scheduler.add_job(job_auto_archive, CronTrigger(hour=2, minute=0),
                       id='auto_archive', name='Auto Archive Subscribers',

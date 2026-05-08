@@ -42,6 +42,19 @@ def _bounded_int(value, default, minimum, maximum):
     return max(minimum, min(maximum, parsed))
 
 
+def _subscriber_status_sync_interval_context(obj):
+    interval_minutes = _bounded_int(obj.mikrotik_status_sync_interval_minutes, 5, 1, 1440)
+    if interval_minutes >= 60 and interval_minutes % 60 == 0:
+        return {
+            'subscriber_status_sync_interval_value': interval_minutes // 60,
+            'subscriber_status_sync_interval_unit': 'hours',
+        }
+    return {
+        'subscriber_status_sync_interval_value': interval_minutes,
+        'subscriber_status_sync_interval_unit': 'minutes',
+    }
+
+
 @login_required
 def settings_index(request):
     return redirect('settings-system-info')
@@ -141,6 +154,17 @@ def subscriber_settings(request):
         obj.mikrotik_auto_suspend = 'mikrotik_auto_suspend' in request.POST
         obj.mikrotik_auto_reconnect = 'mikrotik_auto_reconnect' in request.POST
         obj.auto_reconnect_after_full_payment = 'auto_reconnect_after_full_payment' in request.POST
+        obj.mikrotik_status_auto_sync_enabled = 'mikrotik_status_auto_sync_enabled' in request.POST
+        interval_value = _bounded_int(
+            request.POST.get('mikrotik_status_sync_interval_value'),
+            5,
+            1,
+            1440,
+        )
+        interval_unit = request.POST.get('mikrotik_status_sync_interval_unit', 'minutes')
+        if interval_unit == 'hours':
+            interval_value *= 60
+        obj.mikrotik_status_sync_interval_minutes = max(1, min(1440, interval_value))
         disconnected_policy = request.POST.get('disconnected_billing_policy', 'preserve_balance')
         allowed_policies = {choice[0] for choice in SubscriberSettings.DISCONNECTED_BILLING_POLICY_CHOICES}
         obj.disconnected_billing_policy = (
@@ -198,6 +222,7 @@ def subscriber_settings(request):
         return redirect('settings-subscriber')
     ctx = _ctx('subscriber')
     ctx['obj'] = obj
+    ctx.update(_subscriber_status_sync_interval_context(obj))
     return render(request, 'settings_app/subscriber_settings.html', ctx)
 
 

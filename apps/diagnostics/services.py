@@ -636,6 +636,7 @@ def _build_job_metadata():
     sms_schedule = sms_settings.billing_sms_schedule or '08:00'
     router_interval = max(1, router_settings.polling_interval_seconds)
     usage_interval = max(1, usage_settings.sampler_interval_minutes)
+    subscriber_status_interval = max(1, subscriber_settings.mikrotik_status_sync_interval_minutes)
 
     return {
         'refresh_diagnostics': {
@@ -730,6 +731,18 @@ def _build_job_metadata():
             'enabled': True,
             'healthy_within': timedelta(seconds=max(60, router_interval * 4)),
             'note': 'Feeds live telemetry cards and interface detail views.',
+        },
+        'subscriber_status_sync': {
+            'label': 'Sync Subscriber MikroTik Status',
+            'group': 'Subscribers',
+            'schedule': f'Every {subscriber_status_interval} minute(s)',
+            'enabled': subscriber_settings.mikrotik_status_auto_sync_enabled,
+            'healthy_within': timedelta(minutes=max(30, subscriber_status_interval * 4)),
+            'note': (
+                'Updates subscriber MikroTik online/offline status from PPP active sessions.'
+                if subscriber_settings.mikrotik_status_auto_sync_enabled
+                else 'Disabled in Subscriber Settings.'
+            ),
         },
         'sample_usage': {
             'label': 'Sample Subscriber Usage',
@@ -888,7 +901,7 @@ def _get_scheduler_health(now):
             health = 'pending'
             detail = 'No successful execution recorded yet.'
 
-        if meta['enabled'] and job_id in {'router_status_check', 'sample_router_traffic', 'sample_usage', 'refresh_diagnostics'} and health == 'healthy':
+        if meta['enabled'] and job_id in {'router_status_check', 'sample_router_traffic', 'sample_usage', 'subscriber_status_sync', 'refresh_diagnostics'} and health == 'healthy':
             healthy_interval_seen = True
 
         job_rows.append({

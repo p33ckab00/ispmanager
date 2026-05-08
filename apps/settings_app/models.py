@@ -162,6 +162,14 @@ class SubscriberSettings(models.Model):
         default=False,
         help_text='Automatically reconnect suspended subscribers after all open balances are fully paid'
     )
+    mikrotik_status_auto_sync_enabled = models.BooleanField(
+        default=False,
+        help_text='Automatically refresh subscriber online/offline status from MikroTik PPP active sessions.'
+    )
+    mikrotik_status_sync_interval_minutes = models.IntegerField(
+        default=5,
+        help_text='How often subscriber MikroTik status auto-sync runs, in minutes.'
+    )
     disconnected_billing_policy = models.CharField(
         max_length=30,
         choices=DISCONNECTED_BILLING_POLICY_CHOICES,
