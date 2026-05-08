@@ -77,6 +77,7 @@ Project documentation starts here:
 - [Backup and Restore Runbook](docs/12_backup_restore_runbook.md)
 - [Staging Checklist](docs/13_staging_checklist.md)
 - [Go-Live Checklist](docs/14_go_live_checklist.md)
+- [Container Deployment Options](docs/56_container_deployment_options.md)
 - [Ubuntu Production Manual Install Guide](docs/21_ubuntu_production_manual_install_guide.md)
 - [Ubuntu Scheduler Service Guide](docs/22_ubuntu_scheduler_workaround_guide.md)
 - [Production Hardening Checklist](docs/23_production_hardening_checklist.md)
