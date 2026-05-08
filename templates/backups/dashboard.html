@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Backups - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Backups</h2>
+    <p class="text-gray-500 text-sm mt-1">Database export, backup history, and restore-test tracking.</p>
+  </div>
+  {% if request.user.is_superuser or perms.settings_app.change_backupsettings %}
+  <a href="{% url 'settings-backup' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">
+    <i class="fa fa-gear mr-1"></i> Settings
+  </a>
+  {% endif %}
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs uppercase tracking-wide text-gray-400 mb-1">Manual Backups</p>
+    <p class="text-lg font-semibold text-gray-800">{% if backup_settings.manual_backups_enabled %}Enabled{% else %}Disabled{% endif %}</p>
+    <p class="text-xs text-gray-500 mt-2">Full database backup uses PostgreSQL custom dump format.</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs uppercase tracking-wide text-gray-400 mb-1">Last Success</p>
+    <p class="text-lg font-semibold text-gray-800">
+      {% if latest_success %}{{ latest_success.completed_at|default:latest_success.created_at|date:"M d, Y H:i" }}{% else %}None{% endif %}
+    </p>
+    <p class="text-xs text-gray-500 mt-2">{{ latest_success.file_name|default:"No completed backup recorded." }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs uppercase tracking-wide text-gray-400 mb-1">Last Failure</p>
+    <p class="text-lg font-semibold text-gray-800">
+      {% if latest_failure %}{{ latest_failure.completed_at|default:latest_failure.created_at|date:"M d, Y H:i" }}{% else %}None{% endif %}
+    </p>
+    <p class="text-xs text-gray-500 mt-2">{{ latest_failure.error_report|truncatechars:80|default:"No failed backup recorded." }}</p>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <div>
+      <h3 class="font-semibold text-gray-800">Manual Full Database Backup</h3>
+      <p class="text-sm text-gray-500 mt-1">Creates a full PostgreSQL database export in the configured backup root.</p>
+      {% if running_job %}
+      <p class="text-xs text-blue-700 mt-2">A backup started at {{ running_job.started_at|date:"M d, Y H:i" }} is still marked running.</p>
+      {% elif not backup_settings.manual_backups_enabled %}
+      <p class="text-xs text-amber-700 mt-2">Manual backups are disabled in Backup & Restore settings.</p>
+      {% elif not request.user.is_superuser and not perms.backups.run_database_backup %}
+      <p class="text-xs text-amber-700 mt-2">Your account does not have permission to run database backups.</p>
+      {% endif %}
+    </div>
+    <form method="post" action="{% url 'backups-run-full' %}">
+      {% csrf_token %}
+      <button type="submit"
+        class="inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg"
+        {% if not can_run_full_backup %}disabled{% endif %}>
+        <i class="fa fa-database"></i>
+        Run Full Backup
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+    <div>
+      <h3 class="font-semibold text-gray-800">Partial Database Backup Presets</h3>
+      <p class="text-sm text-gray-500 mt-1">Creates dependency-aware PostgreSQL exports for selected operational areas.</p>
+      {% if not backup_settings.partial_backups_enabled %}
+      <p class="text-xs text-amber-700 mt-2">Partial backups are disabled in Backup & Restore settings.</p>
+      {% elif running_job %}
+      <p class="text-xs text-blue-700 mt-2">Partial backups are paused while another backup is running.</p>
+      {% elif not request.user.is_superuser and not perms.backups.run_database_backup %}
+      <p class="text-xs text-amber-700 mt-2">Your account does not have permission to run database backups.</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+    {% for profile in partial_backup_profiles %}
+    <form method="post" action="{% url 'backups-run-partial' profile=profile.value %}" class="rounded-lg border border-gray-200 p-4">
+      {% csrf_token %}
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h4 class="text-sm font-semibold text-gray-800">{{ profile.label }}</h4>
+          <p class="text-xs text-gray-500 mt-1 leading-5">{{ profile.description }}</p>
+        </div>
+        <button type="submit"
+          class="inline-flex shrink-0 items-center justify-center gap-2 bg-gray-900 hover:bg-black disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-2 rounded-lg"
+          {% if not can_run_partial_backups %}disabled{% endif %}>
+          Run
+        </button>
+      </div>
+    </form>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+    <div>
+      <h3 class="font-semibold text-gray-800">Import Validation</h3>
+      <p class="text-sm text-gray-500 mt-1">Upload a backup file to validate readability and checksum only. This does not restore data.</p>
+      {% if not can_validate_imports %}
+      <p class="text-xs text-amber-700 mt-2">Your account does not have permission to validate backup imports.</p>
+      {% endif %}
+    </div>
+    <form method="post" action="{% url 'backups-validate-upload' %}" enctype="multipart/form-data" class="flex flex-col sm:flex-row gap-2 sm:items-center">
+      {% csrf_token %}
+      <input type="file" name="file" accept=".dump,.sql,.gz"
+        class="block w-full text-sm text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-gray-700 hover:file:bg-gray-200"
+        {% if not can_validate_imports %}disabled{% endif %}>
+      <button type="submit"
+        class="inline-flex items-center justify-center gap-2 bg-gray-900 hover:bg-black disabled:bg-gray-300 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-lg"
+        {% if not can_validate_imports %}disabled{% endif %}>
+        Validate
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <div>
+      <h3 class="font-semibold text-gray-800">Retention Cleanup</h3>
+      <p class="text-sm text-gray-500 mt-1">Deletes older completed backup files while keeping the newest {{ backup_settings.retention_keep_last }} file{{ backup_settings.retention_keep_last|pluralize }}.</p>
+      {% if not can_delete_backups %}
+      <p class="text-xs text-amber-700 mt-2">Enable backup delete and use an account with delete permission to run cleanup.</p>
+      {% endif %}
+    </div>
+    <form method="post" action="{% url 'backups-cleanup-retention' %}" onsubmit="return confirm('Run retention cleanup now? Older backup files outside the retention count will be deleted from disk.');">
+      {% csrf_token %}
+      <button type="submit"
+        class="inline-flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed text-gray-800 text-sm font-semibold px-4 py-2 rounded-lg"
+        {% if not can_delete_backups %}disabled{% endif %}>
+        <i class="fa fa-broom"></i>
+        Run Cleanup
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+  <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+    <h3 class="font-semibold text-gray-800">Backup Jobs</h3>
+    <span class="text-xs text-gray-400">{{ jobs|length }} shown</span>
+  </div>
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">When</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Type</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Profile</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">File</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Size</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Checksum</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Actions</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for job in jobs %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-3 text-xs text-gray-500">{{ job.created_at|date:"M d, Y H:i" }}</td>
+        <td class="px-4 py-3 text-xs">{{ job.get_job_type_display }}</td>
+        <td class="px-4 py-3 text-xs">{{ job.get_profile_display }}</td>
+        <td class="px-4 py-3 text-xs">
+          <span class="inline-flex rounded-full px-2 py-1 text-xs font-medium
+            {% if job.status == 'completed' %}bg-emerald-50 text-emerald-700{% elif job.status == 'failed' %}bg-red-50 text-red-700{% elif job.status == 'running' %}bg-blue-50 text-blue-700{% else %}bg-gray-100 text-gray-600{% endif %}">
+            {{ job.get_status_display }}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-xs text-gray-600">{{ job.file_name|default:"-" }}</td>
+        <td class="px-4 py-3 text-xs text-gray-600">{{ job.file_size_bytes|filesizeformat }}</td>
+        <td class="px-4 py-3 text-xs text-gray-500 font-mono">
+          {{ job.checksum_sha256|truncatechars:18|default:"-" }}
+          {% if job.summary_json.deleted_at %}
+          <span class="ml-2 rounded-full bg-gray-100 px-2 py-1 text-xs font-sans text-gray-500">Deleted</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-right">
+          {% if job.status == 'completed' and job.file_path and not job.summary_json.deleted_at %}
+          <div class="flex items-center justify-end gap-2">
+            <form method="post" action="{% url 'backups-verify' pk=job.pk %}">
+              {% csrf_token %}
+              <button type="submit" class="text-xs text-gray-600 hover:text-gray-900">Verify</button>
+            </form>
+            {% if can_download_backups %}
+            <a href="{% url 'backups-download' pk=job.pk %}" class="text-xs text-blue-600 hover:underline">Download</a>
+            {% endif %}
+            {% if can_delete_backups %}
+            <form method="post" action="{% url 'backups-delete' pk=job.pk %}" onsubmit="return confirm('Delete this backup file from disk? The job history will remain.');">
+              {% csrf_token %}
+              <button type="submit" class="text-xs text-red-600 hover:text-red-800">Delete</button>
+            </form>
+            {% endif %}
+          </div>
+          {% else %}
+          <span class="text-xs text-gray-400">-</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="8" class="px-4 py-10 text-center text-gray-400 text-sm">No backup jobs have been recorded yet.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

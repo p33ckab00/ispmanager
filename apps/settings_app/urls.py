@@ -10,4 +10,5 @@ urlpatterns = [
     path('router/', views.router_settings, name='settings-router'),
     path('subscriber/', views.subscriber_settings, name='settings-subscriber'),
     path('usage/', views.usage_settings, name='settings-usage'),
+    path('backup/', views.backup_settings, name='settings-backup'),
 ]

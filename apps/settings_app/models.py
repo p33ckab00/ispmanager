@@ -1,3 +1,5 @@
+from datetime import time
+
 from django.db import models
 
 
@@ -237,6 +239,68 @@ class UsageSettings(models.Model):
 
     def __str__(self):
         return 'Usage Settings'
+
+    @classmethod
+    def get_settings(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+
+class BackupSettings(models.Model):
+    BACKUP_PROFILE_CHOICES = [
+        ('full', 'Full Database'),
+        ('business_critical', 'Business Critical'),
+        ('subscribers', 'Subscribers'),
+        ('billing_payments', 'Billing and Payments'),
+        ('accounting', 'Accounting'),
+        ('network_nms', 'Network and NMS'),
+        ('settings_content', 'Settings and Content'),
+    ]
+
+    REMOTE_BACKEND_CHOICES = [
+        ('none', 'None'),
+        ('sftp', 'SFTP'),
+        ('s3', 'S3-compatible'),
+    ]
+
+    backup_root = models.CharField(max_length=500, default='/opt/backups/ispmanager/db')
+    pg_dump_path = models.CharField(max_length=255, default='pg_dump')
+    filename_prefix = models.CharField(max_length=80, default='ispmanager')
+    manual_backups_enabled = models.BooleanField(default=False)
+    partial_backups_enabled = models.BooleanField(default=False)
+    allow_backup_download = models.BooleanField(default=False)
+    allow_backup_delete = models.BooleanField(default=False)
+    retention_keep_last = models.PositiveIntegerField(default=14)
+    minimum_free_space_mb = models.PositiveIntegerField(default=1024)
+    scheduled_backups_enabled = models.BooleanField(default=False)
+    scheduled_backup_time = models.TimeField(default=time(2, 0))
+    scheduled_backup_profile = models.CharField(
+        max_length=40,
+        choices=BACKUP_PROFILE_CHOICES,
+        default='full',
+    )
+    weekly_backup_enabled = models.BooleanField(default=False)
+    remote_copy_enabled = models.BooleanField(default=False)
+    remote_backend = models.CharField(
+        max_length=20,
+        choices=REMOTE_BACKEND_CHOICES,
+        default='none',
+    )
+    encryption_enabled = models.BooleanField(default=False)
+    backup_failure_alerts_enabled = models.BooleanField(default=True)
+    backup_stale_after_hours = models.PositiveIntegerField(default=36)
+    restore_test_enabled = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Backup Settings'
+        permissions = [
+            ('view_backup_settings', 'Can view backup settings'),
+            ('change_backup_settings', 'Can change backup settings'),
+        ]
+
+    def __str__(self):
+        return 'Backup Settings'
 
     @classmethod
     def get_settings(cls):

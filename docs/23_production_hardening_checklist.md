@@ -27,6 +27,11 @@ Confirm:
 - database password is strong
 - `5432` is not publicly exposed
 - regular PostgreSQL backups are configured
+- `pg_dump` is installed and executable by the app process
+- Backup & Restore `pg_dump path` is absolute, usually `/usr/bin/pg_dump`
+- Backup & Restore root exists, is writable by the app service user, and is not public web storage
+- manual full database backup completes successfully
+- backup checksum verification succeeds
 - restore workflow has been tested
 
 ## 3. Service Hardening
@@ -86,6 +91,7 @@ Minimum recommended:
 - PostgreSQL service monitored
 - disk space monitored
 - backup success monitored
+- Diagnostics backup health card shows recent success and no stale-backup alert
 - application smoke test performed after each deploy
 
 ## 9. Rollback Readiness
@@ -93,6 +99,7 @@ Minimum recommended:
 Before each deploy, confirm:
 
 - database backup taken
+- backup file has non-zero size and checksum recorded
 - previous app version can be restored
 - environment file backup exists
 - service definitions are backed up

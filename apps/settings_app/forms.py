@@ -1,5 +1,11 @@
 from django import forms
-from apps.settings_app.models import BillingSettings, SMSSettings, TelegramSettings, RouterSettings
+from apps.settings_app.models import (
+    BackupSettings,
+    BillingSettings,
+    RouterSettings,
+    SMSSettings,
+    TelegramSettings,
+)
 from apps.core.models import SystemSetup
 
 
@@ -93,3 +99,63 @@ class RouterSettingsForm(forms.ModelForm):
             'default_api_port', 'polling_interval_seconds',
             'sync_on_startup', 'connection_timeout_seconds',
         ]
+
+
+class BackupSettingsForm(forms.ModelForm):
+    class Meta:
+        model = BackupSettings
+        fields = [
+            'backup_root',
+            'pg_dump_path',
+            'filename_prefix',
+            'manual_backups_enabled',
+            'partial_backups_enabled',
+            'allow_backup_download',
+            'allow_backup_delete',
+            'retention_keep_last',
+            'minimum_free_space_mb',
+            'scheduled_backups_enabled',
+            'scheduled_backup_time',
+            'scheduled_backup_profile',
+            'weekly_backup_enabled',
+            'remote_copy_enabled',
+            'remote_backend',
+            'encryption_enabled',
+            'backup_failure_alerts_enabled',
+            'backup_stale_after_hours',
+            'restore_test_enabled',
+        ]
+        widgets = {
+            'scheduled_backup_time': forms.TimeInput(format='%H:%M', attrs={'type': 'time'}),
+        }
+
+    def clean_backup_root(self):
+        backup_root = self.cleaned_data['backup_root'].strip()
+        if not backup_root.startswith('/'):
+            raise forms.ValidationError('Backup root must be an absolute filesystem path.')
+        return backup_root.rstrip('/') or '/'
+
+    def clean_filename_prefix(self):
+        prefix = self.cleaned_data['filename_prefix'].strip()
+        allowed = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_')
+        if not prefix or any(char not in allowed for char in prefix):
+            raise forms.ValidationError('Filename prefix may contain only letters, numbers, hyphen, and underscore.')
+        return prefix
+
+    def clean_retention_keep_last(self):
+        value = self.cleaned_data['retention_keep_last']
+        if value < 1:
+            raise forms.ValidationError('Retention must keep at least one backup.')
+        return value
+
+    def clean_minimum_free_space_mb(self):
+        value = self.cleaned_data['minimum_free_space_mb']
+        if value < 256:
+            raise forms.ValidationError('Minimum free space guard must be at least 256 MB.')
+        return value
+
+    def clean_backup_stale_after_hours(self):
+        value = self.cleaned_data['backup_stale_after_hours']
+        if value < 1:
+            raise forms.ValidationError('Stale backup alert threshold must be at least one hour.')
+        return value

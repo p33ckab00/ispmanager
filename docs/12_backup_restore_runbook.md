@@ -507,3 +507,312 @@ This is especially important because `ISP Manager` handles:
 - collections state
 - operational settings
 
+## 23. Application-Managed Backup and Restore Feature Plan
+
+`ISP Manager` should expose database backup operations carefully because the app is
+currently maintained directly on a live production server.
+
+The product naming should stay precise:
+
+- `Data Exchange` means CSV import/export for operational records.
+- `DB Export / Backup` means PostgreSQL-native backup output.
+- `DB Import` means validating or restoring a PostgreSQL backup file.
+
+For operator safety, database export should not be implemented as another CSV
+export. A full database backup must use PostgreSQL-native tooling such as
+`pg_dump`.
+
+### Backup & Restore Settings
+
+Add a settings page under:
+
+- `Settings > Backup & Restore`
+
+The settings page should control:
+
+- local backup root, such as `/opt/backups/ispmanager/db`
+- `pg_dump` path
+- filename prefix
+- minimum free-space guard
+- manual backup enablement
+- partial backup enablement
+- download and delete enablement
+- retention count
+- scheduled backup time and profile
+- stale-backup alert threshold
+- V2 remote copy, encryption, and restore-test guardrails
+
+Remote storage credentials and encryption secrets should come from environment
+variables or OS-level secret handling, not from normal database fields.
+
+### V1 Scope
+
+V1 should include:
+
+- manual full DB export / backup
+- manual partial DB export / backup using curated presets
+- backup job history
+- checksum and file-size recording
+- controlled backup download
+- controlled backup delete
+- audit logging for all backup operations
+- uploaded backup validation only
+
+V1 should not include one-click production restore.
+
+### V2 Scope
+
+V2 should include:
+
+- scheduled full backup
+- retention cleanup
+- diagnostics backup-health checks
+- failure and stale-backup alerts
+- remote copy
+- encrypted backups
+- media/config backup packages
+- restore test into a separate database
+
+Production restore should remain a guided maintenance workflow unless a future
+wizard can enforce scheduler stop, write lock, pre-restore backup, authorization,
+and rollback checks.
+
+### Partial Backup Presets
+
+Partial backups must use dependency-aware presets instead of arbitrary table
+selection.
+
+Recommended presets:
+
+- `Full Database`
+- `Business Critical`
+- `Subscribers`
+- `Billing and Payments`
+- `Accounting`
+- `Network and NMS`
+- `Settings and Content`
+
+Random table selection is not recommended because it can produce backups that
+cannot restore cleanly due to foreign-key dependencies.
+
+### DB Import Boundary
+
+The safe first implementation for DB import is upload validation:
+
+- confirm file type and size
+- compute checksum
+- confirm compressed files can be read
+- record validation result
+
+The next safe step is test restore:
+
+- restore into a separate temporary or staging database
+- run count and integrity checks
+- produce a validation report
+
+Direct import into the live production database must not be exposed as a normal
+operator action.
+
+## 24. Production-Safe Implementation Slices
+
+Because this system is being changed directly on a live server, backup work
+should be delivered in small slices.
+
+### Slice 0: Documentation
+
+- Document backup/export/import boundaries.
+- Document V1 and V2 scope.
+- Document partial backup presets.
+- No runtime behavior changes.
+
+### Slice 1: Settings
+
+- Add `Settings > Backup & Restore`.
+- Add backup settings persistence.
+- Keep backup execution disabled.
+
+### Slice 2: Backup Job History
+
+- Add backup job history records.
+- Add a history dashboard.
+- Do not run `pg_dump` yet.
+
+### Slice 3: Manual Full Backup
+
+- Add manual full database backup.
+- Write to a temporary file first.
+- Rename only after success.
+- Record checksum and size.
+- Log the action in `AuditLog`.
+
+Implementation notes:
+
+- The manual full backup must be disabled by default.
+- The operator must enable manual backups in `Settings > Backup & Restore`.
+- The action must require the `run_database_backup` permission or superuser access.
+- The backup service should call `pg_dump` with structured subprocess arguments,
+  not a shell string.
+- The database password should be supplied through `PGPASSWORD` in the subprocess
+  environment and must not be written to job logs.
+- The first supported output format is PostgreSQL custom format
+  (`pg_dump --format=custom`) with `.dump` filenames.
+- If the app reports `No such file or directory: pg_dump`, set `pg_dump path`
+  in `Settings > Backup & Restore` to an absolute path such as
+  `/usr/bin/pg_dump`. On Ubuntu, install the client tools with
+  `sudo apt install postgresql-client` if no `pg_dump` binary exists.
+- The final backup file should be written with restrictive permissions, such as
+  `0600`, after successful completion.
+- Failed backups should create or update a failed backup job record so diagnostics
+  and operators can see the problem.
+
+### Slice 4: Download, Delete, and Verify
+
+- Add controlled download.
+- Add controlled delete.
+- Add checksum verification.
+- Require explicit permissions.
+
+Implementation notes:
+
+- Download must require `download_database_backup` permission or superuser access.
+- Download must also require `allow_backup_download` in Backup & Restore settings.
+- Delete must require `delete_database_backup` permission or superuser access.
+- Delete must also require `allow_backup_delete` in Backup & Restore settings.
+- Checksum verification may be available to operators who can view backup jobs.
+- Download, delete, and verify must resolve the target file path and confirm it is
+  inside the configured backup root before touching the file.
+- Delete should remove the file from disk but preserve the job history record for
+  auditability.
+- Every download, delete, and verification action should write an `AuditLog`
+  entry.
+
+### Slice 5: Partial Backup Presets
+
+- Add curated partial backup profiles.
+- Preserve required table dependencies.
+- Do not allow arbitrary table picking.
+
+Implementation notes:
+
+- Partial backups must require `partial_backups_enabled` in Backup & Restore
+  settings.
+- Partial backups must also require manual backups to be enabled and the same
+  `run_database_backup` permission used by full backups.
+- Profiles should resolve to Django model table names from approved app-label
+  groups.
+- The first implementation should use PostgreSQL custom dump format with
+  repeated `--table` arguments.
+- The backup job summary should record the selected profile and included table
+  list.
+- The UI must present named presets only. Do not expose arbitrary table
+  selection to operators.
+- Partial backups are for controlled export, inspection, and future restore-test
+  workflows. They are not a substitute for full production backups.
+
+### Slice 6: Import Validation
+
+- Allow upload validation only.
+- Do not restore into production.
+
+Implementation notes:
+
+- Import validation must require `validate_database_backup` permission or
+  superuser access.
+- Uploaded files should be streamed to a temporary file for inspection and
+  removed after validation.
+- Validation should record file name, size, checksum, compression, detected dump
+  format, status, and validation errors in backup job history.
+- Validation may confirm gzip readability and basic PostgreSQL dump signatures,
+  such as PostgreSQL custom dump headers or plain SQL dump markers.
+- Validation must not call `pg_restore` against the live production database.
+- Validation must not replace, truncate, or mutate production tables.
+- A successful validation means the uploaded file is readable enough for the
+  current validation checks. It does not prove the file can fully restore until
+  a later restore-test slice restores it into a separate database.
+
+### Slice 7: Retention Cleanup
+
+- Add manual retention cleanup first.
+- Keep scheduled cleanup disabled until manual cleanup is validated.
+
+Implementation notes:
+
+- Retention cleanup should use `retention_keep_last` from Backup & Restore
+  settings.
+- The first implementation should be manual only.
+- Cleanup should require `delete_database_backup` permission or superuser access.
+- Cleanup should also respect the same delete setting used for manual backup
+  delete actions.
+- Cleanup must only consider completed DB export backup jobs.
+- Cleanup must preserve the newest configured number of backup files.
+- Cleanup must confirm every target file is inside the configured backup root
+  before deleting it.
+- Cleanup should remove files from disk but preserve backup job records and mark
+  the job summary with `deleted_at`, `deleted_by`, and `deleted_reason`.
+- Cleanup must write an `AuditLog` entry with deleted/skipped counts.
+
+### Slice 8: Diagnostics
+
+- Show last successful backup.
+- Show last failed backup.
+- Warn when backups are stale.
+- Warn when backup storage is low.
+
+Implementation notes:
+
+- Diagnostics should read Backup & Restore settings and backup job history.
+- Diagnostics should not create backup directories or mutate backup files.
+- Alerts should be generated when backup storage is unavailable, backup storage
+  is below the configured free-space guard, no successful backup is recent enough,
+  or recent backup export jobs failed.
+- The diagnostics dashboard should show last success, recent failures, validation
+  failures, `pg_dump` availability, backup root status, and free-space details.
+- Backup alerts should link operators to `/backups/` or `/settings/backup/`.
+
+### Slice 9: Scheduled Backups
+
+- Add scheduler integration.
+- Keep disabled by default.
+- Enable only after manual backup is proven reliable.
+
+Implementation notes:
+
+- Scheduled backups must use `scheduled_backups_enabled` from Backup & Restore
+  settings.
+- Scheduled backups should reuse the same backup service path as manual backups.
+- The first scheduled implementation should register jobs with APScheduler but
+  exit quietly while scheduling is disabled.
+- Scheduled backup profile should come from `scheduled_backup_profile`.
+- Weekly backups should require both `scheduled_backups_enabled` and
+  `weekly_backup_enabled`.
+- Scheduler time/profile changes may require a scheduler process restart because
+  this project registers cron triggers at scheduler startup.
+- Scheduler diagnostics should list scheduled backup jobs and show whether they
+  are enabled by settings.
+- Scheduled backup jobs must not run until manual backup has been tested
+  successfully on the production server.
+
+### Slice 10: Remote and Encrypted Backups
+
+- Add encryption.
+- Add remote copy.
+- Alert on failed remote transfer.
+
+### Slice 11: Test Restore
+
+- Restore into a separate database.
+- Run validation checks.
+- Produce an operator report.
+
+### Slice 12: Production Restore Wizard
+
+Only consider this after the restore test workflow is proven. A production
+restore wizard must require:
+
+- superuser authorization
+- current-state backup
+- maintenance window confirmation
+- scheduler stop confirmation
+- app write lock or downtime
+- rollback plan confirmation
+- post-restore validation checklist

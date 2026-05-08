@@ -14,6 +14,8 @@ from django.utils import timezone
 from django_apscheduler.models import DjangoJob, DjangoJobExecution
 
 from apps.accounting.models import ExpenseRecord, IncomeRecord
+from apps.backups.models import BackupJob
+from apps.backups.services import BackupError, resolve_pg_dump_path
 from apps.billing.models import BillingSnapshot, Invoice, Payment
 from apps.core.models import AuditLog
 from apps.data_exchange.models import DataExchangeJob
@@ -25,6 +27,7 @@ from apps.diagnostics.models import (
 from apps.notifications.models import Notification
 from apps.routers.models import InterfaceTrafficCache, Router
 from apps.settings_app.models import (
+    BackupSettings,
     BillingSettings,
     RouterSettings,
     SMSSettings,
@@ -347,6 +350,71 @@ def get_incident_resolution_context(incident):
             ],
             links=[{'label': 'Data Exchange', 'href': '/data-exchange/'}],
         ),
+        'backups.storage.unavailable': _manual_guide(
+            'Fix backup storage path',
+            'Backup storage must exist, be writable by the app process, and stay inside the configured server path.',
+            steps=[
+                'Open Backup & Restore settings and confirm the backup root.',
+                'Create the directory on the server if it does not exist.',
+                'Confirm ownership and permissions allow the app user to write backups.',
+            ],
+            commands=[
+                'sudo mkdir -p /opt/backups/ispmanager/db',
+                'sudo chown -R ispmanager:ispmanager /opt/backups/ispmanager',
+                'sudo chmod 750 /opt/backups/ispmanager /opt/backups/ispmanager/db',
+            ],
+            links=[
+                {'label': 'Backup settings', 'href': '/settings/backup/'},
+                {'label': 'Backups', 'href': '/backups/'},
+            ],
+        ),
+        'backups.storage.low_space': _manual_guide(
+            'Free backup storage space',
+            'The configured backup filesystem has less free space than the backup guard requires.',
+            steps=[
+                'Open Backups and review old backup files.',
+                'Run retention cleanup if the retention policy is correct.',
+                'Move or delete obsolete backup files after confirming an off-host copy exists.',
+            ],
+            links=[{'label': 'Backups', 'href': '/backups/'}],
+        ),
+        'backups.stale': _manual_guide(
+            'Create a fresh database backup',
+            'No successful database backup is recent enough for the configured stale-backup threshold.',
+            steps=[
+                'Open Backups.',
+                'Confirm Backup & Restore settings are enabled for manual backup.',
+                'Run a full backup and verify the checksum.',
+            ],
+            links=[
+                {'label': 'Backups', 'href': '/backups/'},
+                {'label': 'Backup settings', 'href': '/settings/backup/'},
+            ],
+        ),
+        'backups.failed_recently': _manual_guide(
+            'Investigate failed backup job',
+            'A recent database backup failed and may leave the system without a trustworthy recovery point.',
+            steps=[
+                'Open Backups and inspect the failed job error.',
+                'Confirm PostgreSQL credentials, pg_dump path, backup root permissions, and free disk space.',
+                'Run a new backup after the root cause is fixed.',
+            ],
+            links=[{'label': 'Backups', 'href': '/backups/'}],
+        ),
+        'backups.pg_dump.missing': _manual_guide(
+            'Configure pg_dump path',
+            'The app cannot run PostgreSQL backups until it can execute pg_dump from the web or scheduler process.',
+            steps=[
+                'Open Backup & Restore settings.',
+                'Set pg_dump path to the detected binary, usually /usr/bin/pg_dump on Ubuntu.',
+                'If no binary exists, install the PostgreSQL client package.',
+            ],
+            commands=[
+                'command -v pg_dump',
+                'sudo apt install postgresql-client',
+            ],
+            links=[{'label': 'Backup settings', 'href': '/settings/backup/'}],
+        ),
     }
 
     guide = guides.get(key)
@@ -627,6 +695,7 @@ def _get_service_health(now, force=False):
 
 
 def _build_job_metadata():
+    backup_settings = BackupSettings.get_settings()
     billing_settings = BillingSettings.get_settings()
     sms_settings = SMSSettings.get_settings()
     router_settings = RouterSettings.get_settings()
@@ -637,6 +706,7 @@ def _build_job_metadata():
     router_interval = max(1, router_settings.polling_interval_seconds)
     usage_interval = max(1, usage_settings.sampler_interval_minutes)
     subscriber_status_interval = max(1, subscriber_settings.mikrotik_status_sync_interval_minutes)
+    backup_time = backup_settings.scheduled_backup_time.strftime('%H:%M')
 
     return {
         'refresh_diagnostics': {
@@ -646,6 +716,30 @@ def _build_job_metadata():
             'enabled': True,
             'healthy_within': timedelta(minutes=15),
             'note': 'Refreshes persisted diagnostics incidents and Linux service snapshots.',
+        },
+        'scheduled_database_backup': {
+            'label': 'Scheduled Database Backup',
+            'group': 'Backups',
+            'schedule': f'Daily at {backup_time}',
+            'enabled': backup_settings.scheduled_backups_enabled,
+            'healthy_within': timedelta(hours=max(36, backup_settings.backup_stale_after_hours + 12)),
+            'note': (
+                f"Runs {backup_settings.get_scheduled_backup_profile_display()} backup from Backup & Restore settings."
+                if backup_settings.scheduled_backups_enabled
+                else 'Disabled in Backup & Restore settings.'
+            ),
+        },
+        'weekly_database_backup': {
+            'label': 'Weekly Database Backup',
+            'group': 'Backups',
+            'schedule': f'Sundays at {backup_time}',
+            'enabled': backup_settings.scheduled_backups_enabled and backup_settings.weekly_backup_enabled,
+            'healthy_within': timedelta(days=8),
+            'note': (
+                f"Runs weekly {backup_settings.get_scheduled_backup_profile_display()} backup."
+                if backup_settings.weekly_backup_enabled
+                else 'Disabled in Backup & Restore settings.'
+            ),
         },
         'mark_overdue': {
             'label': 'Mark Overdue Invoices',
@@ -1176,6 +1270,111 @@ def _get_data_exchange_health(now):
     }
 
 
+def _nearest_existing_path(path):
+    current = os.path.abspath(path)
+    while current and not os.path.exists(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+    return current
+
+
+def _get_backup_health(now):
+    backup_settings = BackupSettings.get_settings()
+    try:
+        pg_dump_detected_path = resolve_pg_dump_path(backup_settings.pg_dump_path)
+        pg_dump_ok = True
+        pg_dump_error = ''
+    except BackupError as exc:
+        pg_dump_detected_path = ''
+        pg_dump_ok = False
+        pg_dump_error = str(exc)
+    latest_success = BackupJob.objects.filter(
+        job_type='export',
+        status='completed',
+    ).order_by('-completed_at', '-created_at').first()
+    latest_failure = BackupJob.objects.filter(
+        job_type='export',
+        status='failed',
+    ).order_by('-completed_at', '-created_at').first()
+    recent_jobs = BackupJob.objects.select_related('created_by').order_by('-created_at')[:8]
+
+    backup_root = os.path.expanduser(backup_settings.backup_root)
+    root_exists = os.path.isdir(backup_root)
+    root_writable = os.access(backup_root, os.W_OK) if root_exists else False
+    free_bytes = None
+    total_bytes = None
+    used_pct = 0
+    usage_probe_path = _nearest_existing_path(backup_root)
+    if usage_probe_path:
+        try:
+            disk_usage = shutil.disk_usage(usage_probe_path)
+            free_bytes = disk_usage.free
+            total_bytes = disk_usage.total
+            used_pct = _safe_ratio(disk_usage.used, disk_usage.total)
+        except OSError:
+            free_bytes = None
+            total_bytes = None
+            used_pct = 0
+
+    minimum_free_bytes = backup_settings.minimum_free_space_mb * 1024 * 1024
+    low_space = bool(free_bytes is not None and free_bytes < minimum_free_bytes)
+    configured = bool(backup_settings.manual_backups_enabled or backup_settings.scheduled_backups_enabled)
+    stale_cutoff = now - timedelta(hours=backup_settings.backup_stale_after_hours)
+    stale = False
+    if configured:
+        stale = not latest_success or latest_success.completed_at < stale_cutoff
+    latest_failure_is_newer = bool(
+        latest_failure
+        and (
+            not latest_success
+            or latest_failure.completed_at
+            and latest_success.completed_at
+            and latest_failure.completed_at > latest_success.completed_at
+        )
+    )
+
+    return {
+        'settings': backup_settings,
+        'configured': configured,
+        'manual_enabled': backup_settings.manual_backups_enabled,
+        'partial_enabled': backup_settings.partial_backups_enabled,
+        'scheduled_enabled': backup_settings.scheduled_backups_enabled,
+        'pg_dump_path': backup_settings.pg_dump_path,
+        'pg_dump_detected_path': pg_dump_detected_path,
+        'pg_dump_ok': pg_dump_ok,
+        'pg_dump_error': pg_dump_error,
+        'backup_root': backup_settings.backup_root,
+        'root_exists': root_exists,
+        'root_writable': root_writable,
+        'storage_path_checked': str(usage_probe_path) if usage_probe_path else '',
+        'free_bytes': free_bytes,
+        'free_display': _format_bytes(free_bytes),
+        'total_display': _format_bytes(total_bytes),
+        'used_pct': used_pct,
+        'minimum_free_mb': backup_settings.minimum_free_space_mb,
+        'low_space': low_space,
+        'stale_after_hours': backup_settings.backup_stale_after_hours,
+        'stale': stale,
+        'latest_success': latest_success,
+        'latest_failure': latest_failure,
+        'latest_failure_is_newer': latest_failure_is_newer,
+        'recent_jobs': recent_jobs,
+        'completed_count': BackupJob.objects.filter(job_type='export', status='completed').count(),
+        'failed_last_7d': BackupJob.objects.filter(
+            job_type='export',
+            status='failed',
+            created_at__gte=now - timedelta(days=7),
+        ).count(),
+        'validation_failures_last_7d': BackupJob.objects.filter(
+            job_type='import_validation',
+            status='failed',
+            created_at__gte=now - timedelta(days=7),
+        ).count(),
+    }
+
+
 def _get_finance_health():
     return {
         'income_count': IncomeRecord.objects.count(),
@@ -1200,6 +1399,7 @@ def _build_alerts(snapshot):
     messaging = snapshot['messaging']
     usage = snapshot['usage']
     data_exchange = snapshot['data_exchange']
+    backups = snapshot['backups']
     services = snapshot['service_health']
 
     if not runtime['database']['ok']:
@@ -1329,6 +1529,51 @@ def _build_alerts(snapshot):
             'Recent import/export failures found',
             f"{data_exchange['failed_last_7d']} data exchange job(s) failed in the last 7 days.",
             source='data_exchange',
+        ))
+    if backups['configured'] and (not backups['root_exists'] or not backups['root_writable']):
+        alerts.append(_make_alert(
+            'backups.storage.unavailable',
+            'warning',
+            'Backup storage path needs attention',
+            f"Backup root {backups['backup_root']} exists={backups['root_exists']} writable={backups['root_writable']}.",
+            href='/settings/backup/',
+            source='backups',
+        ))
+    if backups['configured'] and not backups['pg_dump_ok']:
+        alerts.append(_make_alert(
+            'backups.pg_dump.missing',
+            'warning',
+            'pg_dump is not available to the app',
+            backups['pg_dump_error'],
+            href='/settings/backup/',
+            source='backups',
+        ))
+    if backups['configured'] and backups['low_space']:
+        alerts.append(_make_alert(
+            'backups.storage.low_space',
+            'warning',
+            'Backup storage free space is below guard',
+            f"Backup storage has {backups['free_display']} free; guard requires {backups['minimum_free_mb']} MB.",
+            href='/backups/',
+            source='backups',
+        ))
+    if backups['stale']:
+        alerts.append(_make_alert(
+            'backups.stale',
+            'warning',
+            'Database backup is stale or missing',
+            f"No successful backup is newer than {backups['stale_after_hours']} hour(s).",
+            href='/backups/',
+            source='backups',
+        ))
+    if backups['latest_failure_is_newer'] or backups['failed_last_7d'] > 0:
+        alerts.append(_make_alert(
+            'backups.failed_recently',
+            'warning',
+            'Recent database backup failure found',
+            f"{backups['failed_last_7d']} backup export job(s) failed in the last 7 days.",
+            href='/backups/',
+            source='backups',
         ))
 
     for snapshot_item in services['snapshots']:
@@ -1862,6 +2107,7 @@ def build_diagnostics_snapshot(sync_incidents=True, user=None, incident_status='
         'messaging': _get_messaging_health(now),
         'usage': _get_usage_health(now),
         'data_exchange': _get_data_exchange_health(now),
+        'backups': _get_backup_health(now),
         'finance': _get_finance_health(),
         'recent_activity': _get_recent_activity(),
     }
@@ -1915,6 +2161,16 @@ def build_diagnostics_snapshot(sync_incidents=True, user=None, incident_status='
             'value': f"{snapshot['usage']['fresh_subscriber_count']}/{snapshot['usage']['active_subscriber_count']}",
             'meta': 'subscribers with fresh samples',
             'accent': _badge_classes('warning' if snapshot['usage']['stale_or_missing_count'] else 'healthy'),
+        },
+        {
+            'label': 'Backups',
+            'value': 'OK' if snapshot['backups']['latest_success'] and not snapshot['backups']['stale'] else 'Check',
+            'meta': (
+                f"last success {timezone.localtime(snapshot['backups']['latest_success'].completed_at).strftime('%b %d %H:%M')}"
+                if snapshot['backups']['latest_success']
+                else 'no successful backup recorded'
+            ),
+            'accent': _badge_classes('warning' if snapshot['backups']['stale'] or snapshot['backups']['failed_last_7d'] else 'healthy'),
         },
         {
             'label': 'Linux Services',

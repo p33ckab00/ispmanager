@@ -1,0 +1,169 @@
+{% extends "settings_app/base_settings.html" %}
+{% block settings_content %}
+<div class="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+  <div class="flex items-start justify-between gap-4 mb-6">
+    <div>
+      <h3 class="font-semibold text-gray-700">Backup & Restore Settings</h3>
+      <p class="text-sm text-gray-500 mt-1">Configure backup storage, retention, scheduling, and restore-test guardrails.</p>
+    </div>
+    <a href="{% url 'backups-dashboard' %}" class="text-sm text-blue-600 hover:underline">Open Backups</a>
+  </div>
+
+  <form method="post" class="space-y-6">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+    <div class="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+      {{ form.non_field_errors }}
+    </div>
+    {% endif %}
+
+    <section>
+      <h4 class="text-sm font-semibold text-gray-800 mb-3">Storage</h4>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Backup root</label>
+          <input type="text" name="backup_root" value="{{ form.backup_root.value|default_if_none:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for error in form.backup_root.errors %}<p class="text-xs text-red-600 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">pg_dump path</label>
+          <input type="text" name="pg_dump_path" value="{{ form.pg_dump_path.value|default_if_none:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% if pg_dump_detected_path %}
+          <p class="text-xs text-emerald-700 mt-1">Detected: {{ pg_dump_detected_path }}</p>
+          {% elif pg_dump_detection_error %}
+          <p class="text-xs text-amber-700 mt-1">{{ pg_dump_detection_error }}</p>
+          {% endif %}
+          {% for error in form.pg_dump_path.errors %}<p class="text-xs text-red-600 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Filename prefix</label>
+          <input type="text" name="filename_prefix" value="{{ form.filename_prefix.value|default_if_none:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for error in form.filename_prefix.errors %}<p class="text-xs text-red-600 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Minimum free space guard (MB)</label>
+          <input type="number" name="minimum_free_space_mb" value="{{ form.minimum_free_space_mb.value|default_if_none:'' }}" min="256"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for error in form.minimum_free_space_mb.errors %}<p class="text-xs text-red-600 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h4 class="text-sm font-semibold text-gray-800 mb-3">Manual Controls</h4>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="manual_backups_enabled" {% if form.manual_backups_enabled.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Allow manual full backup</span>
+        </label>
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="partial_backups_enabled" {% if form.partial_backups_enabled.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Allow partial backup presets</span>
+        </label>
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="allow_backup_download" {% if form.allow_backup_download.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Allow backup download</span>
+        </label>
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="allow_backup_delete" {% if form.allow_backup_delete.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Allow backup delete</span>
+        </label>
+      </div>
+    </section>
+
+    <section>
+      <h4 class="text-sm font-semibold text-gray-800 mb-3">Retention & Schedule</h4>
+      <p class="text-xs text-gray-500 mb-3">Scheduler time/profile changes take effect after the scheduler process restarts.</p>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Keep latest backups</label>
+          <input type="number" name="retention_keep_last" value="{{ form.retention_keep_last.value|default_if_none:'' }}" min="1"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for error in form.retention_keep_last.errors %}<p class="text-xs text-red-600 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Daily backup time</label>
+          <input type="time" name="scheduled_backup_time" value="{{ form.scheduled_backup_time.value|default_if_none:'' }}"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for error in form.scheduled_backup_time.errors %}<p class="text-xs text-red-600 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Scheduled profile</label>
+          <select name="scheduled_backup_profile"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            {% for value, label in backup_profile_choices %}
+            <option value="{{ value }}" {% if form.scheduled_backup_profile.value == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="scheduled_backups_enabled" {% if form.scheduled_backups_enabled.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Enable daily scheduled backup</span>
+        </label>
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="weekly_backup_enabled" {% if form.weekly_backup_enabled.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Enable weekly backup</span>
+        </label>
+      </div>
+    </section>
+
+    <section>
+      <h4 class="text-sm font-semibold text-gray-800 mb-3">V2 Guardrails</h4>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Remote backend</label>
+          <select name="remote_backend"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            {% for value, label in remote_backend_choices %}
+            <option value="{{ value }}" {% if form.remote_backend.value == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Stale alert after hours</label>
+          <input type="number" name="backup_stale_after_hours" value="{{ form.backup_stale_after_hours.value|default_if_none:'' }}" min="1"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for error in form.backup_stale_after_hours.errors %}<p class="text-xs text-red-600 mt-1">{{ error }}</p>{% endfor %}
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="remote_copy_enabled" {% if form.remote_copy_enabled.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Enable remote copy</span>
+        </label>
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="encryption_enabled" {% if form.encryption_enabled.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Require encrypted backups</span>
+        </label>
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="backup_failure_alerts_enabled" {% if form.backup_failure_alerts_enabled.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Alert on backup failure</span>
+        </label>
+        <label class="flex items-center gap-3 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <input type="checkbox" name="restore_test_enabled" {% if form.restore_test_enabled.value %}checked{% endif %}
+            class="w-4 h-4 rounded border-gray-300 text-blue-600">
+          <span>Allow restore test jobs</span>
+        </label>
+      </div>
+    </section>
+
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
+      Save Changes
+    </button>
+  </form>
+</div>
+{% endblock %}

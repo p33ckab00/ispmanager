@@ -176,6 +176,8 @@ Before go-live, confirm:
 - fresh DB backup completed
 - backup file verified
 - backup stored safely
+- Backup & Restore settings configured
+- latest successful backup visible in backup history or diagnostics
 - rollback plan documented
 - previous known-good deployment can be restored
 
@@ -343,4 +345,3 @@ The best production launch is a controlled, boring launch with:
 - predictable deployment steps
 - minimal surprises
 - strong rollback readiness
-

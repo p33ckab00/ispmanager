@@ -71,6 +71,11 @@
     </a>
 
     <p class="text-xs text-gray-500 uppercase px-3 pt-4 pb-1">System</p>
+    {% if request.user.is_superuser or perms.backups.view_backupjob %}
+    <a href="/backups/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
+      <i class="fa fa-database w-4"></i> Backups
+    </a>
+    {% endif %}
     <a href="/settings/" @click="if (window.innerWidth < 1024) mobileNavOpen = false" class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-700 text-sm">
       <i class="fa fa-gear w-4"></i> Settings
     </a>

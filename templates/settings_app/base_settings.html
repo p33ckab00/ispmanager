@@ -8,10 +8,12 @@
   <aside class="w-52 shrink-0">
     <nav class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden text-sm">
       {% for url, label, icon, key in nav_items %}
+      {% if key != 'backup' or request.user.is_superuser or perms.settings_app.change_backupsettings %}
       <a href="{{ url }}" class="flex items-center gap-2 px-4 py-3 hover:bg-gray-50 border-b border-gray-50 last:border-0
         {% if active == key %}bg-blue-50 text-blue-600 font-medium{% else %}text-gray-700{% endif %}">
         <i class="fa {{ icon }} w-4"></i> {{ label }}
       </a>
+      {% endif %}
       {% endfor %}
     </nav>
   </aside>

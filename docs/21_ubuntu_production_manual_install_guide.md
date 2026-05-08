@@ -124,8 +124,28 @@ sudo apt install -y \
   python3 python3-venv python3-dev \
   build-essential libpq-dev \
   git rsync curl nginx \
-  postgresql postgresql-contrib \
+  postgresql postgresql-contrib postgresql-client \
   certbot python3-certbot-nginx
+```
+
+`postgresql-client` is required for app-managed database backups because the
+Backup & Restore UI calls `pg_dump`. On Ubuntu this usually installs:
+
+```bash
+/usr/bin/pg_dump
+```
+
+If the web UI reports `[Errno 2] No such file or directory: 'pg_dump'`, open
+`Settings > Backup & Restore` and set `pg_dump path` to:
+
+```bash
+/usr/bin/pg_dump
+```
+
+Then restart the production services when possible:
+
+```bash
+sudo systemctl restart ispmanager-web ispmanager-scheduler
 ```
 
 ## Recommended Runtime Paths
@@ -135,6 +155,7 @@ sudo apt install -y \
 - virtualenv: `/opt/ispmanager/.venv`
 - environment file: `/etc/ispmanager/ispmanager.env`
 - backup root: `/opt/backups/ispmanager`
+- app-managed DB backup root: `/opt/backups/ispmanager/db`
 - Gunicorn bind: `127.0.0.1:8193`
 
 ## One-Click Fresh Installation Script

@@ -272,11 +272,34 @@ def job_refresh_diagnostics():
         logger.error(f"job_refresh_diagnostics error: {e}")
 
 
+def job_scheduled_database_backup():
+    from apps.backups.services import run_scheduled_database_backup
+
+    try:
+        job = run_scheduled_database_backup(weekly=False)
+        if job:
+            logger.info("Scheduled database backup completed: %s", job.file_name)
+    except Exception as e:
+        logger.error(f"job_scheduled_database_backup error: {e}")
+
+
+def job_weekly_database_backup():
+    from apps.backups.services import run_scheduled_database_backup
+
+    try:
+        job = run_scheduled_database_backup(weekly=True)
+        if job:
+            logger.info("Weekly database backup completed: %s", job.file_name)
+    except Exception as e:
+        logger.error(f"job_weekly_database_backup error: {e}")
+
+
 def start_scheduler():
-    from apps.settings_app.models import UsageSettings, RouterSettings, SMSSettings, SubscriberSettings
+    from apps.settings_app.models import BackupSettings, UsageSettings, RouterSettings, SMSSettings, SubscriberSettings
     scheduler = get_scheduler()
     if scheduler.running:
         return
+    backup_settings = BackupSettings.get_settings()
     usage_settings = UsageSettings.get_settings()
     router_settings = RouterSettings.get_settings()
     sms_settings = SMSSettings.get_settings()
@@ -289,6 +312,9 @@ def start_scheduler():
     except Exception:
         logger.warning("Invalid billing SMS schedule '%s'; defaulting to 08:00", sms_settings.billing_sms_schedule)
 
+    backup_hour = backup_settings.scheduled_backup_time.hour
+    backup_minute = backup_settings.scheduled_backup_time.minute
+
     scheduler.add_job(job_mark_overdue, CronTrigger(hour=0, minute=5),
                       id='mark_overdue', name='Mark Overdue Invoices',
                       replace_existing=True, misfire_grace_time=3600)
@@ -296,6 +322,14 @@ def start_scheduler():
     scheduler.add_job(job_refresh_diagnostics, IntervalTrigger(minutes=5),
                       id='refresh_diagnostics', name='Refresh Diagnostics State',
                       replace_existing=True, misfire_grace_time=300)
+
+    scheduler.add_job(job_scheduled_database_backup, CronTrigger(hour=backup_hour, minute=backup_minute),
+                      id='scheduled_database_backup', name='Scheduled Database Backup',
+                      replace_existing=True, misfire_grace_time=3600)
+
+    scheduler.add_job(job_weekly_database_backup, CronTrigger(day_of_week='sun', hour=backup_hour, minute=backup_minute),
+                      id='weekly_database_backup', name='Weekly Database Backup',
+                      replace_existing=True, misfire_grace_time=3600)
 
     scheduler.add_job(job_auto_suspend_overdue, CronTrigger(minute='*/15'),
                       id='auto_suspend_overdue', name='Auto Suspend Overdue Subscribers',

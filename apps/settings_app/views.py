@@ -1,12 +1,13 @@
 from django.shortcuts import render, redirect
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib import messages
-from apps.settings_app.models import BillingSettings, SMSSettings, TelegramSettings, RouterSettings
+from apps.settings_app.models import BackupSettings, BillingSettings, SMSSettings, TelegramSettings, RouterSettings
 from apps.settings_app.forms import (
-    SystemInfoForm, BillingSettingsForm, SMSSettingsForm,
+    BackupSettingsForm, SystemInfoForm, BillingSettingsForm, SMSSettingsForm,
     TelegramSettingsForm, RouterSettingsForm
 )
 from apps.core.models import SystemSetup, AuditLog
+from apps.backups.services import BackupError, resolve_pg_dump_path
 
 NAV_ITEMS = [
     ('/settings/system/', 'System Info', 'fa-building', 'system'),
@@ -16,6 +17,7 @@ NAV_ITEMS = [
     ('/settings/router/', 'Router', 'fa-router', 'router'),
     ('/settings/subscriber/', 'Subscriber', 'fa-users', 'subscriber'),
     ('/settings/usage/', 'Usage Tracking', 'fa-chart-bar', 'usage'),
+    ('/settings/backup/', 'Backup & Restore', 'fa-database', 'backup'),
 ]
 
 TELEGRAM_NOTIFY_FIELDS = [
@@ -243,3 +245,30 @@ def usage_settings(request):
     ctx = _ctx('usage')
     ctx['obj'] = obj
     return render(request, 'settings_app/usage_settings.html', ctx)
+
+
+@login_required
+@permission_required('settings_app.change_backupsettings', raise_exception=True)
+def backup_settings(request):
+    obj = BackupSettings.get_settings()
+    if request.method == 'POST':
+        form = BackupSettingsForm(request.POST, instance=obj)
+        if form.is_valid():
+            form.save()
+            AuditLog.log('update', 'settings', 'Backup and restore settings updated', user=request.user)
+            messages.success(request, 'Backup and restore settings saved.')
+            return redirect('settings-backup')
+    else:
+        form = BackupSettingsForm(instance=obj)
+    ctx = _ctx('backup')
+    ctx['form'] = form
+    ctx['obj'] = obj
+    ctx['backup_profile_choices'] = BackupSettings.BACKUP_PROFILE_CHOICES
+    ctx['remote_backend_choices'] = BackupSettings.REMOTE_BACKEND_CHOICES
+    try:
+        ctx['pg_dump_detected_path'] = resolve_pg_dump_path(obj.pg_dump_path)
+        ctx['pg_dump_detection_error'] = ''
+    except BackupError as exc:
+        ctx['pg_dump_detected_path'] = ''
+        ctx['pg_dump_detection_error'] = str(exc)
+    return render(request, 'settings_app/backup_settings.html', ctx)

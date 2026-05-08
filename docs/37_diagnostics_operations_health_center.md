@@ -157,6 +157,17 @@ This replaces the older loose approach where the dashboard inferred health from 
 - dry-run / applied import visibility
 - recent audit activity
 
+### Backup and restore
+
+- Backup & Restore settings state
+- last successful database backup
+- last failed database backup
+- failed backup exports in the last 7 days
+- failed import-validation jobs in the last 7 days
+- stale backup warning based on the configured threshold
+- backup root exists/writable checks
+- backup filesystem free-space guard visibility
+
 ## Alerts model
 
 The new diagnostics page builds active alerts from multiple subsystems.
@@ -175,6 +186,9 @@ Examples:
 - Telegram failures in the last 24 hours
 - stale or missing usage data
 - failed import/export jobs
+- stale or missing database backups
+- failed database backup jobs
+- backup storage path or free-space problems
 
 These alerts roll up into:
 

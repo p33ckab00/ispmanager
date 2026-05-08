@@ -249,6 +249,26 @@ NMS impact:
 - coordinate imports can affect map visibility
 - payment imports can affect billing rings
 
+### Backups
+
+Use Backups for PostgreSQL-native database export and backup validation.
+
+1. Open `Settings > Backup & Restore`.
+2. Confirm backup root, usually `/opt/backups/ispmanager/db`.
+3. Confirm `pg_dump path`, usually `/usr/bin/pg_dump`.
+4. Enable manual backups only after the storage path is ready.
+5. Open `/backups/` and run a full database backup.
+6. Verify the checksum after the backup completes.
+7. Use partial backup presets only for controlled export or inspection.
+8. Use import validation to inspect backup files without restoring them.
+9. Check Diagnostics for stale backup, failed backup, and storage warnings.
+
+NMS impact:
+
+- backups protect router, subscriber, billing, accounting, and NMS topology data
+- database import validation does not restore or overwrite production data
+- production restore remains a maintenance/runbook action, not a normal NMS workflow
+
 ### NMS
 
 Use NMS as the physical network and mapping layer.
