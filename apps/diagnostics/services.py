@@ -15,7 +15,7 @@ from django_apscheduler.models import DjangoJob, DjangoJobExecution
 
 from apps.accounting.models import ExpenseRecord, IncomeRecord
 from apps.backups.models import BackupJob
-from apps.backups.services import BackupError, resolve_pg_dump_path
+from apps.backups.services import BackupError, encryption_status, resolve_pg_dump_path
 from apps.billing.models import BillingSnapshot, Invoice, Payment
 from apps.core.models import AuditLog
 from apps.data_exchange.models import DataExchangeJob
@@ -412,6 +412,19 @@ def get_incident_resolution_context(incident):
             commands=[
                 'command -v pg_dump',
                 'sudo apt install postgresql-client',
+            ],
+            links=[{'label': 'Backup settings', 'href': '/settings/backup/'}],
+        ),
+        'backups.encryption.not_ready': _manual_guide(
+            'Complete backup encryption setup',
+            'Encrypted backups require OpenSSL and BACKUP_ENCRYPTION_PASSPHRASE in the web and scheduler service environments.',
+            steps=[
+                'Set BACKUP_ENCRYPTION_PASSPHRASE in the production environment file.',
+                'Restart the web and scheduler services so both processes receive the secret.',
+                'Refresh Backup & Restore settings and confirm encryption readiness before enabling encrypted backups.',
+            ],
+            commands=[
+                'sudo systemctl restart ispmanager-web ispmanager-scheduler',
             ],
             links=[{'label': 'Backup settings', 'href': '/settings/backup/'}],
         ),
@@ -1290,6 +1303,7 @@ def _get_backup_health(now):
         pg_dump_detected_path = ''
         pg_dump_ok = False
         pg_dump_error = str(exc)
+    backup_encryption_status = encryption_status()
     latest_success = BackupJob.objects.filter(
         job_type='export',
         status='completed',
@@ -1341,6 +1355,11 @@ def _get_backup_health(now):
         'manual_enabled': backup_settings.manual_backups_enabled,
         'partial_enabled': backup_settings.partial_backups_enabled,
         'scheduled_enabled': backup_settings.scheduled_backups_enabled,
+        'encryption_enabled': backup_settings.encryption_enabled,
+        'encryption_ready': backup_encryption_status['ok'],
+        'encryption_error': backup_encryption_status['error'],
+        'encryption_openssl_path': backup_encryption_status['openssl_path'],
+        'encryption_passphrase_configured': backup_encryption_status['passphrase_configured'],
         'pg_dump_path': backup_settings.pg_dump_path,
         'pg_dump_detected_path': pg_dump_detected_path,
         'pg_dump_ok': pg_dump_ok,
@@ -1545,6 +1564,15 @@ def _build_alerts(snapshot):
             'warning',
             'pg_dump is not available to the app',
             backups['pg_dump_error'],
+            href='/settings/backup/',
+            source='backups',
+        ))
+    if backups['encryption_enabled'] and not backups['encryption_ready']:
+        alerts.append(_make_alert(
+            'backups.encryption.not_ready',
+            'warning',
+            'Encrypted backups are enabled but not ready',
+            backups['encryption_error'],
             href='/settings/backup/',
             source='backups',
         ))

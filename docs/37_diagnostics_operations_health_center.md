@@ -167,6 +167,7 @@ This replaces the older loose approach where the dashboard inferred health from 
 - stale backup warning based on the configured threshold
 - backup root exists/writable checks
 - backup filesystem free-space guard visibility
+- encrypted backup readiness when encryption is enabled
 
 ## Alerts model
 
@@ -189,6 +190,7 @@ Examples:
 - stale or missing database backups
 - failed database backup jobs
 - backup storage path or free-space problems
+- encrypted backups enabled without OpenSSL or the passphrase environment variable
 
 These alerts roll up into:
 

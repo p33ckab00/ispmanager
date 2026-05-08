@@ -159,6 +159,15 @@
           <span>Allow restore test jobs</span>
         </label>
       </div>
+      <div class="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
+        <p class="font-semibold text-gray-800">Encryption readiness</p>
+        {% if encryption_status.ok %}
+        <p class="mt-1 text-emerald-700">Ready. OpenSSL detected at {{ encryption_status.openssl_path }} and passphrase env is configured.</p>
+        {% else %}
+        <p class="mt-1 text-amber-700">{{ encryption_status.error }}</p>
+        {% endif %}
+        <p class="mt-2">Set {{ encryption_status.env_var }} in the web and scheduler service environment before enabling encrypted backups.</p>
+      </div>
     </section>
 
     <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">

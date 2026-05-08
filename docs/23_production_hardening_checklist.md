@@ -30,6 +30,7 @@ Confirm:
 - `pg_dump` is installed and executable by the app process
 - Backup & Restore `pg_dump path` is absolute, usually `/usr/bin/pg_dump`
 - Backup & Restore root exists, is writable by the app service user, and is not public web storage
+- encrypted backups have `BACKUP_ENCRYPTION_PASSPHRASE` configured if encryption is enabled
 - manual full database backup completes successfully
 - backup checksum verification succeeds
 - restore workflow has been tested

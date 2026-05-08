@@ -798,6 +798,25 @@ Implementation notes:
 - Add remote copy.
 - Alert on failed remote transfer.
 
+Implementation notes:
+
+- Encrypted backups should be disabled by default.
+- Encrypted backups require `BACKUP_ENCRYPTION_PASSPHRASE` in the web and
+  scheduler service environment.
+- Encryption uses OpenSSL AES-256-CBC with PBKDF2 and a high iteration count.
+- When encryption is enabled, the app should:
+  1. create the normal PostgreSQL custom dump
+  2. encrypt it into a `.dump.enc` file
+  3. remove the unencrypted `.dump` file
+  4. record checksum and file size for the encrypted artifact
+- The encryption passphrase must not be stored in the database, job history,
+  audit log, or source code.
+- Diagnostics should warn when encrypted backups are enabled but OpenSSL or the
+  passphrase environment variable is missing.
+- Remote copy should remain disabled until the deployment has a concrete backend,
+  credentials, and off-host retention policy. Do not add ad hoc remote copy
+  commands that could leak backup files or secrets.
+
 ### Slice 11: Test Restore
 
 - Restore into a separate database.

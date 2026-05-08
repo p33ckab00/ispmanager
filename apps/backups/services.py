@@ -20,6 +20,7 @@ class BackupError(Exception):
 
 
 VALIDATION_UPLOAD_MAX_BYTES = 10 * 1024 * 1024 * 1024
+ENCRYPTION_PASSPHRASE_ENV = 'BACKUP_ENCRYPTION_PASSPHRASE'
 
 
 PARTIAL_BACKUP_PROFILES = {
@@ -152,6 +153,43 @@ def resolve_pg_dump_path(configured_path):
     )
 
 
+def resolve_openssl_path():
+    found = shutil.which('openssl')
+    if found:
+        return found
+
+    for candidate in [Path('/usr/bin/openssl'), Path('/usr/local/bin/openssl')]:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    raise BackupError('OpenSSL was not found. Install openssl before enabling encrypted backups.')
+
+
+def encryption_status():
+    try:
+        openssl_path = resolve_openssl_path()
+        openssl_error = ''
+    except BackupError as exc:
+        openssl_path = ''
+        openssl_error = str(exc)
+
+    passphrase_configured = bool(os.environ.get(ENCRYPTION_PASSPHRASE_ENV))
+    ok = bool(openssl_path and passphrase_configured)
+    error = ''
+    if not openssl_path:
+        error = openssl_error
+    elif not passphrase_configured:
+        error = f"{ENCRYPTION_PASSPHRASE_ENV} is not set in the service environment."
+
+    return {
+        'ok': ok,
+        'openssl_path': openssl_path,
+        'passphrase_configured': passphrase_configured,
+        'error': error,
+        'env_var': ENCRYPTION_PASSPHRASE_ENV,
+    }
+
+
 def _backup_root(settings):
     root = Path(settings.backup_root).expanduser()
     if not root.is_absolute():
@@ -249,6 +287,40 @@ def _safe_process_error(process):
     if not text:
         text = f"pg_dump exited with status {process.returncode}."
     return text[:4000]
+
+
+def _encrypt_backup_file(source_path, encrypted_temp_path):
+    status = encryption_status()
+    if not status['ok']:
+        raise BackupError(f"Backup encryption is enabled but not ready: {status['error']}")
+
+    env = os.environ.copy()
+    process = subprocess.run(
+        [
+            status['openssl_path'],
+            'enc',
+            '-aes-256-cbc',
+            '-salt',
+            '-pbkdf2',
+            '-iter',
+            '200000',
+            '-in',
+            str(source_path),
+            '-out',
+            str(encrypted_temp_path),
+            '-pass',
+            f'env:{ENCRYPTION_PASSPHRASE_ENV}',
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if process.returncode != 0:
+        raise BackupError(_safe_process_error(process))
+    if not encrypted_temp_path.exists() or encrypted_temp_path.stat().st_size <= 0:
+        raise BackupError('OpenSSL completed but did not produce a non-empty encrypted backup file.')
+    return status
 
 
 def _detect_backup_format(sample):
@@ -354,6 +426,7 @@ def run_database_backup(profile='full', user=None, trigger='manual'):
     filename = _filename(backup_settings, job.pk, profile)
     final_path = root / filename
     temp_path = root / f".{filename}.tmp"
+    encrypted_temp_path = root / f".{filename}.enc.tmp"
     job.file_name = filename
     job.file_path = str(final_path)
     job.save(update_fields=['file_name', 'file_path'])
@@ -361,6 +434,8 @@ def run_database_backup(profile='full', user=None, trigger='manual'):
     try:
         if temp_path.exists():
             temp_path.unlink()
+        if encrypted_temp_path.exists():
+            encrypted_temp_path.unlink()
 
         process = subprocess.run(
             _pg_dump_command(backup_settings, database, temp_path, table_names=table_names),
@@ -380,6 +455,32 @@ def run_database_backup(profile='full', user=None, trigger='manual'):
         except OSError:
             pass
 
+        encryption_summary = {'enabled': False}
+        if backup_settings.encryption_enabled:
+            encrypted_final_path = root / f"{filename}.enc"
+            if encrypted_final_path.exists():
+                encrypted_final_path.unlink()
+            status = _encrypt_backup_file(final_path, encrypted_temp_path)
+            encrypted_temp_path.replace(encrypted_final_path)
+            try:
+                encrypted_final_path.chmod(0o600)
+            except OSError:
+                pass
+            final_path.unlink()
+            final_path = encrypted_final_path
+            filename = encrypted_final_path.name
+            job.file_name = filename
+            job.file_path = str(final_path)
+            encryption_summary = {
+                'enabled': True,
+                'tool': 'openssl',
+                'openssl_path': status['openssl_path'],
+                'cipher': 'aes-256-cbc',
+                'kdf': 'pbkdf2',
+                'iterations': 200000,
+                'passphrase_env': ENCRYPTION_PASSPHRASE_ENV,
+            }
+
         checksum = _sha256_file(final_path)
         size = final_path.stat().st_size
         completed_at = timezone.now()
@@ -390,8 +491,11 @@ def run_database_backup(profile='full', user=None, trigger='manual'):
         job.summary_json = {
             **job.summary_json,
             'completed_at': completed_at.isoformat(),
+            'encryption': encryption_summary,
         }
         job.save(update_fields=[
+            'file_name',
+            'file_path',
             'status',
             'file_size_bytes',
             'checksum_sha256',
@@ -408,6 +512,8 @@ def run_database_backup(profile='full', user=None, trigger='manual'):
     except Exception as exc:
         if temp_path.exists():
             temp_path.unlink()
+        if encrypted_temp_path.exists():
+            encrypted_temp_path.unlink()
         message = str(exc)
         job.status = 'failed'
         job.error_report = message[:4000]

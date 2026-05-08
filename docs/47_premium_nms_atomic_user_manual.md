@@ -261,7 +261,8 @@ Use Backups for PostgreSQL-native database export and backup validation.
 6. Verify the checksum after the backup completes.
 7. Use partial backup presets only for controlled export or inspection.
 8. Use import validation to inspect backup files without restoring them.
-9. Check Diagnostics for stale backup, failed backup, and storage warnings.
+9. Enable encrypted backups only after `BACKUP_ENCRYPTION_PASSPHRASE` is configured.
+10. Check Diagnostics for stale backup, failed backup, encryption, and storage warnings.
 
 NMS impact:
 

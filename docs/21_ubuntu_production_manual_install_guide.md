@@ -123,7 +123,7 @@ sudo apt update
 sudo apt install -y \
   python3 python3-venv python3-dev \
   build-essential libpq-dev \
-  git rsync curl nginx \
+  git rsync curl nginx openssl \
   postgresql postgresql-contrib postgresql-client \
   certbot python3-certbot-nginx
 ```
@@ -147,6 +147,25 @@ Then restart the production services when possible:
 ```bash
 sudo systemctl restart ispmanager-web ispmanager-scheduler
 ```
+
+### Optional Encrypted Backup Environment
+
+If `Require encrypted backups` is enabled in `Settings > Backup & Restore`, set
+the encryption passphrase in the production environment file used by both the web
+and scheduler services:
+
+```bash
+BACKUP_ENCRYPTION_PASSPHRASE=replace-with-long-random-secret
+```
+
+Then restart:
+
+```bash
+sudo systemctl restart ispmanager-web ispmanager-scheduler
+```
+
+Encrypted backup files are stored as `.dump.enc`. The app removes the temporary
+unencrypted `.dump` after encryption succeeds.
 
 ## Recommended Runtime Paths
 
