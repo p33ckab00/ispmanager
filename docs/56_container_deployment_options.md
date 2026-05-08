@@ -119,6 +119,7 @@ RUN apt-get update \
         libffi-dev \
         libjpeg62-turbo-dev \
         libpq-dev \
+        postgresql-client \
         zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -1506,6 +1507,1147 @@ Keep scheduler single:
 ```bash
 docker service scale ispmanager_scheduler=1
 ```
+
+## Troubleshooting and Error Resolution
+
+Use this section when deployment, startup, migration, TLS, scheduler, database, static/media, or network errors occur.
+
+### First Response Triage
+
+When something fails, collect the current state before changing several things at once.
+
+For Docker Compose:
+
+```bash
+cd /opt/ispmanager-container
+docker compose --env-file env/ispmanager.prod.env ps
+docker compose --env-file env/ispmanager.prod.env logs --tail=200 web
+docker compose --env-file env/ispmanager.prod.env logs --tail=200 scheduler
+docker compose --env-file env/ispmanager.prod.env logs --tail=200 db
+docker compose --env-file env/ispmanager.prod.env logs --tail=200 proxy
+```
+
+For hybrid host services:
+
+```bash
+sudo systemctl status nginx --no-pager
+sudo journalctl -u nginx -n 100 --no-pager
+sudo systemctl status postgresql --no-pager
+sudo journalctl -u postgresql -n 100 --no-pager
+docker compose --env-file env/ispmanager.prod.env ps
+docker compose --env-file env/ispmanager.prod.env logs --tail=200 web scheduler
+```
+
+For Kubernetes:
+
+```bash
+kubectl get pods -o wide
+kubectl get events --sort-by=.lastTimestamp | tail -80
+kubectl logs deploy/ispmanager-web --tail=200
+kubectl logs deploy/ispmanager-scheduler --tail=200
+kubectl describe pod -l app=ispmanager-web
+kubectl describe pod -l app=ispmanager-scheduler
+```
+
+Always verify the app environment from inside the running container:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env exec web env | sort | grep -E 'DEBUG|ALLOWED_HOSTS|APP_BASE_URL|POSTGRES|CSRF|CORS|SECURE|DISABLE'
+```
+
+Kubernetes equivalent:
+
+```bash
+kubectl exec deploy/ispmanager-web -- env | sort | grep -E 'DEBUG|ALLOWED_HOSTS|APP_BASE_URL|POSTGRES|CSRF|CORS|SECURE|DISABLE'
+```
+
+### Docker Permission Denied
+
+Symptom:
+
+```text
+permission denied while trying to connect to the Docker daemon socket
+```
+
+Cause:
+
+- user is not allowed to access Docker
+- Docker daemon is not running
+
+Fix:
+
+```bash
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+newgrp docker
+docker ps
+```
+
+Temporary workaround:
+
+```bash
+sudo docker ps
+```
+
+### Compose Variables Are Blank or Not Substituted
+
+Symptoms:
+
+```text
+WARN The "POSTGRES_DB" variable is not set. Defaulting to a blank string.
+```
+
+or PostgreSQL starts with empty/unexpected credentials.
+
+Cause:
+
+- Compose interpolation reads from shell environment or the `--env-file`
+- `env_file:` injects values into containers, but top-level `${POSTGRES_DB}` interpolation still needs the variable available to Compose
+
+Fix:
+
+```bash
+cd /opt/ispmanager-container
+set -a
+. ./env/ispmanager.prod.env
+set +a
+docker compose --env-file env/ispmanager.prod.env config | less
+docker compose --env-file env/ispmanager.prod.env up -d
+```
+
+If using automation, always include:
+
+```bash
+docker compose --env-file /opt/ispmanager-container/env/ispmanager.prod.env ...
+```
+
+### Build Fails While Installing Python Dependencies
+
+Symptoms:
+
+```text
+error: command 'gcc' failed
+pg_config executable not found
+fatal error: Python.h: No such file or directory
+```
+
+Cause:
+
+- missing build libraries in the image
+- Dockerfile does not install required OS packages
+
+Fix:
+
+- ensure the Dockerfile installs `build-essential`, `libpq-dev`, `libjpeg62-turbo-dev`, `zlib1g-dev`, and `libffi-dev`
+- rebuild without cache if dependency state looks stale
+
+```bash
+docker compose --env-file env/ispmanager.prod.env build --no-cache web scheduler
+```
+
+### Static Directory Missing During collectstatic
+
+Symptom:
+
+```text
+The STATICFILES_DIRS setting refers to the directory '/app/static' that does not exist
+```
+
+Cause:
+
+- `config/settings.py` expects a `static/` directory
+- the current repository may not contain a source `static/` folder
+
+Fix:
+
+- keep this Dockerfile line:
+
+```dockerfile
+RUN mkdir -p /app/static /app/staticfiles /app/media
+```
+
+- rebuild the image:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env build web scheduler
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py collectstatic --noinput
+```
+
+### PostgreSQL Container Is Unhealthy
+
+Symptoms:
+
+```text
+db service is unhealthy
+pg_isready: no response
+```
+
+Checks:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env logs --tail=200 db
+docker compose --env-file env/ispmanager.prod.env exec db pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+```
+
+Common causes:
+
+- database password changed after the volume was already initialized
+- PostgreSQL volume has old credentials
+- disk is full
+- invalid environment values
+
+Fix for disk full:
+
+```bash
+df -h
+docker system df
+docker image prune
+```
+
+Fix for changed credentials:
+
+- do not delete the volume in production unless you have a verified backup
+- update the existing PostgreSQL role password inside the database
+- if authentication fails, temporarily use the old known-good password in `env/ispmanager.prod.env`, connect, change the role password, then put the new password back in the env file
+
+```bash
+set -a
+. ./env/ispmanager.prod.env
+set +a
+
+docker compose --env-file env/ispmanager.prod.env exec db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "ALTER USER ${POSTGRES_USER} WITH PASSWORD '${POSTGRES_PASSWORD}';"
+```
+
+If this is a brand-new staging setup with no data to keep:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env down
+docker volume ls | grep ispmanager
+docker volume rm ispmanager_postgres_data
+docker compose --env-file env/ispmanager.prod.env up -d db
+```
+
+Never remove a production PostgreSQL volume without a verified backup and restore plan.
+
+### Django Cannot Connect to PostgreSQL
+
+Symptoms:
+
+```text
+django.db.utils.OperationalError: could not translate host name "db" to address
+django.db.utils.OperationalError: connection refused
+django.db.utils.OperationalError: password authentication failed
+```
+
+Cause and fix:
+
+- In Option 1, `POSTGRES_HOST` must be `db`
+- In Option 2 with host PostgreSQL, `POSTGRES_HOST` should usually be `host.docker.internal` plus `extra_hosts`
+- In Option 2 with managed/private DB, `POSTGRES_HOST` must be the DB host or private IP
+- credentials must match the actual PostgreSQL role
+
+Verify from the web container:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env exec web python - <<'PY'
+import os
+import socket
+
+host = os.environ.get('POSTGRES_HOST')
+port = int(os.environ.get('POSTGRES_PORT', '5432'))
+print('POSTGRES_HOST=', host)
+print('resolved=', socket.gethostbyname(host))
+sock = socket.create_connection((host, port), timeout=5)
+print('tcp ok')
+sock.close()
+PY
+```
+
+Then verify Django DB access:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env exec web python manage.py dbshell
+```
+
+If `dbshell` is unavailable, use the PostgreSQL client from the `db` container or a temporary `postgres:16` container.
+
+### Migration Fails With Permission Denied for Schema public
+
+Symptom:
+
+```text
+permission denied for schema public
+```
+
+Cause:
+
+- PostgreSQL 15+ schema ownership/permissions are not set for the app user
+
+Fix:
+
+```bash
+sudo -u postgres psql -d ispmanager
+```
+
+```sql
+GRANT ALL ON SCHEMA public TO ispmanager;
+ALTER SCHEMA public OWNER TO ispmanager;
+\q
+```
+
+For Compose DB:
+
+```bash
+set -a
+. ./env/ispmanager.prod.env
+set +a
+
+docker compose --env-file env/ispmanager.prod.env exec db \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "GRANT ALL ON SCHEMA public TO ${POSTGRES_USER}; ALTER SCHEMA public OWNER TO ${POSTGRES_USER};"
+```
+
+Then rerun:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py migrate
+```
+
+### Migration Fails After Partial Deployment
+
+Symptoms:
+
+```text
+relation already exists
+duplicate column
+inconsistent migration history
+```
+
+Safe response:
+
+1. Stop scheduler first.
+2. Do not run random `migrate --fake` commands until you understand the state.
+3. Take a fresh backup of the current database.
+4. Inspect migration state.
+
+Commands:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env stop scheduler
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py showmigrations
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py migrate --plan
+```
+
+If this happened during a release, compare against the predeploy backup and decide whether to:
+
+- complete the migration
+- roll code forward
+- restore the predeploy database backup
+
+Use `--fake` only when a migration's database changes are already truly present and verified.
+
+### DisallowedHost Error
+
+Symptom:
+
+```text
+Invalid HTTP_HOST header
+DisallowedHost
+```
+
+Cause:
+
+- incoming domain/IP is not listed in `ALLOWED_HOSTS`
+
+Fix:
+
+```env
+ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com,server-ip
+```
+
+Restart app:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env up -d web scheduler
+```
+
+Kubernetes:
+
+```bash
+kubectl edit configmap ispmanager-config
+kubectl rollout restart deployment/ispmanager-web deployment/ispmanager-scheduler
+```
+
+### CSRF 403 on Login or Forms
+
+Symptoms:
+
+```text
+Forbidden (403) CSRF verification failed
+Origin checking failed
+```
+
+Cause:
+
+- `CSRF_TRUSTED_ORIGINS` does not include the exact scheme and host
+- reverse proxy is not forwarding `X-Forwarded-Proto`
+- `APP_BASE_URL` does not match the public URL
+
+Fix:
+
+```env
+APP_BASE_URL=https://yourdomain.com
+CSRF_TRUSTED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+SECURE_PROXY_SSL_HEADER=HTTP_X_FORWARDED_PROTO,https
+```
+
+Nginx must include:
+
+```nginx
+proxy_set_header X-Forwarded-Proto https;
+```
+
+or, for host Nginx that handles both HTTP and HTTPS:
+
+```nginx
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+Restart the app after env changes.
+
+### HTTPS Redirect Loop
+
+Symptoms:
+
+```text
+too many redirects
+ERR_TOO_MANY_REDIRECTS
+```
+
+Cause:
+
+- Django has `SECURE_SSL_REDIRECT=True`
+- proxy terminates HTTPS but does not tell Django the request is HTTPS
+
+Fix:
+
+In Django env:
+
+```env
+SECURE_SSL_REDIRECT=True
+SECURE_PROXY_SSL_HEADER=HTTP_X_FORWARDED_PROTO,https
+```
+
+In proxy:
+
+```nginx
+proxy_set_header X-Forwarded-Proto https;
+```
+
+For Cloudflare Tunnel, confirm the tunnel/proxy chain sends HTTPS as the forwarded protocol. If not, configure the origin proxy to force:
+
+```nginx
+proxy_set_header X-Forwarded-Proto https;
+```
+
+### Login Works But Immediately Logs Out
+
+Symptoms:
+
+- login form accepts credentials
+- next page redirects back to login
+- session cookie not stored
+
+Common causes:
+
+- `SESSION_COOKIE_SECURE=True` while accessing the site over plain HTTP
+- browser is using a different hostname than `APP_BASE_URL`
+- domain/proxy mismatch
+
+Fix for production:
+
+- use HTTPS only
+- keep secure cookie settings enabled
+- use the final public hostname
+
+Fix for temporary HTTP staging:
+
+```env
+SESSION_COOKIE_SECURE=False
+CSRF_COOKIE_SECURE=False
+SECURE_SSL_REDIRECT=False
+SECURE_PROXY_SSL_HEADER=
+```
+
+Restart app after changing env.
+
+### Nginx 502 Bad Gateway
+
+Symptoms:
+
+```text
+502 Bad Gateway
+connect() failed
+host not found in upstream "web"
+```
+
+Checks:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env ps
+docker compose --env-file env/ispmanager.prod.env logs --tail=200 web
+docker compose --env-file env/ispmanager.prod.env exec proxy nginx -t
+docker compose --env-file env/ispmanager.prod.env exec proxy wget -S -O- http://web:8193/
+```
+
+Common fixes:
+
+- ensure `web` and `proxy` are on the same Compose network
+- ensure Gunicorn binds to `0.0.0.0:8193`, not `127.0.0.1`
+- restart web if it crashed
+- run migrations if web is crashing on missing tables
+
+```bash
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py migrate
+docker compose --env-file env/ispmanager.prod.env up -d web proxy
+```
+
+### Nginx 413 Request Entity Too Large
+
+Symptom:
+
+```text
+413 Request Entity Too Large
+```
+
+Cause:
+
+- upload/import file exceeds proxy limit
+
+Fix:
+
+Set a larger limit in Nginx:
+
+```nginx
+client_max_body_size 50M;
+```
+
+Reload:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env exec proxy nginx -s reload
+```
+
+or host Nginx:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### Certbot Challenge Fails
+
+Symptoms:
+
+```text
+Invalid response from /.well-known/acme-challenge/
+Timeout during connect
+```
+
+Checks:
+
+```bash
+curl -I http://yourdomain.com/.well-known/acme-challenge/test
+docker compose --env-file env/ispmanager.prod.env logs --tail=100 proxy
+sudo ufw status
+dig +short yourdomain.com
+```
+
+Common fixes:
+
+- DNS A/AAAA records must point to the server
+- port `80` must be reachable from the internet
+- HTTP Nginx config must serve `/.well-known/acme-challenge/`
+- Cloudflare proxy mode can interfere during initial issuance; use DNS challenge or temporarily switch records as appropriate
+
+After fixing:
+
+```bash
+docker run --rm \
+  -v /opt/ispmanager-container/certbot/www:/var/www/certbot \
+  -v /opt/ispmanager-container/certbot/conf:/etc/letsencrypt \
+  certbot/certbot certonly \
+  --webroot \
+  --webroot-path /var/www/certbot \
+  --email admin@yourdomain.com \
+  --agree-tos \
+  --no-eff-email \
+  -d yourdomain.com \
+  -d www.yourdomain.com
+```
+
+### Static Files Return 404 or Broken Styling
+
+Symptoms:
+
+- page loads but CSS/JS is broken
+- `/static/admin/css/base.css` returns 404
+
+Checks:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py collectstatic --noinput
+docker compose --env-file env/ispmanager.prod.env exec proxy ls -la /staticfiles | head
+curl -I https://yourdomain.com/static/admin/css/base.css
+```
+
+Fix:
+
+- run `collectstatic`
+- ensure `staticfiles_data` volume is mounted into both `web` and `proxy`
+- ensure Nginx alias ends with a slash
+
+Correct:
+
+```nginx
+location /static/ {
+    alias /staticfiles/;
+}
+```
+
+### Media Files Return 404 or Permission Denied
+
+Symptoms:
+
+- uploaded logo or generated file is missing
+- Nginx logs permission denied
+
+Checks:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env exec web ls -la /app/media
+docker compose --env-file env/ispmanager.prod.env exec proxy ls -la /media
+docker compose --env-file env/ispmanager.prod.env logs --tail=100 proxy
+```
+
+Fix for named volumes:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env exec web sh -lc 'touch /app/media/.write-test && rm /app/media/.write-test'
+```
+
+If permission fails, inspect container user:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env exec web id
+```
+
+For bind mounts, match ownership:
+
+```bash
+APP_UID="$(docker compose --env-file env/ispmanager.prod.env run --rm web id -u)"
+APP_GID="$(docker compose --env-file env/ispmanager.prod.env run --rm web id -g)"
+sudo chown -R "${APP_UID}:${APP_GID}" /srv/ispmanager/media
+```
+
+### Gunicorn Worker Timeout
+
+Symptoms:
+
+```text
+WORKER TIMEOUT
+upstream timed out
+```
+
+Common causes:
+
+- slow database
+- long import/export request
+- router API call blocking a request
+- too few workers for current traffic
+
+Fix:
+
+Increase timeout conservatively:
+
+```env
+GUNICORN_TIMEOUT=180
+```
+
+Restart:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env up -d web
+```
+
+Then inspect the slow path. Do not hide recurring timeouts only by increasing the timeout. Check DB load, router reachability, and logs.
+
+### Web Container Keeps Restarting
+
+Symptoms:
+
+```text
+Restarting
+ModuleNotFoundError
+django.db.utils.ProgrammingError: relation does not exist
+```
+
+Checks:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env logs --tail=300 web
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py check
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py showmigrations
+```
+
+Fixes:
+
+- missing dependency: rebuild image
+- missing tables: run migrations
+- bad env: correct env file and restart
+
+```bash
+docker compose --env-file env/ispmanager.prod.env build web scheduler
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py migrate
+docker compose --env-file env/ispmanager.prod.env up -d web scheduler
+```
+
+### Scheduler Is Not Running
+
+Symptoms:
+
+- diagnostics scheduler page shows stale jobs
+- billing/SMS/router jobs do not run
+- scheduler container is exited or restarting
+
+Checks:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env ps scheduler
+docker compose --env-file env/ispmanager.prod.env logs --tail=300 scheduler
+docker compose --env-file env/ispmanager.prod.env exec scheduler python manage.py showmigrations django_apscheduler
+```
+
+Fix:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py migrate
+docker compose --env-file env/ispmanager.prod.env up -d scheduler
+```
+
+Confirm only one scheduler:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env ps scheduler
+docker ps --format 'table {{.Names}}\t{{.Command}}\t{{.Status}}' | grep run_scheduler
+```
+
+Kubernetes:
+
+```bash
+kubectl get pods -l app=ispmanager-scheduler
+kubectl scale deployment/ispmanager-scheduler --replicas=1
+```
+
+### Duplicate Scheduler Jobs or Duplicate SMS/Billing
+
+Symptoms:
+
+- SMS sent more than once
+- invoice/snapshot automation appears duplicated
+- router polling load unexpectedly multiplies
+
+Cause:
+
+- more than one scheduler process is running
+- web process accidentally starts scheduler
+- Kubernetes or Swarm scheduler replicas are greater than one
+
+Fix:
+
+Compose:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env ps
+docker ps --format 'table {{.Names}}\t{{.Command}}\t{{.Status}}' | grep -E 'run_scheduler|gunicorn'
+```
+
+Ensure web env has:
+
+```env
+DISABLE_SCHEDULER=1
+```
+
+Restart:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env up -d web
+docker compose --env-file env/ispmanager.prod.env up -d --scale scheduler=1 scheduler
+```
+
+Kubernetes:
+
+```bash
+kubectl scale deployment/ispmanager-scheduler --replicas=1
+kubectl rollout restart deployment/ispmanager-web deployment/ispmanager-scheduler
+```
+
+After resolving duplicates, review affected invoices, snapshots, SMS logs, and payments before making accounting changes.
+
+### RouterOS or MikroTik Connections Fail From Containers
+
+Symptoms:
+
+```text
+connection timed out
+No route to host
+Network is unreachable
+```
+
+Checks from container:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env exec web sh -lc 'ip route && getent hosts google.com || true'
+docker compose --env-file env/ispmanager.prod.env exec web python - <<'PY'
+import socket
+host = 'ROUTER_IP_HERE'
+port = 8728
+sock = socket.create_connection((host, port), timeout=5)
+print('router tcp ok')
+sock.close()
+PY
+```
+
+Common causes:
+
+- Docker bridge subnet overlaps with ISP network
+- host firewall blocks outbound traffic
+- router API service is disabled
+- router API only allows specific source IPs
+- VPN or management route exists on host but not available to Docker bridge
+
+Fixes:
+
+- choose a non-overlapping Docker subnet
+- add host routes as needed
+- allow Docker bridge source IP on router/firewall
+- use host networking for the app containers only if routing cannot be solved cleanly
+
+Compose host-network fallback example:
+
+```yaml
+services:
+  web:
+    network_mode: host
+  scheduler:
+    network_mode: host
+```
+
+If using host networking, remove conflicting `ports:` and verify Gunicorn binding carefully. Keep PostgreSQL and proxy exposure locked down.
+
+### DNS Fails Inside Containers
+
+Symptoms:
+
+```text
+Temporary failure in name resolution
+Name or service not known
+```
+
+Checks:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env exec web cat /etc/resolv.conf
+docker compose --env-file env/ispmanager.prod.env exec web getent hosts github.com
+```
+
+Fix:
+
+Add DNS servers to Compose if the host resolver is not usable inside containers:
+
+```yaml
+services:
+  web:
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+  scheduler:
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+```
+
+Restart:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env up -d web scheduler
+```
+
+### Backup File Is Empty
+
+Symptom:
+
+```bash
+ls -lh backups/*.sql.gz
+```
+
+shows a tiny or zero-byte file.
+
+Cause:
+
+- `pg_dump` failed but shell pipeline still created a file
+
+Fix:
+
+Use `set -o pipefail`:
+
+```bash
+set -euo pipefail
+set -a
+. ./env/ispmanager.prod.env
+set +a
+
+docker compose --env-file env/ispmanager.prod.env exec -T db \
+  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  | gzip > "backups/ispmanager-db-$(date +%Y%m%d-%H%M%S).sql.gz"
+```
+
+Verify backup:
+
+```bash
+gzip -t backups/ispmanager-db-YYYYMMDD-HHMMSS.sql.gz
+gunzip -c backups/ispmanager-db-YYYYMMDD-HHMMSS.sql.gz | head
+```
+
+### Restore Fails Because Volume Name Is Different
+
+Symptom:
+
+```text
+no such volume: ispmanager_media_data
+```
+
+Cause:
+
+- Compose project name changed
+- volume prefix is different
+
+Find actual volume names:
+
+```bash
+docker volume ls | grep ispmanager
+docker compose --env-file env/ispmanager.prod.env config --volumes
+```
+
+Use the actual volume name in restore commands.
+
+Example:
+
+```bash
+docker run --rm \
+  -v ACTUAL_MEDIA_VOLUME_NAME:/media \
+  -v /opt/ispmanager-container/backups:/backups \
+  alpine tar -xzf /backups/ispmanager-media-YYYYMMDD-HHMMSS.tar.gz -C /media
+```
+
+### Kubernetes Pod Is Pending
+
+Symptoms:
+
+```text
+0/3 nodes are available
+pod has unbound immediate PersistentVolumeClaims
+```
+
+Checks:
+
+```bash
+kubectl describe pod -l app=ispmanager-web
+kubectl get pvc
+kubectl describe pvc ispmanager-media
+kubectl get storageclass
+```
+
+Fixes:
+
+- create or fix the StorageClass
+- reduce requested storage if unavailable
+- use a storage mode compatible with replicas
+- switch media/static PVC to `ReadWriteMany` if pods must run on multiple nodes
+
+### Kubernetes ImagePullBackOff
+
+Symptoms:
+
+```text
+ImagePullBackOff
+ErrImagePull
+```
+
+Checks:
+
+```bash
+kubectl describe pod -l app=ispmanager-web
+kubectl get secret
+```
+
+Fix:
+
+- verify image name and tag
+- push the image
+- configure registry pull secret if private
+
+```bash
+docker push ghcr.io/p33ckab00/ispmanager:prod
+
+kubectl create secret docker-registry ghcr-login \
+  --docker-server=ghcr.io \
+  --docker-username=GITHUB_USERNAME \
+  --docker-password=GITHUB_TOKEN \
+  --docker-email=admin@example.com
+```
+
+Patch deployment:
+
+```bash
+kubectl patch serviceaccount default \
+  -p '{"imagePullSecrets":[{"name":"ghcr-login"}]}'
+kubectl rollout restart deployment/ispmanager-web deployment/ispmanager-scheduler
+```
+
+### Kubernetes CrashLoopBackOff
+
+Symptoms:
+
+```text
+CrashLoopBackOff
+```
+
+Checks:
+
+```bash
+kubectl logs pod/POD_NAME --previous
+kubectl describe pod/POD_NAME
+kubectl exec deploy/ispmanager-web -- env | sort
+```
+
+Common fixes:
+
+- run migration job if tables are missing
+- correct ConfigMap or Secret values
+- verify DB host reachability from cluster
+- verify mounted PVC permissions
+
+Rerun release job:
+
+```bash
+kubectl delete job ispmanager-release --ignore-not-found
+kubectl apply -f k8s/release-job.yaml
+kubectl wait --for=condition=complete job/ispmanager-release --timeout=300s
+kubectl logs job/ispmanager-release
+```
+
+### Kubernetes Ingress Returns 404
+
+Symptoms:
+
+- Ingress controller responds, but app does not load
+- default backend 404
+
+Checks:
+
+```bash
+kubectl get ingress
+kubectl describe ingress ispmanager
+kubectl get svc ispmanager-web
+kubectl get endpoints ispmanager-web
+```
+
+Fixes:
+
+- ensure Ingress host matches DNS host
+- ensure `ingressClassName` matches installed controller
+- ensure Service selector matches web pod labels
+- ensure web readiness probe is passing
+
+### Swarm Service Does Not Receive Secrets
+
+Symptoms:
+
+- app starts with default `SECRET_KEY`
+- DB password missing
+
+Cause:
+
+- Docker secrets are mounted as files, not automatically exported as env vars
+
+Fix:
+
+- use an entrypoint that reads secret files into env vars
+- or use Swarm configs/secrets with a wrapper script
+- verify inside the task
+
+```bash
+docker service ps ispmanager_web
+docker exec -it CONTAINER_ID ls -la /run/secrets
+```
+
+### Emergency Safe Mode
+
+If production has unstable scheduler behavior, stop scheduler first while keeping web online:
+
+Compose:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env stop scheduler
+```
+
+Kubernetes:
+
+```bash
+kubectl scale deployment/ispmanager-scheduler --replicas=0
+```
+
+Swarm:
+
+```bash
+docker service scale ispmanager_scheduler=0
+```
+
+Use this when investigating duplicate billing, SMS sends, router polling storms, or migration issues. Restart exactly one scheduler only after the issue is understood.
+
+### When to Restore From Backup
+
+Restore only after confirming that forward repair is riskier than rollback.
+
+Strong restore candidates:
+
+- migration corrupted important financial data
+- accidental bulk deletion
+- production database was overwritten with wrong environment data
+- failed deployment created many incorrect invoices/snapshots
+
+Before restore:
+
+```bash
+date
+docker compose --env-file env/ispmanager.prod.env stop web scheduler
+cp env/ispmanager.prod.env backups/env-before-restore-$(date +%Y%m%d-%H%M%S).env
+```
+
+Then restore DB and media using the restore section above.
+
+After restore:
+
+```bash
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py check
+docker compose --env-file env/ispmanager.prod.env run --rm web python manage.py showmigrations
+docker compose --env-file env/ispmanager.prod.env up -d web
+```
+
+Verify app behavior before restarting scheduler.
 
 ## Deployment Decision Matrix
 
