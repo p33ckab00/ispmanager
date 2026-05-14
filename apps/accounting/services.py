@@ -1541,8 +1541,13 @@ def _account_balance_for_code(entity, code, as_of_date=None):
     return account, _account_balance_as_of(account, as_of_date)
 
 
-def build_trial_balance_report(entity, start_date=None, end_date=None):
-    rows = _account_activity_rows(entity, start_date=start_date, end_date=end_date)
+def build_trial_balance_report(entity, start_date=None, end_date=None, include_zero=False):
+    rows = _account_activity_rows(
+        entity,
+        start_date=start_date,
+        end_date=end_date,
+        include_zero=include_zero,
+    )
     total_debit = sum((row['debit'] for row in rows), Decimal('0.00'))
     total_credit = sum((row['credit'] for row in rows), Decimal('0.00'))
     return {
@@ -2002,7 +2007,7 @@ def build_tax_ledger_report(entity, start_date=None, end_date=None):
     }
 
 
-def build_general_ledger_report(entity, start_date=None, end_date=None, account=None):
+def build_general_ledger_report(entity, start_date=None, end_date=None, account=None, include_zero=False):
     accounts = ChartOfAccount.objects.filter(entity=entity, is_active=True).order_by('code')
     if account:
         accounts = accounts.filter(pk=account.pk)
@@ -2054,7 +2059,7 @@ def build_general_ledger_report(entity, start_date=None, end_date=None, account=
                 'movement': movement,
                 'running_balance': running_balance,
             })
-        if ledger_lines or opening_balance != Decimal('0.00'):
+        if ledger_lines or opening_balance != Decimal('0.00') or include_zero:
             sections.append({
                 'account': item,
                 'opening_balance': opening_balance,

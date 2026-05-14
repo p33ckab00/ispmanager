@@ -18,7 +18,15 @@
 </div>
 
 <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6 no-print">
-  <form method="get" class="grid gap-3 md:grid-cols-4 lg:grid-cols-5 items-end">
+  <form method="get" class="grid gap-3 md:grid-cols-5 lg:grid-cols-6 items-end">
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Preset</label>
+      <select name="preset" class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full">
+        {% for value, label in preset_choices %}
+        <option value="{{ value }}" {% if selected_preset == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">From</label>
       <input type="date" name="start" value="{{ start_date|date:'Y-m-d' }}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full">
@@ -36,6 +44,10 @@
         {% endfor %}
       </select>
     </div>
+    <label class="inline-flex items-center gap-2 text-sm text-gray-700 pb-2">
+      <input type="checkbox" name="include_zero" value="1" {% if include_zero %}checked{% endif %} class="rounded border-gray-300">
+      Include zero accounts
+    </label>
     <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm">Run</button>
   </form>
 </div>

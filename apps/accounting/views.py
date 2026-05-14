@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.core.exceptions import ValidationError
 from django.db.models import Q, Sum
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from apps.accounting.models import (
@@ -151,6 +151,83 @@ def _parse_report_date(value, fallback=None):
 
 def _cutover_is_locked(plan):
     return bool(plan and plan.status in ('approved', 'live'))
+
+
+RANGE_PRESET_CHOICES = [
+    ('', 'Manual dates'),
+    ('current_month', 'Current month'),
+    ('previous_month', 'Previous month'),
+    ('year_to_date', 'Year to date'),
+    ('current_year', 'Current year'),
+    ('previous_year', 'Previous year'),
+]
+
+AS_OF_PRESET_CHOICES = [
+    ('', 'Manual date'),
+    ('today', 'Today'),
+    ('current_month_end', 'Current month end'),
+    ('previous_month_end', 'Previous month end'),
+    ('current_year_end', 'Current year end'),
+    ('previous_year_end', 'Previous year end'),
+]
+
+
+def _add_months(value, months):
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, 1)
+
+
+def _month_start(value):
+    return value.replace(day=1)
+
+
+def _month_end(value):
+    return _add_months(_month_start(value), 1) - timedelta(days=1)
+
+
+def _report_date_range(request, default_start, default_end):
+    today = date.today()
+    preset = request.GET.get('preset', '')
+    if preset == 'current_month':
+        return _month_start(today), _month_end(today), preset
+    if preset == 'previous_month':
+        previous_month = _add_months(_month_start(today), -1)
+        return previous_month, _month_end(previous_month), preset
+    if preset == 'year_to_date':
+        return today.replace(month=1, day=1), today, preset
+    if preset == 'current_year':
+        return today.replace(month=1, day=1), today.replace(month=12, day=31), preset
+    if preset == 'previous_year':
+        previous_year = today.year - 1
+        return date(previous_year, 1, 1), date(previous_year, 12, 31), preset
+    return (
+        _parse_report_date(request.GET.get('start'), default_start),
+        _parse_report_date(request.GET.get('end'), default_end),
+        '',
+    )
+
+
+def _report_as_of_date(request, fallback):
+    today = date.today()
+    preset = request.GET.get('as_of_preset', '')
+    if preset == 'today':
+        return today, preset
+    if preset == 'current_month_end':
+        return _month_end(today), preset
+    if preset == 'previous_month_end':
+        previous_month = _add_months(_month_start(today), -1)
+        return _month_end(previous_month), preset
+    if preset == 'current_year_end':
+        return date(today.year, 12, 31), preset
+    if preset == 'previous_year_end':
+        return date(today.year - 1, 12, 31), preset
+    return _parse_report_date(request.GET.get('as_of'), fallback), ''
+
+
+def _include_zero(request):
+    return request.GET.get('include_zero') in ('1', 'true', 'yes', 'on')
 
 
 def _report_query(request, **updates):
@@ -617,12 +694,14 @@ def trial_balance(request):
     if not isinstance(entity, AccountingEntity):
         return entity
     period_id = request.GET.get('period')
+    include_zero = _include_zero(request)
     periods = AccountingPeriod.objects.filter(entity=entity).order_by('-start_date')
     period = periods.filter(pk=period_id).first() if period_id else periods.first()
     report = build_trial_balance_report(
         entity,
         start_date=period.start_date if period else None,
         end_date=period.end_date if period else None,
+        include_zero=include_zero,
     )
     if _wants_csv(request):
         label = period.name.lower().replace(' ', '-') if period else 'all-periods'
@@ -641,6 +720,7 @@ def trial_balance(request):
         'total_debit': report['total_debit'],
         'total_credit': report['total_credit'],
         'is_balanced': report['is_balanced'],
+        'include_zero': include_zero,
         'export_query': _report_query(request, format='csv'),
     })
 
@@ -651,9 +731,13 @@ def general_ledger(request):
     if not isinstance(entity, AccountingEntity):
         return entity
     today = date.today()
-    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
-    end_date = _parse_report_date(request.GET.get('end'), today)
+    start_date, end_date, selected_preset = _report_date_range(
+        request,
+        today.replace(month=1, day=1),
+        today,
+    )
     account_id = request.GET.get('account')
+    include_zero = _include_zero(request)
     accounts = ChartOfAccount.objects.filter(entity=entity, is_active=True).order_by('code')
     selected_account = accounts.filter(pk=account_id).first() if account_id else None
     report = build_general_ledger_report(
@@ -661,6 +745,7 @@ def general_ledger(request):
         start_date=start_date,
         end_date=end_date,
         account=selected_account,
+        include_zero=include_zero,
     )
     if _wants_csv(request):
         label = selected_account.code if selected_account else 'all-accounts'
@@ -676,6 +761,9 @@ def general_ledger(request):
         'start_date': start_date,
         'end_date': end_date,
         'report': report,
+        'include_zero': include_zero,
+        'preset_choices': RANGE_PRESET_CHOICES,
+        'selected_preset': selected_preset,
         'export_query': _report_query(request, format='csv'),
     })
 
@@ -686,8 +774,11 @@ def income_statement(request):
     if not isinstance(entity, AccountingEntity):
         return entity
     today = date.today()
-    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
-    end_date = _parse_report_date(request.GET.get('end'), today)
+    start_date, end_date, selected_preset = _report_date_range(
+        request,
+        today.replace(month=1, day=1),
+        today,
+    )
     report = build_income_statement_report(entity, start_date=start_date, end_date=end_date)
     if _wants_csv(request):
         return csv_response(
@@ -700,6 +791,8 @@ def income_statement(request):
         'start_date': start_date,
         'end_date': end_date,
         'report': report,
+        'preset_choices': RANGE_PRESET_CHOICES,
+        'selected_preset': selected_preset,
         'export_query': _report_query(request, format='csv'),
     })
 
@@ -709,7 +802,7 @@ def balance_sheet(request):
     entity = _require_entity(request)
     if not isinstance(entity, AccountingEntity):
         return entity
-    as_of_date = _parse_report_date(request.GET.get('as_of'), date.today())
+    as_of_date, selected_as_of_preset = _report_as_of_date(request, date.today())
     report = build_balance_sheet_report(entity, as_of_date=as_of_date)
     if _wants_csv(request):
         return csv_response(
@@ -721,6 +814,8 @@ def balance_sheet(request):
         'entity': entity,
         'as_of_date': as_of_date,
         'report': report,
+        'as_of_preset_choices': AS_OF_PRESET_CHOICES,
+        'selected_as_of_preset': selected_as_of_preset,
         'export_query': _report_query(request, format='csv'),
     })
 
@@ -731,8 +826,11 @@ def cash_flow(request):
     if not isinstance(entity, AccountingEntity):
         return entity
     today = date.today()
-    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
-    end_date = _parse_report_date(request.GET.get('end'), today)
+    start_date, end_date, selected_preset = _report_date_range(
+        request,
+        today.replace(month=1, day=1),
+        today,
+    )
     report = build_cash_flow_report(entity, start_date=start_date, end_date=end_date)
     if _wants_csv(request):
         return csv_response(
@@ -745,6 +843,8 @@ def cash_flow(request):
         'start_date': start_date,
         'end_date': end_date,
         'report': report,
+        'preset_choices': RANGE_PRESET_CHOICES,
+        'selected_preset': selected_preset,
         'activity_sections': [
             {
                 'key': 'operating',
@@ -775,8 +875,11 @@ def changes_in_equity(request):
     if not isinstance(entity, AccountingEntity):
         return entity
     today = date.today()
-    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
-    end_date = _parse_report_date(request.GET.get('end'), today)
+    start_date, end_date, selected_preset = _report_date_range(
+        request,
+        today.replace(month=1, day=1),
+        today,
+    )
     report = build_changes_in_equity_report(entity, start_date=start_date, end_date=end_date)
     if _wants_csv(request):
         return csv_response(
@@ -789,6 +892,8 @@ def changes_in_equity(request):
         'start_date': start_date,
         'end_date': end_date,
         'report': report,
+        'preset_choices': RANGE_PRESET_CHOICES,
+        'selected_preset': selected_preset,
         'export_query': _report_query(request, format='csv'),
     })
 
@@ -798,7 +903,7 @@ def ar_aging(request):
     entity = _require_entity(request)
     if not isinstance(entity, AccountingEntity):
         return entity
-    as_of_date = _parse_report_date(request.GET.get('as_of'), date.today())
+    as_of_date, selected_as_of_preset = _report_as_of_date(request, date.today())
     report = build_ar_aging_report(entity, as_of_date=as_of_date)
     if _wants_csv(request):
         return csv_response(
@@ -810,6 +915,8 @@ def ar_aging(request):
         'entity': entity,
         'as_of_date': as_of_date,
         'report': report,
+        'as_of_preset_choices': AS_OF_PRESET_CHOICES,
+        'selected_as_of_preset': selected_as_of_preset,
         'export_query': _report_query(request, format='csv'),
     })
 
@@ -819,7 +926,7 @@ def ap_aging(request):
     entity = _require_entity(request)
     if not isinstance(entity, AccountingEntity):
         return entity
-    as_of_date = _parse_report_date(request.GET.get('as_of'), date.today())
+    as_of_date, selected_as_of_preset = _report_as_of_date(request, date.today())
     report = build_ap_aging_report(entity, as_of_date=as_of_date)
     if _wants_csv(request):
         return csv_response(
@@ -831,6 +938,8 @@ def ap_aging(request):
         'entity': entity,
         'as_of_date': as_of_date,
         'report': report,
+        'as_of_preset_choices': AS_OF_PRESET_CHOICES,
+        'selected_as_of_preset': selected_as_of_preset,
         'export_query': _report_query(request, format='csv'),
     })
 
@@ -841,8 +950,11 @@ def tax_ledger(request):
     if not isinstance(entity, AccountingEntity):
         return entity
     today = date.today()
-    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
-    end_date = _parse_report_date(request.GET.get('end'), today)
+    start_date, end_date, selected_preset = _report_date_range(
+        request,
+        today.replace(month=1, day=1),
+        today,
+    )
     report = build_tax_ledger_report(entity, start_date=start_date, end_date=end_date)
     if _wants_csv(request):
         return csv_response(
@@ -855,6 +967,8 @@ def tax_ledger(request):
         'start_date': start_date,
         'end_date': end_date,
         'report': report,
+        'preset_choices': RANGE_PRESET_CHOICES,
+        'selected_preset': selected_preset,
         'export_query': _report_query(request, format='csv'),
     })
 

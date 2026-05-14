@@ -10,6 +10,7 @@ Slice 3C-A adds the two remaining ledger-derived statements that can be built
 without vendor/subscriber aging subledgers.
 Slice 3C-B adds operational aging and tax workpapers tied back to GL control
 accounts where the current data model allows it.
+Slice 3D-A adds accountant-facing report ergonomics for repeat review runs.
 
 ## Slice 3A Implemented
 
@@ -89,6 +90,20 @@ Implemented:
   balances.
 - Dashboard and statement navigation now link to the aging and tax schedules.
 
+## Slice 3D-A Implemented
+
+Implemented:
+
+- Date range presets for General Ledger, Income Statement, Cash Flow, Changes
+  in Equity, and Tax Ledger.
+- As-of date presets for Balance Sheet, AR Aging, and AP Aging.
+- Trial Balance can include zero-balance accounts for full COA review.
+- General Ledger can include zero-balance account sections for account review
+  and print/export completeness.
+- CSV export links preserve preset and zero-balance filter selections.
+- Regression coverage was added for zero-balance report service behavior and
+  preset-aware CSV endpoints.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -106,6 +121,9 @@ Implemented:
   control comparison.
 - Tax Ledger is a date-range GL tax account report with optional 2307/EWT claim
   support rows.
+- Date presets are UI/report conveniences only; generated reports still show
+  the resolved exact dates.
+- Zero-balance inclusion applies to Trial Balance and General Ledger only.
 - Trial Balance is period-based for now.
 - General Ledger is date-range based and can show all active accounts or one
   selected account.
@@ -127,12 +145,12 @@ Implemented:
   cutover/opening AP support until expense/AP posting is upgraded.
 - Tax Ledger is a GL workpaper and optional 2307 support schedule, not a
   finalized BIR return package or SLSP/QAP/MAP file.
+- Presets and zero-balance toggles are not yet saved per user.
 
 ## Next Slice Candidate
 
-Slice 3D should harden report operations before BIR/NTC books:
+Slice 3D-B should harden report outputs before BIR/NTC books:
 
-- Optional zero-balance account toggle and report date presets.
 - PDF/XLSX export support for the report set.
 - Archived report package manifests and generated-file hashes.
 - Full post-live AP vendor invoice subledger design.

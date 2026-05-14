@@ -270,6 +270,29 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(section['closing_balance'], Decimal('1380.00'))
         self.assertEqual(len(section['lines']), 2)
 
+    def test_zero_balance_toggle_includes_inactive_statement_accounts(self):
+        entity, _cash = self._post_sample_activity()
+        bank = ChartOfAccount.objects.get(entity=entity, code='1010')
+
+        trial_balance = build_trial_balance_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+            include_zero=True,
+        )
+        ledger = build_general_ledger_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+            account=bank,
+            include_zero=True,
+        )
+
+        self.assertIn(bank, [row['account'] for row in trial_balance['rows']])
+        self.assertEqual(len(ledger['sections']), 1)
+        self.assertEqual(ledger['sections'][0]['account'], bank)
+        self.assertEqual(ledger['sections'][0]['closing_balance'], Decimal('0.00'))
+
     def test_cash_flow_and_changes_in_equity_reconcile_to_statements(self):
         entity, _cash = self._post_sample_activity()
 
@@ -445,10 +468,14 @@ class AccountingV2FinancialStatementTests(TestCase):
 
         endpoints = [
             (f'/accounting/trial-balance/?period={period.pk}&format=csv', b'account_code'),
+            (f'/accounting/trial-balance/?period={period.pk}&include_zero=1&format=csv', b'account_code'),
             ('/accounting/general-ledger/?start=2026-01-01&end=2026-01-31&format=csv', b'account_code'),
             (f'/accounting/general-ledger/?start=2026-01-02&end=2026-01-31&account={cash.pk}&format=csv', b'account_code'),
+            ('/accounting/general-ledger/?preset=current_year&include_zero=1&format=csv', b'account_code'),
             ('/accounting/income-statement/?start=2026-01-01&end=2026-01-31&format=csv', b'account_code'),
+            ('/accounting/income-statement/?preset=current_year&format=csv', b'account_code'),
             ('/accounting/balance-sheet/?as_of=2026-01-31&format=csv', b'account_code'),
+            ('/accounting/balance-sheet/?as_of_preset=current_year_end&format=csv', b'account_code'),
             ('/accounting/cash-flow/?start=2026-01-01&end=2026-01-31&format=csv', b'section'),
             ('/accounting/changes-in-equity/?start=2026-01-01&end=2026-01-31&format=csv', b'account_code'),
             ('/accounting/ar-aging/?as_of=2026-01-31&format=csv', b'subscriber_username'),

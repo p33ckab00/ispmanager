@@ -118,6 +118,8 @@ unclosed current earnings are included before formal closing entries.
 Slice 3C-B is now implemented for aging and tax workpapers: AR Aging, AP Aging,
 and Tax Ledger pages with CSV/print support and GL control comparisons where
 available.
+Slice 3D-A is now implemented for report ergonomics: date/as-of presets and
+zero-balance account toggles for Trial Balance and General Ledger.
 
 ## 2. Locked Decisions
 
@@ -364,9 +366,17 @@ Slice 3C-B is implemented as aging and tax workpapers:
   compares the schedule total to the posted GL AP control account.
 - Tax Ledger reports VAT, percentage tax, withholding, and CWT GL accounts plus
   optional 2307/EWT claim rows for the selected period.
+
+Slice 3D-A is implemented as report ergonomics:
+
+- Date range presets are available on General Ledger, Income Statement, Cash
+  Flow, Changes in Equity, and Tax Ledger.
+- As-of presets are available on Balance Sheet, AR Aging, and AP Aging.
+- Trial Balance and General Ledger can include zero-balance accounts for
+  complete COA review and export runs.
 - Remaining Slice 3 work starts with PDF/XLSX exports, archived report
-  packages, report presets, formal closing entries, and a full post-live AP
-  vendor invoice subledger.
+  packages, formal closing entries, and a full post-live AP vendor invoice
+  subledger.
 
 ### Slice 4 - BIR Books and Guides
 

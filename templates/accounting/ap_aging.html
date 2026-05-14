@@ -19,6 +19,14 @@
 <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6 no-print">
   <form method="get" class="flex flex-wrap items-end gap-3">
     <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">Preset</label>
+      <select name="as_of_preset" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        {% for value, label in as_of_preset_choices %}
+        <option value="{{ value }}" {% if selected_as_of_preset == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">As Of</label>
       <input type="date" name="as_of" value="{{ as_of_date|date:'Y-m-d' }}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
     </div>

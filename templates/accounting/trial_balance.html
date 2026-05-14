@@ -28,6 +28,10 @@
         {% endfor %}
       </select>
     </div>
+    <label class="inline-flex items-center gap-2 text-sm text-gray-700 pb-2">
+      <input type="checkbox" name="include_zero" value="1" {% if include_zero %}checked{% endif %} class="rounded border-gray-300">
+      Include zero-balance accounts
+    </label>
     <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm">Run</button>
   </form>
 </div>
