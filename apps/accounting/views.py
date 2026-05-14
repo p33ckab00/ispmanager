@@ -42,6 +42,8 @@ from apps.accounting.services import (
     build_cutover_balance_schedule_summary,
     approve_cutover_plan,
     build_balance_sheet_report,
+    build_cash_flow_report,
+    build_changes_in_equity_report,
     create_accounting_foundation,
     create_cutover_balance_schedule,
     create_cutover_plan,
@@ -269,6 +271,56 @@ def _balance_sheet_csv_rows(report):
         ['Summary', '', 'Total Liabilities And Equity', report['total_liabilities_equity']],
         ['Summary', '', 'Difference', report['difference']],
         ['Summary', '', 'Balanced', 'yes' if report['is_balanced'] else 'no'],
+    ])
+    return rows
+
+
+def _cash_flow_csv_rows(report):
+    labels = {
+        'operating': 'Operating Activities',
+        'investing': 'Investing Activities',
+        'financing': 'Financing Activities',
+    }
+    rows = []
+    for key in ('operating', 'investing', 'financing'):
+        for row in report['sections'][key]:
+            rows.append([
+                labels[key],
+                row['entry_date'],
+                row['entry_number'],
+                row['description'],
+                row['counterparty'],
+                row['amount'],
+            ])
+        rows.append([labels[key], '', '', 'Total', '', report['totals'][key]])
+    rows.extend([
+        ['Summary', '', '', 'Opening Cash And Cash Equivalents', '', report['opening_cash']],
+        ['Summary', '', '', 'Net Cash Change', '', report['net_cash_change']],
+        ['Summary', '', '', 'Closing Cash And Cash Equivalents', '', report['closing_cash']],
+        ['Summary', '', '', 'Difference', '', report['difference']],
+    ])
+    return rows
+
+
+def _changes_in_equity_csv_rows(report):
+    rows = [
+        [
+            'Equity Account',
+            row['account'].code,
+            row['account'].name,
+            row['opening_balance'],
+            row['movement'],
+            row['ending_balance'],
+        ]
+        for row in report['rows']
+    ]
+    rows.extend([
+        ['Summary', '', 'Prior Unclosed Earnings', report['prior_unclosed_earnings'], '', ''],
+        ['Summary', '', 'Period Net Income', '', report['period_net_income'], ''],
+        ['Summary', '', 'Opening Equity', report['opening_equity'], '', ''],
+        ['Summary', '', 'Ending Equity', '', '', report['ending_equity']],
+        ['Summary', '', 'Balance Sheet Equity', '', '', report['balance_sheet_equity']],
+        ['Summary', '', 'Difference', '', '', report['difference']],
     ])
     return rows
 
@@ -575,6 +627,74 @@ def balance_sheet(request):
     return render(request, 'accounting/balance_sheet.html', {
         'entity': entity,
         'as_of_date': as_of_date,
+        'report': report,
+        'export_query': _report_query(request, format='csv'),
+    })
+
+
+@login_required
+def cash_flow(request):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    today = date.today()
+    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
+    end_date = _parse_report_date(request.GET.get('end'), today)
+    report = build_cash_flow_report(entity, start_date=start_date, end_date=end_date)
+    if _wants_csv(request):
+        return csv_response(
+            f'accounting-cash-flow-{start_date}-{end_date}.csv',
+            ['section', 'date', 'entry_number', 'description', 'counterparty', 'amount'],
+            _cash_flow_csv_rows(report),
+        )
+    return render(request, 'accounting/cash_flow.html', {
+        'entity': entity,
+        'start_date': start_date,
+        'end_date': end_date,
+        'report': report,
+        'activity_sections': [
+            {
+                'key': 'operating',
+                'label': 'Operating Activities',
+                'rows': report['sections']['operating'],
+                'total': report['totals']['operating'],
+            },
+            {
+                'key': 'investing',
+                'label': 'Investing Activities',
+                'rows': report['sections']['investing'],
+                'total': report['totals']['investing'],
+            },
+            {
+                'key': 'financing',
+                'label': 'Financing Activities',
+                'rows': report['sections']['financing'],
+                'total': report['totals']['financing'],
+            },
+        ],
+        'export_query': _report_query(request, format='csv'),
+    })
+
+
+@login_required
+def changes_in_equity(request):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    today = date.today()
+    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
+    end_date = _parse_report_date(request.GET.get('end'), today)
+    report = build_changes_in_equity_report(entity, start_date=start_date, end_date=end_date)
+    if _wants_csv(request):
+        return csv_response(
+            f'accounting-changes-in-equity-{start_date}-{end_date}.csv',
+            ['section', 'account_code', 'account_name', 'opening_balance', 'movement', 'ending_balance'],
+            _changes_in_equity_csv_rows(report),
+        )
+    return render(request, 'accounting/changes_in_equity.html', {
+        'entity': entity,
+        'start_date': start_date,
+        'end_date': end_date,
         'report': report,
         'export_query': _report_query(request, format='csv'),
     })

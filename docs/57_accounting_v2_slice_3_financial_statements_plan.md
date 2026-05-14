@@ -6,6 +6,8 @@ Slice 3 starts the financial statement layer on top of the posted Accounting v2
 ledger. Slice 3A delivered the core accountant-facing reports. Slice 3B adds
 basic export and print ergonomics while still avoiding BIR/NTC claims,
 immutable filing packages, and full subledger engines.
+Slice 3C-A adds the two remaining ledger-derived statements that can be built
+without vendor/subscriber aging subledgers.
 
 ## Slice 3A Implemented
 
@@ -46,6 +48,25 @@ Implemented:
   filters, and actions while preserving report headers and tables.
 - Regression coverage was added for the CSV report endpoints.
 
+## Slice 3C-A Implemented
+
+Implemented:
+
+- Cash Flow page at `/accounting/cash-flow/`.
+- Changes in Equity page at `/accounting/changes-in-equity/`.
+- CSV exports and print-friendly layouts for both new statement pages.
+- Cash Flow uses posted journal activity against the ISP cash-equivalent
+  accounts seeded by the COA templates: cash on hand, bank accounts, and
+  e-wallet/gateway clearing.
+- Cash Flow classifies entries into operating, investing, and financing
+  activities based on the non-cash counterparty accounts.
+- Cash Flow reconciles opening cash plus net cash change to closing cash.
+- Changes in Equity reports opening equity, equity-account movement, period net
+  income, ending equity, and difference against Balance Sheet equity.
+- Balance Sheet now displays a visible warning when unclosed current earnings
+  are included because closing entries are not posted.
+- Accounting dashboard and statement navigation now link to the new statements.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -53,14 +74,16 @@ Implemented:
 - Balance Sheet is an as-of report using posted lines through the selected
   date.
 - Income Statement is a date-range report.
+- Cash Flow is a date-range report based on posted movements in configured
+  cash-equivalent accounts.
+- Changes in Equity is a date-range report that includes unclosed income when
+  period closing entries are not posted yet.
 - Trial Balance is period-based for now.
 - General Ledger is date-range based and can show all active accounts or one
   selected account.
 
 ## Remaining Slice 3 Gaps
 
-- Cash Flow statement is not implemented yet.
-- Changes in Equity statement is not implemented yet.
 - AR aging and AP aging are not implemented as formal statement schedules yet.
 - VAT ledger and tax reconciliation reports remain manual/cutover-level only.
 - PDF and XLSX exports are not implemented for the new reports.
@@ -69,15 +92,16 @@ Implemented:
 - Formal period close and closing entries are not implemented yet.
 - Department, area, service-type, and subscriber dimensions are not yet present
   in journal lines.
+- Cash Flow classification is GL-account based. It will become more exact once
+  journal lines carry service area, asset class, settlement, and source document
+  dimensions.
 
 ## Next Slice Candidate
 
-Slice 3C should add the missing statement schedules that accountants will need
+Slice 3C-B should add the aging and tax schedules that accountants will need
 before BIR/NTC books:
 
-- Cash Flow statement.
-- Changes in Equity statement.
 - AR aging schedule tied to the AR control account.
 - AP aging schedule tied to the AP control account.
+- VAT ledger and tax reconciliation schedule.
 - Optional zero-balance account toggle and report date presets.
-- Clear warning when the Balance Sheet relies on unclosed current earnings.

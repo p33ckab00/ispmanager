@@ -7,12 +7,13 @@
     <h2 class="text-2xl font-bold text-gray-800">Trial Balance</h2>
     <p class="text-gray-500 text-sm mt-1">{{ entity }}{% if period %} · {{ period.start_date }} to {{ period.end_date }}{% endif %}</p>
   </div>
-  <div class="flex gap-2 no-print">
+  <div class="flex flex-wrap gap-2 no-print">
     <a href="?{{ export_query }}" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">CSV</a>
     <button type="button" onclick="window.print()" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Print</button>
     <a href="{% url 'accounting-general-ledger' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">General Ledger</a>
     <a href="{% url 'accounting-income-statement' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Income Statement</a>
     <a href="{% url 'accounting-balance-sheet' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Balance Sheet</a>
+    <a href="{% url 'accounting-cash-flow' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Cash Flow</a>
     <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Accounting</a>
   </div>
 </div>

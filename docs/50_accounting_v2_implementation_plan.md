@@ -112,6 +112,9 @@ pages with current earnings included in equity for unclosed income accounts.
 Slice 3B is now implemented for financial statement exports and print layouts:
 Trial Balance, General Ledger, Income Statement, and Balance Sheet now have
 filter-preserving CSV downloads and browser print views.
+Slice 3C-A is now implemented for ledger-derived statement coverage: Cash Flow,
+Changes in Equity, CSV/print support for both, and a Balance Sheet warning when
+unclosed current earnings are included before formal closing entries.
 
 ## 2. Locked Decisions
 
@@ -340,8 +343,17 @@ Slice 3B is implemented as report export and print ergonomics:
   filter-preserving CSV downloads.
 - The same reports have print-friendly browser layouts that hide navigation,
   filters, and actions.
-- Remaining Slice 3 work starts with Cash Flow, Changes in Equity, AR/AP aging,
-  VAT ledgers, PDF/XLSX exports, and archived report packages.
+
+Slice 3C-A is implemented as ledger-derived statement completion:
+
+- Cash Flow reports opening cash, operating/investing/financing cash movement,
+  net cash change, and closing cash from posted cash-equivalent journal lines.
+- Changes in Equity reports opening equity, equity account movement, period net
+  income, ending equity, and difference against Balance Sheet equity.
+- Balance Sheet warns when it relies on unclosed current earnings because
+  closing entries are not posted yet.
+- Remaining Slice 3 work starts with AR/AP aging, VAT ledgers, PDF/XLSX
+  exports, archived report packages, report presets, and formal closing entries.
 
 ### Slice 4 - BIR Books and Guides
 

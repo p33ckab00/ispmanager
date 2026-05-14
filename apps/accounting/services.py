@@ -78,6 +78,8 @@ COMMON_ISP_ACCOUNTS = [
     _account('8000', 'Other Expense', 'other_expense', 'debit'),
 ]
 
+CASH_EQUIVALENT_ACCOUNT_CODES = ('1000', '1010', '1020')
+
 VAT_ACCOUNTS = [
     _account('1200', 'Input VAT', 'asset', 'debit'),
     _account('2300', 'Output VAT', 'liability', 'credit'),
@@ -1453,6 +1455,42 @@ def _account_activity_rows(entity, start_date=None, end_date=None, account_types
     return rows
 
 
+def _account_balance_as_of(account, as_of_date=None):
+    qs = JournalLine.objects.filter(
+        account=account,
+        journal_entry__entity=account.entity,
+        journal_entry__status='posted',
+    )
+    if as_of_date:
+        qs = qs.filter(journal_entry__entry_date__lte=as_of_date)
+    totals = qs.aggregate(debit_total=Sum('debit'), credit_total=Sum('credit'))
+    return _statement_balance(
+        account,
+        totals['debit_total'] or Decimal('0.00'),
+        totals['credit_total'] or Decimal('0.00'),
+    )
+
+
+def _account_activity_balance(account, start_date=None, end_date=None):
+    qs = JournalLine.objects.filter(
+        account=account,
+        journal_entry__entity=account.entity,
+        journal_entry__status='posted',
+    )
+    if start_date:
+        qs = qs.filter(journal_entry__entry_date__gte=start_date)
+    if end_date:
+        qs = qs.filter(journal_entry__entry_date__lte=end_date)
+    totals = qs.aggregate(debit_total=Sum('debit'), credit_total=Sum('credit'))
+    debit = totals['debit_total'] or Decimal('0.00')
+    credit = totals['credit_total'] or Decimal('0.00')
+    return {
+        'debit': debit,
+        'credit': credit,
+        'balance': _statement_balance(account, debit, credit),
+    }
+
+
 def build_trial_balance_report(entity, start_date=None, end_date=None):
     rows = _account_activity_rows(entity, start_date=start_date, end_date=end_date)
     total_debit = sum((row['debit'] for row in rows), Decimal('0.00'))
@@ -1541,6 +1579,170 @@ def build_balance_sheet_report(entity, as_of_date=None):
         'is_balanced': difference == Decimal('0.00'),
         'as_of_date': as_of_date,
         'current_earnings': current_earnings,
+        'uses_unclosed_current_earnings': current_earnings != Decimal('0.00'),
+    }
+
+
+def _cash_flow_section_for_lines(lines):
+    if not lines:
+        return 'transfer'
+    for line in lines:
+        account = line.account
+        if account.account_type == 'equity' or account.code == '2400':
+            return 'financing'
+    for line in lines:
+        account = line.account
+        name = account.name.lower()
+        if account.account_type == 'asset' and (
+            account.code.startswith('15')
+            or 'equipment' in name
+            or 'facilities' in name
+            or 'fixed asset' in name
+        ):
+            return 'investing'
+    return 'operating'
+
+
+def build_cash_flow_report(entity, start_date=None, end_date=None):
+    day_before_start = start_date - timedelta(days=1) if start_date else None
+    cash_accounts = list(
+        ChartOfAccount.objects
+        .filter(entity=entity, is_active=True, code__in=CASH_EQUIVALENT_ACCOUNT_CODES)
+        .order_by('code')
+    )
+    cash_account_ids = {account.pk for account in cash_accounts}
+    cash_account_rows = []
+    for account in cash_accounts:
+        opening_balance = _account_balance_as_of(account, day_before_start)
+        closing_balance = _account_balance_as_of(account, end_date)
+        cash_account_rows.append({
+            'account': account,
+            'opening_balance': opening_balance,
+            'closing_balance': closing_balance,
+            'movement': closing_balance - opening_balance,
+        })
+
+    entries = (
+        JournalEntry.objects
+        .filter(
+            entity=entity,
+            status='posted',
+            lines__account_id__in=cash_account_ids,
+        )
+        .prefetch_related('lines__account')
+        .distinct()
+        .order_by('entry_date', 'entry_number', 'id')
+    )
+    if start_date:
+        entries = entries.filter(entry_date__gte=start_date)
+    if end_date:
+        entries = entries.filter(entry_date__lte=end_date)
+
+    sections = {
+        'operating': [],
+        'investing': [],
+        'financing': [],
+    }
+    transfer_rows = []
+    for entry in entries:
+        lines = list(entry.lines.all())
+        cash_lines = [line for line in lines if line.account_id in cash_account_ids]
+        cash_movement = sum((
+            _statement_balance(line.account, line.debit, line.credit)
+            for line in cash_lines
+        ), Decimal('0.00'))
+        if cash_movement == Decimal('0.00'):
+            continue
+
+        non_cash_lines = [line for line in lines if line.account_id not in cash_account_ids]
+        section_key = _cash_flow_section_for_lines(non_cash_lines)
+        row = {
+            'journal_entry': entry,
+            'entry_date': entry.entry_date,
+            'entry_number': entry.entry_number,
+            'description': entry.description,
+            'counterparty': ', '.join(
+                sorted({f'{line.account.code} {line.account.name}' for line in non_cash_lines})
+            ) or 'Cash transfer',
+            'amount': cash_movement,
+            'section': section_key,
+        }
+        if section_key == 'transfer':
+            transfer_rows.append(row)
+        else:
+            sections[section_key].append(row)
+
+    totals = {
+        key: sum((row['amount'] for row in value), Decimal('0.00'))
+        for key, value in sections.items()
+    }
+    net_cash_change = sum(totals.values(), Decimal('0.00'))
+    opening_cash = sum((row['opening_balance'] for row in cash_account_rows), Decimal('0.00'))
+    closing_cash = sum((row['closing_balance'] for row in cash_account_rows), Decimal('0.00'))
+    return {
+        'sections': sections,
+        'totals': totals,
+        'transfer_rows': transfer_rows,
+        'cash_accounts': cash_account_rows,
+        'opening_cash': opening_cash,
+        'net_cash_change': net_cash_change,
+        'closing_cash': closing_cash,
+        'recomputed_closing_cash': opening_cash + net_cash_change,
+        'difference': closing_cash - (opening_cash + net_cash_change),
+        'start_date': start_date,
+        'end_date': end_date,
+    }
+
+
+def build_changes_in_equity_report(entity, start_date=None, end_date=None):
+    day_before_start = start_date - timedelta(days=1) if start_date else None
+    accounts = (
+        ChartOfAccount.objects
+        .filter(entity=entity, is_active=True, account_type='equity')
+        .order_by('code')
+    )
+    rows = []
+    for account in accounts:
+        opening_balance = _account_balance_as_of(account, day_before_start)
+        activity = _account_activity_balance(account, start_date=start_date, end_date=end_date)
+        movement = activity['balance']
+        ending_balance = opening_balance + movement
+        if opening_balance == Decimal('0.00') and movement == Decimal('0.00') and ending_balance == Decimal('0.00'):
+            continue
+        rows.append({
+            'account': account,
+            'opening_balance': opening_balance,
+            'movement': movement,
+            'ending_balance': ending_balance,
+        })
+
+    prior_income = (
+        build_income_statement_report(entity, end_date=day_before_start)['net_income']
+        if day_before_start else Decimal('0.00')
+    )
+    period_income = build_income_statement_report(
+        entity,
+        start_date=start_date,
+        end_date=end_date,
+    )['net_income']
+    opening_equity = sum((row['opening_balance'] for row in rows), Decimal('0.00')) + prior_income
+    equity_account_movement = sum((row['movement'] for row in rows), Decimal('0.00'))
+    total_period_change = equity_account_movement + period_income
+    ending_equity = opening_equity + equity_account_movement + period_income
+    balance_sheet = build_balance_sheet_report(entity, as_of_date=end_date)
+
+    return {
+        'rows': rows,
+        'prior_unclosed_earnings': prior_income,
+        'period_net_income': period_income,
+        'opening_equity': opening_equity,
+        'equity_account_movement': equity_account_movement,
+        'total_period_change': total_period_change,
+        'ending_equity': ending_equity,
+        'balance_sheet_equity': balance_sheet['totals']['equity'],
+        'difference': ending_equity - balance_sheet['totals']['equity'],
+        'start_date': start_date,
+        'end_date': end_date,
     }
 
 

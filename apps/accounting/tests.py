@@ -25,6 +25,8 @@ from apps.accounting.models import (
 from apps.accounting.services import (
     approve_cutover_plan,
     build_balance_sheet_report,
+    build_cash_flow_report,
+    build_changes_in_equity_report,
     build_cutover_readiness,
     build_general_ledger_report,
     build_income_statement_report,
@@ -264,6 +266,31 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(section['closing_balance'], Decimal('1380.00'))
         self.assertEqual(len(section['lines']), 2)
 
+    def test_cash_flow_and_changes_in_equity_reconcile_to_statements(self):
+        entity, _cash = self._post_sample_activity()
+
+        cash_flow = build_cash_flow_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+        )
+        equity = build_changes_in_equity_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+        )
+
+        self.assertEqual(cash_flow['opening_cash'], Decimal('0.00'))
+        self.assertEqual(cash_flow['totals']['operating'], Decimal('380.00'))
+        self.assertEqual(cash_flow['totals']['financing'], Decimal('1000.00'))
+        self.assertEqual(cash_flow['closing_cash'], Decimal('1380.00'))
+        self.assertEqual(cash_flow['difference'], Decimal('0.00'))
+        self.assertEqual(equity['opening_equity'], Decimal('0.00'))
+        self.assertEqual(equity['equity_account_movement'], Decimal('1000.00'))
+        self.assertEqual(equity['period_net_income'], Decimal('380.00'))
+        self.assertEqual(equity['ending_equity'], Decimal('1380.00'))
+        self.assertEqual(equity['difference'], Decimal('0.00'))
+
     def test_financial_statement_pages_export_csv(self):
         entity, cash = self._post_sample_activity()
         user = get_user_model().objects.create_user(
@@ -276,20 +303,22 @@ class AccountingV2FinancialStatementTests(TestCase):
         period = AccountingPeriod.objects.get(entity=entity, period_number=1)
 
         endpoints = [
-            f'/accounting/trial-balance/?period={period.pk}&format=csv',
-            '/accounting/general-ledger/?start=2026-01-01&end=2026-01-31&format=csv',
-            f'/accounting/general-ledger/?start=2026-01-02&end=2026-01-31&account={cash.pk}&format=csv',
-            '/accounting/income-statement/?start=2026-01-01&end=2026-01-31&format=csv',
-            '/accounting/balance-sheet/?as_of=2026-01-31&format=csv',
+            (f'/accounting/trial-balance/?period={period.pk}&format=csv', b'account_code'),
+            ('/accounting/general-ledger/?start=2026-01-01&end=2026-01-31&format=csv', b'account_code'),
+            (f'/accounting/general-ledger/?start=2026-01-02&end=2026-01-31&account={cash.pk}&format=csv', b'account_code'),
+            ('/accounting/income-statement/?start=2026-01-01&end=2026-01-31&format=csv', b'account_code'),
+            ('/accounting/balance-sheet/?as_of=2026-01-31&format=csv', b'account_code'),
+            ('/accounting/cash-flow/?start=2026-01-01&end=2026-01-31&format=csv', b'section'),
+            ('/accounting/changes-in-equity/?start=2026-01-01&end=2026-01-31&format=csv', b'account_code'),
         ]
 
-        for endpoint in endpoints:
+        for endpoint, expected_header in endpoints:
             response = self.client.get(endpoint)
 
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response['Content-Type'], 'text/csv')
             self.assertIn('attachment;', response['Content-Disposition'])
-            self.assertIn(b'account_code', response.content)
+            self.assertIn(expected_header, response.content)
 
 
 class AccountingV2CutoverTests(TestCase):

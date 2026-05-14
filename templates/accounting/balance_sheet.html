@@ -7,10 +7,11 @@
     <h2 class="text-2xl font-bold text-gray-800">Balance Sheet</h2>
     <p class="text-gray-500 text-sm mt-1">{{ entity }} · as of {{ as_of_date }}</p>
   </div>
-  <div class="flex gap-2 no-print">
+  <div class="flex flex-wrap gap-2 no-print">
     <a href="?{{ export_query }}" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">CSV</a>
     <button type="button" onclick="window.print()" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Print</button>
     <a href="{% url 'accounting-income-statement' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Income Statement</a>
+    <a href="{% url 'accounting-changes-in-equity' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Equity</a>
     <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Accounting</a>
   </div>
 </div>
@@ -24,6 +25,13 @@
     <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm">Run</button>
   </form>
 </div>
+
+{% if report.uses_unclosed_current_earnings %}
+<div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 mb-6 report-panel">
+  <p class="font-semibold text-sm">Unclosed current earnings included</p>
+  <p class="text-sm mt-1">This Balance Sheet includes PHP {{ report.current_earnings }} as unclosed current earnings because formal closing entries are not posted yet.</p>
+</div>
+{% endif %}
 
 <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden report-panel">
   <table class="w-full text-sm">

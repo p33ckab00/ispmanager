@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Cash Flow - {{ isp_name }}{% endblock %}
+{% block extra_css %}{% include "accounting/partials/report_print_css.html" %}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">Cash Flow</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ entity }} · {{ start_date }} to {{ end_date }}</p>
+  </div>
+  <div class="flex flex-wrap gap-2 no-print">
+    <a href="?{{ export_query }}" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">CSV</a>
+    <button type="button" onclick="window.print()" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Print</button>
+    <a href="{% url 'accounting-income-statement' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Income Statement</a>
+    <a href="{% url 'accounting-balance-sheet' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Balance Sheet</a>
+    <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Accounting</a>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6 no-print">
+  <form method="get" class="flex flex-wrap items-end gap-3">
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">From</label>
+      <input type="date" name="start" value="{{ start_date|date:'Y-m-d' }}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">To</label>
+      <input type="date" name="end" value="{{ end_date|date:'Y-m-d' }}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+    </div>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm">Run</button>
+  </form>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 report-panel">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide">Opening Cash</p>
+    <p class="text-2xl font-bold text-gray-800 mt-1">PHP {{ report.opening_cash }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide">Net Cash Change</p>
+    <p class="text-2xl font-bold {% if report.net_cash_change >= 0 %}text-green-700{% else %}text-red-600{% endif %} mt-1">PHP {{ report.net_cash_change }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide">Closing Cash</p>
+    <p class="text-2xl font-bold text-gray-800 mt-1">PHP {{ report.closing_cash }}</p>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden report-panel">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Activity</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Entry</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Description</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Amount</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for section in activity_sections %}
+      <tr class="bg-gray-50"><td colspan="4" class="px-4 py-3 font-semibold text-gray-700">{{ section.label }}</td></tr>
+      {% for row in section.rows %}
+      <tr>
+        <td class="px-4 py-3">{{ row.entry_date }}</td>
+        <td class="px-4 py-3"><a href="{% url 'accounting-journal-detail' row.journal_entry.pk %}" class="text-blue-600 hover:underline">{{ row.entry_number }}</a></td>
+        <td class="px-4 py-3">
+          <p class="font-medium text-gray-800">{{ row.description }}</p>
+          <p class="text-xs text-gray-500">{{ row.counterparty }}</p>
+        </td>
+        <td class="px-4 py-3 text-right {% if row.amount >= 0 %}text-green-700{% else %}text-red-600{% endif %}">PHP {{ row.amount }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="px-4 py-3 text-gray-400">No cash activity in this section.</td></tr>
+      {% endfor %}
+      <tr class="font-semibold">
+        <td colspan="3" class="px-4 py-3 text-right">Total {{ section.label }}</td>
+        <td class="px-4 py-3 text-right">PHP {{ section.total }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="bg-gray-50 font-bold">
+        <td colspan="3" class="px-4 py-3 text-right">Closing Cash And Cash Equivalents</td>
+        <td class="px-4 py-3 text-right">PHP {{ report.closing_cash }}</td>
+      </tr>
+      {% if report.difference %}
+      <tr class="font-semibold">
+        <td colspan="3" class="px-4 py-3 text-right">Difference</td>
+        <td class="px-4 py-3 text-right text-red-600">PHP {{ report.difference }}</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
