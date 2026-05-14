@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
@@ -262,6 +263,33 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(section['opening_balance'], Decimal('1000.00'))
         self.assertEqual(section['closing_balance'], Decimal('1380.00'))
         self.assertEqual(len(section['lines']), 2)
+
+    def test_financial_statement_pages_export_csv(self):
+        entity, cash = self._post_sample_activity()
+        user = get_user_model().objects.create_user(
+            username='statement-admin',
+            password='test-password',
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.client.force_login(user)
+        period = AccountingPeriod.objects.get(entity=entity, period_number=1)
+
+        endpoints = [
+            f'/accounting/trial-balance/?period={period.pk}&format=csv',
+            '/accounting/general-ledger/?start=2026-01-01&end=2026-01-31&format=csv',
+            f'/accounting/general-ledger/?start=2026-01-02&end=2026-01-31&account={cash.pk}&format=csv',
+            '/accounting/income-statement/?start=2026-01-01&end=2026-01-31&format=csv',
+            '/accounting/balance-sheet/?as_of=2026-01-31&format=csv',
+        ]
+
+        for endpoint in endpoints:
+            response = self.client.get(endpoint)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response['Content-Type'], 'text/csv')
+            self.assertIn('attachment;', response['Content-Disposition'])
+            self.assertIn(b'account_code', response.content)
 
 
 class AccountingV2CutoverTests(TestCase):

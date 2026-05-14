@@ -1,18 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Balance Sheet - {{ isp_name }}{% endblock %}
+{% block extra_css %}{% include "accounting/partials/report_print_css.html" %}{% endblock %}
 {% block content %}
 <div class="flex items-center justify-between mb-6">
   <div>
     <h2 class="text-2xl font-bold text-gray-800">Balance Sheet</h2>
-    <p class="text-gray-500 text-sm mt-1">{{ entity }}</p>
+    <p class="text-gray-500 text-sm mt-1">{{ entity }} · as of {{ as_of_date }}</p>
   </div>
-  <div class="flex gap-2">
+  <div class="flex gap-2 no-print">
+    <a href="?{{ export_query }}" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">CSV</a>
+    <button type="button" onclick="window.print()" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Print</button>
     <a href="{% url 'accounting-income-statement' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Income Statement</a>
     <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Accounting</a>
   </div>
 </div>
 
-<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6">
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6 no-print">
   <form method="get" class="flex flex-wrap items-end gap-3">
     <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">As Of</label>
@@ -22,7 +25,7 @@
   </form>
 </div>
 
-<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden report-panel">
   <table class="w-full text-sm">
     <thead class="bg-gray-50 border-b border-gray-100">
       <tr>

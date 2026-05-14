@@ -66,6 +66,7 @@ from apps.accounting.services import (
     validate_opening_balance_import,
 )
 from apps.core.models import AuditLog
+from apps.data_exchange.services import csv_response
 
 
 def _active_entity():
@@ -145,6 +146,131 @@ def _parse_report_date(value, fallback=None):
 
 def _cutover_is_locked(plan):
     return bool(plan and plan.status in ('approved', 'live'))
+
+
+def _report_query(request, **updates):
+    query = request.GET.copy()
+    for key, value in updates.items():
+        if value in (None, ''):
+            query.pop(key, None)
+        else:
+            query[key] = value
+    return query.urlencode()
+
+
+def _wants_csv(request):
+    return request.GET.get('format') == 'csv'
+
+
+def _trial_balance_csv_rows(report):
+    return [
+        [
+            row['account'].code,
+            row['account'].name,
+            row['account'].get_account_type_display(),
+            row['debit'],
+            row['credit'],
+            row['balance'],
+        ]
+        for row in report['rows']
+    ] + [[
+        '',
+        'Total',
+        '',
+        report['total_debit'],
+        report['total_credit'],
+        'Balanced' if report['is_balanced'] else 'Out of balance',
+    ]]
+
+
+def _general_ledger_csv_rows(report):
+    rows = []
+    for section in report['sections']:
+        account = section['account']
+        rows.append([
+            account.code,
+            account.name,
+            '',
+            'Opening Balance',
+            '',
+            '',
+            '',
+            section['opening_balance'],
+        ])
+        for item in section['lines']:
+            journal_entry = item['journal_entry']
+            rows.append([
+                account.code,
+                account.name,
+                journal_entry.entry_date,
+                journal_entry.entry_number,
+                item['line'].description or journal_entry.description,
+                item['debit'],
+                item['credit'],
+                item['running_balance'],
+            ])
+        rows.append([
+            account.code,
+            account.name,
+            '',
+            'Closing Balance',
+            '',
+            '',
+            '',
+            section['closing_balance'],
+        ])
+    return rows
+
+
+def _income_statement_csv_rows(report):
+    labels = {
+        'revenue': 'Revenue',
+        'direct_cost': 'Direct Costs',
+        'expense': 'Operating Expenses',
+        'other_income': 'Other Income',
+        'other_expense': 'Other Expenses',
+    }
+    rows = []
+    for key in ('revenue', 'direct_cost', 'expense', 'other_income', 'other_expense'):
+        for row in report['sections'][key]:
+            rows.append([
+                labels[key],
+                row['account'].code,
+                row['account'].name,
+                row['balance'],
+            ])
+        rows.append([labels[key], '', 'Total', report['totals'][key]])
+    rows.extend([
+        ['Summary', '', 'Gross Profit', report['gross_profit']],
+        ['Summary', '', 'Operating Income', report['operating_income']],
+        ['Summary', '', 'Net Income', report['net_income']],
+    ])
+    return rows
+
+
+def _balance_sheet_csv_rows(report):
+    labels = {
+        'asset': 'Assets',
+        'liability': 'Liabilities',
+        'equity': 'Equity',
+    }
+    rows = []
+    for key in ('asset', 'liability', 'equity'):
+        for row in report['sections'][key]:
+            account = row.get('account')
+            rows.append([
+                labels[key],
+                account.code if account else '',
+                account.name if account else row.get('label', ''),
+                row['balance'],
+            ])
+        rows.append([labels[key], '', 'Total', report['totals'][key]])
+    rows.extend([
+        ['Summary', '', 'Total Liabilities And Equity', report['total_liabilities_equity']],
+        ['Summary', '', 'Difference', report['difference']],
+        ['Summary', '', 'Balanced', 'yes' if report['is_balanced'] else 'no'],
+    ])
+    return rows
 
 
 @login_required
@@ -353,6 +479,13 @@ def trial_balance(request):
         start_date=period.start_date if period else None,
         end_date=period.end_date if period else None,
     )
+    if _wants_csv(request):
+        label = period.name.lower().replace(' ', '-') if period else 'all-periods'
+        return csv_response(
+            f'accounting-trial-balance-{label}.csv',
+            ['account_code', 'account_name', 'account_type', 'debit', 'credit', 'balance'],
+            _trial_balance_csv_rows(report),
+        )
 
     return render(request, 'accounting/trial_balance.html', {
         'entity': entity,
@@ -363,6 +496,7 @@ def trial_balance(request):
         'total_debit': report['total_debit'],
         'total_credit': report['total_credit'],
         'is_balanced': report['is_balanced'],
+        'export_query': _report_query(request, format='csv'),
     })
 
 
@@ -383,6 +517,13 @@ def general_ledger(request):
         end_date=end_date,
         account=selected_account,
     )
+    if _wants_csv(request):
+        label = selected_account.code if selected_account else 'all-accounts'
+        return csv_response(
+            f'accounting-general-ledger-{label}-{start_date}-{end_date}.csv',
+            ['account_code', 'account_name', 'date', 'entry_number', 'description', 'debit', 'credit', 'running_balance'],
+            _general_ledger_csv_rows(report),
+        )
     return render(request, 'accounting/general_ledger.html', {
         'entity': entity,
         'accounts': accounts,
@@ -390,6 +531,7 @@ def general_ledger(request):
         'start_date': start_date,
         'end_date': end_date,
         'report': report,
+        'export_query': _report_query(request, format='csv'),
     })
 
 
@@ -402,11 +544,18 @@ def income_statement(request):
     start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
     end_date = _parse_report_date(request.GET.get('end'), today)
     report = build_income_statement_report(entity, start_date=start_date, end_date=end_date)
+    if _wants_csv(request):
+        return csv_response(
+            f'accounting-income-statement-{start_date}-{end_date}.csv',
+            ['section', 'account_code', 'account_name', 'amount'],
+            _income_statement_csv_rows(report),
+        )
     return render(request, 'accounting/income_statement.html', {
         'entity': entity,
         'start_date': start_date,
         'end_date': end_date,
         'report': report,
+        'export_query': _report_query(request, format='csv'),
     })
 
 
@@ -417,10 +566,17 @@ def balance_sheet(request):
         return entity
     as_of_date = _parse_report_date(request.GET.get('as_of'), date.today())
     report = build_balance_sheet_report(entity, as_of_date=as_of_date)
+    if _wants_csv(request):
+        return csv_response(
+            f'accounting-balance-sheet-{as_of_date}.csv',
+            ['section', 'account_code', 'account_name', 'balance'],
+            _balance_sheet_csv_rows(report),
+        )
     return render(request, 'accounting/balance_sheet.html', {
         'entity': entity,
         'as_of_date': as_of_date,
         'report': report,
+        'export_query': _report_query(request, format='csv'),
     })
 
 

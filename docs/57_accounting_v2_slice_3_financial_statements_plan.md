@@ -3,9 +3,9 @@
 ## Summary
 
 Slice 3 starts the financial statement layer on top of the posted Accounting v2
-ledger. The first implemented sub-slice is Slice 3A, which keeps the scope to
-core accountant-facing reports and avoids BIR/NTC claims, immutable filing
-packages, and full subledger engines.
+ledger. Slice 3A delivered the core accountant-facing reports. Slice 3B adds
+basic export and print ergonomics while still avoiding BIR/NTC claims,
+immutable filing packages, and full subledger engines.
 
 ## Slice 3A Implemented
 
@@ -27,6 +27,25 @@ Implemented:
 - Balance Sheet includes unclosed current earnings in equity so reports can
   balance before formal period close and closing entries exist.
 
+## Slice 3B Implemented
+
+Implemented:
+
+- CSV exports for Trial Balance, General Ledger, Income Statement, and Balance
+  Sheet.
+- CSV exports preserve the active period/date/account filters from each report.
+- Trial Balance CSV includes account code, account name, account type, debit,
+  credit, balance, and a final total/balanced row.
+- General Ledger CSV includes account sections, opening balance rows, posted
+  journal lines, running balances, and closing balance rows.
+- Income Statement CSV includes section totals and gross profit, operating
+  income, and net income summary rows.
+- Balance Sheet CSV includes assets, liabilities, equity, total liabilities and
+  equity, difference, and balanced status rows.
+- Print-friendly browser layouts for the same four reports hide navigation,
+  filters, and actions while preserving report headers and tables.
+- Regression coverage was added for the CSV report endpoints.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -44,19 +63,21 @@ Implemented:
 - Changes in Equity statement is not implemented yet.
 - AR aging and AP aging are not implemented as formal statement schedules yet.
 - VAT ledger and tax reconciliation reports remain manual/cutover-level only.
-- PDF/XLSX/CSV exports are not implemented for the new reports.
+- PDF and XLSX exports are not implemented for the new reports.
+- CSV exports are direct downloads only; they are not yet archived as immutable
+  compliance packages or tracked in Data Exchange history.
 - Formal period close and closing entries are not implemented yet.
 - Department, area, service-type, and subscriber dimensions are not yet present
   in journal lines.
 
 ## Next Slice Candidate
 
-Slice 3B should add report exports and accountant review ergonomics:
+Slice 3C should add the missing statement schedules that accountants will need
+before BIR/NTC books:
 
-- CSV export for Trial Balance, General Ledger, Income Statement, and Balance
-  Sheet.
-- Print-friendly layouts for the same reports.
-- Report date presets.
-- Optional zero-balance account toggle.
+- Cash Flow statement.
+- Changes in Equity statement.
+- AR aging schedule tied to the AR control account.
+- AP aging schedule tied to the AP control account.
+- Optional zero-balance account toggle and report date presets.
 - Clear warning when the Balance Sheet relies on unclosed current earnings.
-

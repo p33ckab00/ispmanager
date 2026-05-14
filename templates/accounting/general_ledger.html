@@ -1,18 +1,21 @@
 {% extends "base.html" %}
 {% block title %}General Ledger - {{ isp_name }}{% endblock %}
+{% block extra_css %}{% include "accounting/partials/report_print_css.html" %}{% endblock %}
 {% block content %}
 <div class="flex items-center justify-between mb-6">
   <div>
     <h2 class="text-2xl font-bold text-gray-800">General Ledger</h2>
-    <p class="text-gray-500 text-sm mt-1">{{ entity }}</p>
+    <p class="text-gray-500 text-sm mt-1">{{ entity }} · {{ start_date }} to {{ end_date }}</p>
   </div>
-  <div class="flex gap-2">
+  <div class="flex gap-2 no-print">
+    <a href="?{{ export_query }}" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">CSV</a>
+    <button type="button" onclick="window.print()" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Print</button>
     <a href="{% url 'accounting-trial-balance' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Trial Balance</a>
     <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Accounting</a>
   </div>
 </div>
 
-<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6">
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6 no-print">
   <form method="get" class="grid gap-3 md:grid-cols-4 lg:grid-cols-5 items-end">
     <div>
       <label class="block text-sm font-medium text-gray-700 mb-1">From</label>
@@ -36,7 +39,7 @@
 </div>
 
 {% for section in report.sections %}
-<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-6">
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-6 report-panel">
   <div class="p-4 border-b border-gray-100 flex items-center justify-between">
     <div>
       <h3 class="text-lg font-semibold text-gray-800"><span class="font-mono text-sm">{{ section.account.code }}</span> {{ section.account.name }}</h3>

@@ -109,6 +109,9 @@ Accounting settings can move to `live` through an explicit go-live action.
 Slice 3A is now implemented for financial statement foundations: posted-only
 Trial Balance service math, General Ledger, Income Statement, and Balance Sheet
 pages with current earnings included in equity for unclosed income accounts.
+Slice 3B is now implemented for financial statement exports and print layouts:
+Trial Balance, General Ledger, Income Statement, and Balance Sheet now have
+filter-preserving CSV downloads and browser print views.
 
 ## 2. Locked Decisions
 
@@ -330,8 +333,15 @@ Slice 3A is implemented as the statement foundation:
   other income/expenses, and net income from posted journals.
 - Balance Sheet page reports assets, liabilities, equity, and unclosed current
   earnings so the report can balance before formal closing entries exist.
+
+Slice 3B is implemented as report export and print ergonomics:
+
+- Trial Balance, General Ledger, Income Statement, and Balance Sheet have
+  filter-preserving CSV downloads.
+- The same reports have print-friendly browser layouts that hide navigation,
+  filters, and actions.
 - Remaining Slice 3 work starts with Cash Flow, Changes in Equity, AR/AP aging,
-  VAT ledgers, and richer report exports.
+  VAT ledgers, PDF/XLSX exports, and archived report packages.
 
 ### Slice 4 - BIR Books and Guides
 
