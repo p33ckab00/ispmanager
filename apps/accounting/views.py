@@ -36,6 +36,7 @@ from apps.accounting.forms import (
     OpeningBalanceLineForm,
     WithholdingTaxClassForm,
 )
+from apps.accounting.report_exports import report_export_response
 from apps.accounting.services import (
     build_cutover_readiness,
     build_cutover_balance_schedule_reconciliation,
@@ -71,7 +72,6 @@ from apps.accounting.services import (
     validate_opening_balance_import,
 )
 from apps.core.models import AuditLog
-from apps.data_exchange.services import csv_response
 
 
 def _active_entity():
@@ -240,8 +240,13 @@ def _report_query(request, **updates):
     return query.urlencode()
 
 
-def _wants_csv(request):
-    return request.GET.get('format') == 'csv'
+def _report_export_queries(request):
+    return {
+        'export_query': _report_query(request, format='csv'),
+        'xlsx_query': _report_query(request, format='xlsx'),
+        'pdf_query': _report_query(request, format='pdf'),
+        'manifest_query': _report_query(request, format='manifest'),
+    }
 
 
 def _trial_balance_csv_rows(report):
@@ -703,13 +708,24 @@ def trial_balance(request):
         end_date=period.end_date if period else None,
         include_zero=include_zero,
     )
-    if _wants_csv(request):
-        label = period.name.lower().replace(' ', '-') if period else 'all-periods'
-        return csv_response(
-            f'accounting-trial-balance-{label}.csv',
-            ['account_code', 'account_name', 'account_type', 'debit', 'credit', 'balance'],
-            _trial_balance_csv_rows(report),
-        )
+    label = period.name.lower().replace(' ', '-') if period else 'all-periods'
+    headers = ['account_code', 'account_name', 'account_type', 'debit', 'credit', 'balance']
+    export_response = report_export_response(
+        request,
+        f'accounting-trial-balance-{label}',
+        'Trial Balance',
+        headers,
+        _trial_balance_csv_rows(report),
+        {
+            'period': period.name if period else 'All periods',
+            'start_date': period.start_date if period else None,
+            'end_date': period.end_date if period else None,
+            'include_zero': include_zero,
+        },
+        entity=entity,
+    )
+    if export_response is not None:
+        return export_response
 
     return render(request, 'accounting/trial_balance.html', {
         'entity': entity,
@@ -721,7 +737,7 @@ def trial_balance(request):
         'total_credit': report['total_credit'],
         'is_balanced': report['is_balanced'],
         'include_zero': include_zero,
-        'export_query': _report_query(request, format='csv'),
+        **_report_export_queries(request),
     })
 
 
@@ -747,13 +763,25 @@ def general_ledger(request):
         account=selected_account,
         include_zero=include_zero,
     )
-    if _wants_csv(request):
-        label = selected_account.code if selected_account else 'all-accounts'
-        return csv_response(
-            f'accounting-general-ledger-{label}-{start_date}-{end_date}.csv',
-            ['account_code', 'account_name', 'date', 'entry_number', 'description', 'debit', 'credit', 'running_balance'],
-            _general_ledger_csv_rows(report),
-        )
+    label = selected_account.code if selected_account else 'all-accounts'
+    headers = ['account_code', 'account_name', 'date', 'entry_number', 'description', 'debit', 'credit', 'running_balance']
+    export_response = report_export_response(
+        request,
+        f'accounting-general-ledger-{label}-{start_date}-{end_date}',
+        'General Ledger',
+        headers,
+        _general_ledger_csv_rows(report),
+        {
+            'start_date': start_date,
+            'end_date': end_date,
+            'preset': selected_preset or 'manual',
+            'account': str(selected_account) if selected_account else 'All accounts with activity',
+            'include_zero': include_zero,
+        },
+        entity=entity,
+    )
+    if export_response is not None:
+        return export_response
     return render(request, 'accounting/general_ledger.html', {
         'entity': entity,
         'accounts': accounts,
@@ -764,7 +792,7 @@ def general_ledger(request):
         'include_zero': include_zero,
         'preset_choices': RANGE_PRESET_CHOICES,
         'selected_preset': selected_preset,
-        'export_query': _report_query(request, format='csv'),
+        **_report_export_queries(request),
     })
 
 
@@ -780,12 +808,22 @@ def income_statement(request):
         today,
     )
     report = build_income_statement_report(entity, start_date=start_date, end_date=end_date)
-    if _wants_csv(request):
-        return csv_response(
-            f'accounting-income-statement-{start_date}-{end_date}.csv',
-            ['section', 'account_code', 'account_name', 'amount'],
-            _income_statement_csv_rows(report),
-        )
+    headers = ['section', 'account_code', 'account_name', 'amount']
+    export_response = report_export_response(
+        request,
+        f'accounting-income-statement-{start_date}-{end_date}',
+        'Income Statement',
+        headers,
+        _income_statement_csv_rows(report),
+        {
+            'start_date': start_date,
+            'end_date': end_date,
+            'preset': selected_preset or 'manual',
+        },
+        entity=entity,
+    )
+    if export_response is not None:
+        return export_response
     return render(request, 'accounting/income_statement.html', {
         'entity': entity,
         'start_date': start_date,
@@ -793,7 +831,7 @@ def income_statement(request):
         'report': report,
         'preset_choices': RANGE_PRESET_CHOICES,
         'selected_preset': selected_preset,
-        'export_query': _report_query(request, format='csv'),
+        **_report_export_queries(request),
     })
 
 
@@ -804,19 +842,28 @@ def balance_sheet(request):
         return entity
     as_of_date, selected_as_of_preset = _report_as_of_date(request, date.today())
     report = build_balance_sheet_report(entity, as_of_date=as_of_date)
-    if _wants_csv(request):
-        return csv_response(
-            f'accounting-balance-sheet-{as_of_date}.csv',
-            ['section', 'account_code', 'account_name', 'balance'],
-            _balance_sheet_csv_rows(report),
-        )
+    headers = ['section', 'account_code', 'account_name', 'balance']
+    export_response = report_export_response(
+        request,
+        f'accounting-balance-sheet-{as_of_date}',
+        'Balance Sheet',
+        headers,
+        _balance_sheet_csv_rows(report),
+        {
+            'as_of_date': as_of_date,
+            'preset': selected_as_of_preset or 'manual',
+        },
+        entity=entity,
+    )
+    if export_response is not None:
+        return export_response
     return render(request, 'accounting/balance_sheet.html', {
         'entity': entity,
         'as_of_date': as_of_date,
         'report': report,
         'as_of_preset_choices': AS_OF_PRESET_CHOICES,
         'selected_as_of_preset': selected_as_of_preset,
-        'export_query': _report_query(request, format='csv'),
+        **_report_export_queries(request),
     })
 
 
@@ -832,12 +879,22 @@ def cash_flow(request):
         today,
     )
     report = build_cash_flow_report(entity, start_date=start_date, end_date=end_date)
-    if _wants_csv(request):
-        return csv_response(
-            f'accounting-cash-flow-{start_date}-{end_date}.csv',
-            ['section', 'date', 'entry_number', 'description', 'counterparty', 'amount'],
-            _cash_flow_csv_rows(report),
-        )
+    headers = ['section', 'date', 'entry_number', 'description', 'counterparty', 'amount']
+    export_response = report_export_response(
+        request,
+        f'accounting-cash-flow-{start_date}-{end_date}',
+        'Cash Flow',
+        headers,
+        _cash_flow_csv_rows(report),
+        {
+            'start_date': start_date,
+            'end_date': end_date,
+            'preset': selected_preset or 'manual',
+        },
+        entity=entity,
+    )
+    if export_response is not None:
+        return export_response
     return render(request, 'accounting/cash_flow.html', {
         'entity': entity,
         'start_date': start_date,
@@ -865,7 +922,7 @@ def cash_flow(request):
                 'total': report['totals']['financing'],
             },
         ],
-        'export_query': _report_query(request, format='csv'),
+        **_report_export_queries(request),
     })
 
 
@@ -881,12 +938,22 @@ def changes_in_equity(request):
         today,
     )
     report = build_changes_in_equity_report(entity, start_date=start_date, end_date=end_date)
-    if _wants_csv(request):
-        return csv_response(
-            f'accounting-changes-in-equity-{start_date}-{end_date}.csv',
-            ['section', 'account_code', 'account_name', 'opening_balance', 'movement', 'ending_balance'],
-            _changes_in_equity_csv_rows(report),
-        )
+    headers = ['section', 'account_code', 'account_name', 'opening_balance', 'movement', 'ending_balance']
+    export_response = report_export_response(
+        request,
+        f'accounting-changes-in-equity-{start_date}-{end_date}',
+        'Changes in Equity',
+        headers,
+        _changes_in_equity_csv_rows(report),
+        {
+            'start_date': start_date,
+            'end_date': end_date,
+            'preset': selected_preset or 'manual',
+        },
+        entity=entity,
+    )
+    if export_response is not None:
+        return export_response
     return render(request, 'accounting/changes_in_equity.html', {
         'entity': entity,
         'start_date': start_date,
@@ -894,7 +961,7 @@ def changes_in_equity(request):
         'report': report,
         'preset_choices': RANGE_PRESET_CHOICES,
         'selected_preset': selected_preset,
-        'export_query': _report_query(request, format='csv'),
+        **_report_export_queries(request),
     })
 
 
@@ -905,19 +972,28 @@ def ar_aging(request):
         return entity
     as_of_date, selected_as_of_preset = _report_as_of_date(request, date.today())
     report = build_ar_aging_report(entity, as_of_date=as_of_date)
-    if _wants_csv(request):
-        return csv_response(
-            f'accounting-ar-aging-{as_of_date}.csv',
-            ['subscriber_username', 'subscriber_name', 'invoice_number', 'due_date', 'status', 'days_overdue', 'bucket', 'balance'],
-            _ar_aging_csv_rows(report),
-        )
+    headers = ['subscriber_username', 'subscriber_name', 'invoice_number', 'due_date', 'status', 'days_overdue', 'bucket', 'balance']
+    export_response = report_export_response(
+        request,
+        f'accounting-ar-aging-{as_of_date}',
+        'AR Aging',
+        headers,
+        _ar_aging_csv_rows(report),
+        {
+            'as_of_date': as_of_date,
+            'preset': selected_as_of_preset or 'manual',
+        },
+        entity=entity,
+    )
+    if export_response is not None:
+        return export_response
     return render(request, 'accounting/ar_aging.html', {
         'entity': entity,
         'as_of_date': as_of_date,
         'report': report,
         'as_of_preset_choices': AS_OF_PRESET_CHOICES,
         'selected_as_of_preset': selected_as_of_preset,
-        'export_query': _report_query(request, format='csv'),
+        **_report_export_queries(request),
     })
 
 
@@ -928,19 +1004,28 @@ def ap_aging(request):
         return entity
     as_of_date, selected_as_of_preset = _report_as_of_date(request, date.today())
     report = build_ap_aging_report(entity, as_of_date=as_of_date)
-    if _wants_csv(request):
-        return csv_response(
-            f'accounting-ap-aging-{as_of_date}.csv',
-            ['vendor_name', 'reference', 'document_date', 'due_date', 'account_code', 'account_name', 'days_overdue', 'bucket', 'amount', 'source'],
-            _ap_aging_csv_rows(report),
-        )
+    headers = ['vendor_name', 'reference', 'document_date', 'due_date', 'account_code', 'account_name', 'days_overdue', 'bucket', 'amount', 'source']
+    export_response = report_export_response(
+        request,
+        f'accounting-ap-aging-{as_of_date}',
+        'AP Aging',
+        headers,
+        _ap_aging_csv_rows(report),
+        {
+            'as_of_date': as_of_date,
+            'preset': selected_as_of_preset or 'manual',
+        },
+        entity=entity,
+    )
+    if export_response is not None:
+        return export_response
     return render(request, 'accounting/ap_aging.html', {
         'entity': entity,
         'as_of_date': as_of_date,
         'report': report,
         'as_of_preset_choices': AS_OF_PRESET_CHOICES,
         'selected_as_of_preset': selected_as_of_preset,
-        'export_query': _report_query(request, format='csv'),
+        **_report_export_queries(request),
     })
 
 
@@ -956,12 +1041,22 @@ def tax_ledger(request):
         today,
     )
     report = build_tax_ledger_report(entity, start_date=start_date, end_date=end_date)
-    if _wants_csv(request):
-        return csv_response(
-            f'accounting-tax-ledger-{start_date}-{end_date}.csv',
-            ['section', 'code', 'name', 'opening_balance', 'debit_or_gross', 'credit_or_withheld', 'movement_or_status', 'ending_balance'],
-            _tax_ledger_csv_rows(report),
-        )
+    headers = ['section', 'code', 'name', 'opening_balance', 'debit_or_gross', 'credit_or_withheld', 'movement_or_status', 'ending_balance']
+    export_response = report_export_response(
+        request,
+        f'accounting-tax-ledger-{start_date}-{end_date}',
+        'Tax Ledger',
+        headers,
+        _tax_ledger_csv_rows(report),
+        {
+            'start_date': start_date,
+            'end_date': end_date,
+            'preset': selected_preset or 'manual',
+        },
+        entity=entity,
+    )
+    if export_response is not None:
+        return export_response
     return render(request, 'accounting/tax_ledger.html', {
         'entity': entity,
         'start_date': start_date,
@@ -969,7 +1064,7 @@ def tax_ledger(request):
         'report': report,
         'preset_choices': RANGE_PRESET_CHOICES,
         'selected_preset': selected_preset,
-        'export_query': _report_query(request, format='csv'),
+        **_report_export_queries(request),
     })
 
 

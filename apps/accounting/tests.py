@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -490,6 +491,63 @@ class AccountingV2FinancialStatementTests(TestCase):
             self.assertEqual(response['Content-Type'], 'text/csv')
             self.assertIn('attachment;', response['Content-Disposition'])
             self.assertIn(expected_header, response.content)
+
+    def test_financial_statement_export_package_formats(self):
+        entity, _cash = self._post_sample_activity()
+        user = get_user_model().objects.create_user(
+            username='statement-export-admin',
+            password='test-password',
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.client.force_login(user)
+        period = AccountingPeriod.objects.get(entity=entity, period_number=1)
+
+        binary_endpoints = [
+            (
+                f'/accounting/trial-balance/?period={period.pk}&format=xlsx',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                b'PK',
+            ),
+            (
+                '/accounting/tax-ledger/?preset=current_year&format=xlsx',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                b'PK',
+            ),
+        ]
+
+        for endpoint, content_type, prefix in binary_endpoints:
+            response = self.client.get(endpoint)
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response['Content-Type'], content_type)
+            self.assertIn('attachment;', response['Content-Disposition'])
+            self.assertEqual(len(response['X-Report-Data-SHA256']), 64)
+            self.assertTrue(response.content.startswith(prefix))
+
+        manifest_response = self.client.get(
+            f'/accounting/trial-balance/?period={period.pk}&format=manifest',
+        )
+        manifest = json.loads(manifest_response.content.decode('utf-8'))
+
+        self.assertEqual(manifest_response.status_code, 200)
+        self.assertEqual(manifest_response['Content-Type'], 'application/json')
+        self.assertEqual(manifest['report_name'], 'Trial Balance')
+        self.assertEqual(len(manifest['canonical_data']['sha256']), 64)
+        self.assertIn('account_code', manifest['columns'])
+
+        pdf_response = self.client.get(
+            '/accounting/general-ledger/?preset=current_year&include_zero=1&format=pdf',
+        )
+
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertIn(pdf_response['Content-Type'], ('application/pdf', 'text/html'))
+        self.assertIn('attachment;', pdf_response['Content-Disposition'])
+        self.assertEqual(len(pdf_response['X-Report-Data-SHA256']), 64)
+        self.assertTrue(
+            pdf_response.content.startswith(b'%PDF')
+            or b'General Ledger' in pdf_response.content
+        )
 
 
 class AccountingV2CutoverTests(TestCase):

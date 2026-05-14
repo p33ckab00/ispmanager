@@ -120,6 +120,10 @@ and Tax Ledger pages with CSV/print support and GL control comparisons where
 available.
 Slice 3D-A is now implemented for report ergonomics: date/as-of presets and
 zero-balance account toggles for Trial Balance and General Ledger.
+Slice 3D-B is now implemented for export packaging: Trial Balance, General
+Ledger, Income Statement, Balance Sheet, Cash Flow, Changes in Equity, AR
+Aging, AP Aging, and Tax Ledger now share CSV/XLSX/PDF/manifest export support
+with canonical CSV SHA-256 hashes.
 
 ## 2. Locked Decisions
 
@@ -374,7 +378,18 @@ Slice 3D-A is implemented as report ergonomics:
 - As-of presets are available on Balance Sheet, AR Aging, and AP Aging.
 - Trial Balance and General Ledger can include zero-balance accounts for
   complete COA review and export runs.
-- Remaining Slice 3 work starts with PDF/XLSX exports, archived report
+
+Slice 3D-B is implemented as report export packaging:
+
+- Trial Balance, General Ledger, Income Statement, Balance Sheet, Cash Flow,
+  Changes in Equity, AR Aging, AP Aging, and Tax Ledger expose CSV, XLSX, PDF,
+  and manifest downloads.
+- Export manifests include active filters, row counts, canonical CSV filename,
+  byte count, and SHA-256 hash.
+- XLSX exports include both manifest and report sheets.
+- PDF exports use the existing `xhtml2pdf`/ReportLab path with an HTML
+  workpaper fallback if rendering fails.
+- Remaining Slice 3 work starts with immutable archive records for generated
   packages, formal closing entries, and a full post-live AP vendor invoice
   subledger.
 

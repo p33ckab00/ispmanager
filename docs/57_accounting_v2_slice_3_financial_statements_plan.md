@@ -11,6 +11,8 @@ without vendor/subscriber aging subledgers.
 Slice 3C-B adds operational aging and tax workpapers tied back to GL control
 accounts where the current data model allows it.
 Slice 3D-A adds accountant-facing report ergonomics for repeat review runs.
+Slice 3D-B adds export packages for the full report set using canonical CSV
+data, XLSX workbooks, PDF workpapers, and JSON manifests with SHA-256 hashes.
 
 ## Slice 3A Implemented
 
@@ -104,6 +106,26 @@ Implemented:
 - Regression coverage was added for zero-balance report service behavior and
   preset-aware CSV endpoints.
 
+## Slice 3D-B Implemented
+
+Implemented:
+
+- Shared report export helper for CSV, XLSX, PDF, and JSON manifest downloads.
+- Trial Balance, General Ledger, Income Statement, Balance Sheet, Cash Flow,
+  Changes in Equity, AR Aging, AP Aging, and Tax Ledger now expose XLSX, PDF,
+  and manifest actions beside the existing CSV export.
+- Export packages are generated from the same canonical report rows used by
+  CSV output, so the PDF/XLSX/manifest payloads stay aligned with the report
+  service result.
+- Manifests include report name, entity, generated timestamp, generated user,
+  active filters, row count, columns, canonical CSV filename, canonical CSV
+  byte count, and SHA-256 hash.
+- XLSX exports include a `Manifest` sheet and a `Report` sheet.
+- PDF exports use the existing `xhtml2pdf`/ReportLab path and fall back to a
+  downloadable HTML workpaper if PDF rendering fails.
+- `openpyxl` is now a project dependency for `.xlsx` workbooks.
+- Regression coverage now includes XLSX, manifest, and PDF export smoke checks.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -130,9 +152,9 @@ Implemented:
 
 ## Remaining Slice 3 Gaps
 
-- PDF and XLSX exports are not implemented for the new reports.
-- CSV exports are direct downloads only; they are not yet archived as immutable
-  compliance packages or tracked in Data Exchange history.
+- Report exports are generated downloads with manifests; they are not yet
+  persisted as immutable compliance archives or tracked in Data Exchange
+  history.
 - Formal period close and closing entries are not implemented yet.
 - Department, area, service-type, and subscriber dimensions are not yet present
   in journal lines.
@@ -149,8 +171,9 @@ Implemented:
 
 ## Next Slice Candidate
 
-Slice 3D-B should harden report outputs before BIR/NTC books:
+Slice 3E should close the remaining accounting-reporting foundation before
+BIR/NTC books:
 
-- PDF/XLSX export support for the report set.
-- Archived report package manifests and generated-file hashes.
+- Formal period close and generated closing entries.
+- Immutable report archive records for generated manifest/export packages.
 - Full post-live AP vendor invoice subledger design.

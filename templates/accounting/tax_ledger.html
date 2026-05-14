@@ -9,6 +9,9 @@
   </div>
   <div class="flex flex-wrap gap-2 no-print">
     <a href="?{{ export_query }}" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">CSV</a>
+    <a href="?{{ xlsx_query }}" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">XLSX</a>
+    <a href="?{{ pdf_query }}" class="bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">PDF</a>
+    <a href="?{{ manifest_query }}" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Manifest</a>
     <button type="button" onclick="window.print()" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Print</button>
     <a href="{% url 'accounting-general-ledger' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">General Ledger</a>
     <a href="{% url 'accounting-withholding-2307' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">2307</a>
