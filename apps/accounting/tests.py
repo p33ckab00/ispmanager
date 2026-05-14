@@ -10,6 +10,7 @@ from apps.accounting.models import (
     AccountingSourcePosting,
     AlphanumericTaxCode,
     ChartOfAccount,
+    CutoverBalanceScheduleLine,
     CutoverPlan,
     CutoverSubscriberBalanceLine,
     CustomerWithholdingAllocation,
@@ -23,6 +24,7 @@ from apps.accounting.models import (
 from apps.accounting.services import (
     build_cutover_readiness,
     create_accounting_foundation,
+    create_cutover_balance_schedule,
     create_cutover_plan,
     create_credit_adjustment_source_draft,
     create_invoice_source_draft,
@@ -34,6 +36,7 @@ from apps.accounting.services import (
     generate_cutover_reconciliation_snapshot,
     post_journal_entry,
     refresh_opening_balance_totals,
+    validate_cutover_balance_schedule,
     retry_source_posting,
     seed_bir_atc_codes,
     validate_opening_balance_import,
@@ -265,6 +268,15 @@ class AccountingV2CutoverTests(TestCase):
         refresh_opening_balance_totals(import_batch)
         validated = validate_opening_balance_import(import_batch)
         journal_entry = create_opening_balance_journal(validated)
+        schedule = create_cutover_balance_schedule(plan, 'cash_on_hand')[0]
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=cash,
+            label='Cash count',
+            debit=Decimal('1000.00'),
+        )
+        validate_cutover_balance_schedule(schedule)
         readiness = build_cutover_readiness(entity)
 
         self.assertEqual(validated.status, 'validated')
@@ -484,6 +496,127 @@ class AccountingV2CutoverReconciliationTests(TestCase):
             set(snapshot.subscriber_lines.values_list('status', flat=True)),
             {'missing_opening', 'missing_source'},
         )
+
+
+class AccountingV2CutoverBalanceScheduleTests(TestCase):
+    def _foundation(self):
+        return create_accounting_foundation(
+            entity_name='Schedule ISP',
+            template_key='isp_non_vat_sole_prop',
+            fiscal_year=2026,
+        )['entity']
+
+    def _plan(self, entity):
+        return create_cutover_plan(entity, date(2026, 1, 1))[0]
+
+    def _import_batch(self, entity, plan):
+        return OpeningBalanceImport.objects.create(
+            entity=entity,
+            cutover_plan=plan,
+            import_type='manual',
+        )
+
+    def test_cash_schedule_reconciles_to_opening_balance_lines(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=cash,
+            line_type='cash',
+            debit=Decimal('250.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=capital,
+            line_type='equity',
+            credit=Decimal('250.00'),
+        )
+        refresh_opening_balance_totals(import_batch)
+        validate_opening_balance_import(import_batch)
+        schedule = create_cutover_balance_schedule(plan, 'cash_on_hand')[0]
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=cash,
+            label='Cash count',
+            debit=Decimal('250.00'),
+        )
+
+        validate_cutover_balance_schedule(schedule)
+        schedule.refresh_from_db()
+
+        self.assertEqual(schedule.status, 'reconciled')
+        self.assertEqual(schedule.difference, Decimal('0.00'))
+
+    def test_tax_schedule_checks_account_level_differences_not_only_net_total(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        cwt = ChartOfAccount.objects.get(entity=entity, code='1210')
+        wht_payable = ChartOfAccount.objects.get(entity=entity, code='2310')
+        percentage_tax = ChartOfAccount.objects.get(entity=entity, code='2330')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=cwt,
+            line_type='tax',
+            debit=Decimal('100.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=wht_payable,
+            line_type='tax',
+            credit=Decimal('100.00'),
+        )
+        refresh_opening_balance_totals(import_batch)
+        validate_opening_balance_import(import_batch)
+        schedule = create_cutover_balance_schedule(plan, 'tax_balance')[0]
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=cwt,
+            label='CWT receivable',
+            debit=Decimal('100.00'),
+            source_document_number='Tax worksheet',
+        )
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=percentage_tax,
+            label='Percentage tax payable',
+            credit=Decimal('100.00'),
+            source_document_number='Tax worksheet',
+        )
+
+        validate_cutover_balance_schedule(schedule)
+        schedule.refresh_from_db()
+
+        self.assertEqual(schedule.difference, Decimal('0.00'))
+        self.assertEqual(schedule.status, 'needs_review')
+        self.assertIn('2310', schedule.validation_errors)
+        self.assertIn('2330', schedule.validation_errors)
+
+    def test_ap_schedule_line_requires_counterparty_name(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        schedule = create_cutover_balance_schedule(plan, 'accounts_payable')[0]
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        line = CutoverBalanceScheduleLine(
+            entity=entity,
+            schedule=schedule,
+            account=ap,
+            label='Unpaid vendor bill',
+            credit=Decimal('100.00'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'vendor or payee'):
+            line.full_clean()
 
 
 class AccountingV2SourcePostingTests(TestCase):

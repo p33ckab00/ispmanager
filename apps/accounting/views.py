@@ -14,6 +14,7 @@ from apps.accounting.models import (
     AccountingSourcePosting,
     AlphanumericTaxCode,
     ChartOfAccount,
+    CutoverBalanceSchedule,
     CutoverPlan,
     CutoverReconciliationSnapshot,
     CustomerWithholdingTaxClaim,
@@ -25,6 +26,8 @@ from apps.accounting.models import (
 )
 from apps.accounting.forms import (
     AccountingSetupForm,
+    CutoverBalanceScheduleForm,
+    CutoverBalanceScheduleLineForm,
     CutoverPlanForm,
     ExpenseForm,
     IncomeForm,
@@ -35,12 +38,16 @@ from apps.accounting.forms import (
 )
 from apps.accounting.services import (
     build_cutover_readiness,
+    build_cutover_balance_schedule_reconciliation,
+    build_cutover_balance_schedule_summary,
     create_accounting_foundation,
+    create_cutover_balance_schedule,
     create_cutover_plan,
     create_manual_journal_entry,
     create_opening_balance_journal,
     generate_cutover_reconciliation_snapshot,
     get_active_cutover_plan,
+    refresh_cutover_balance_schedule,
     get_latest_cutover_reconciliation_snapshot,
     post_journal_entry,
     refresh_opening_balance_totals,
@@ -48,6 +55,7 @@ from apps.accounting.services import (
     sync_payments_to_income,
     get_monthly_summary,
     get_totals,
+    validate_cutover_balance_schedule,
     validate_opening_balance_import,
 )
 from apps.core.models import AuditLog
@@ -774,6 +782,181 @@ def cutover_reconciliation_generate(request):
     except ValidationError as exc:
         messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
     return redirect('accounting-cutover-reconciliation')
+
+
+@login_required
+def cutover_schedule_list(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_cutoverbalanceschedule')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    plan = get_active_cutover_plan(entity)
+    schedules = CutoverBalanceSchedule.objects.none()
+    summary = []
+    if plan:
+        schedules = (
+            CutoverBalanceSchedule.objects
+            .filter(cutover_plan=plan)
+            .exclude(status='voided')
+            .order_by('schedule_type')
+        )
+        summary = build_cutover_balance_schedule_summary(plan)
+    return render(request, 'accounting/cutover_schedule_list.html', {
+        'entity': entity,
+        'plan': plan,
+        'schedules': schedules,
+        'summary': summary,
+    })
+
+
+@login_required
+def cutover_schedule_add(request):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cutoverbalanceschedule',
+        'accounting-cutover-schedule-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    plan = get_active_cutover_plan(entity)
+    if not plan:
+        messages.info(request, 'Create a cutover plan before adding cutover balance schedules.')
+        return redirect('accounting-cutover-setup')
+
+    if request.method == 'POST':
+        form = CutoverBalanceScheduleForm(request.POST)
+        if form.is_valid():
+            try:
+                schedule, created = create_cutover_balance_schedule(
+                    plan,
+                    form.cleaned_data['schedule_type'],
+                    created_by=request.user,
+                    notes=form.cleaned_data['notes'],
+                )
+                AuditLog.log(
+                    'create' if created else 'update',
+                    'accounting',
+                    f"Cutover balance schedule {'created' if created else 'opened'}: {schedule.get_schedule_type_display()}",
+                    user=request.user,
+                )
+                messages.success(request, 'Cutover balance schedule is ready.')
+                return redirect('accounting-cutover-schedule-detail', pk=schedule.pk)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        form = CutoverBalanceScheduleForm()
+
+    return render(request, 'accounting/cutover_schedule_form.html', {
+        'entity': entity,
+        'plan': plan,
+        'form': form,
+    })
+
+
+@login_required
+def cutover_schedule_detail(request, pk):
+    permission_check = _require_accounting_perm(request, 'accounting.view_cutoverbalanceschedule')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    schedule = get_object_or_404(
+        CutoverBalanceSchedule.objects.select_related('cutover_plan'),
+        entity=entity,
+        pk=pk,
+    )
+    refresh_cutover_balance_schedule(schedule)
+    schedule.refresh_from_db()
+    rows = build_cutover_balance_schedule_reconciliation(schedule)
+    return render(request, 'accounting/cutover_schedule_detail.html', {
+        'entity': entity,
+        'plan': schedule.cutover_plan,
+        'schedule': schedule,
+        'lines': schedule.lines.select_related('account').order_by('account__code', 'label', 'id'),
+        'rows': rows,
+        'can_edit': schedule.status != 'voided',
+    })
+
+
+@login_required
+def cutover_schedule_line_add(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cutoverbalanceschedule',
+        'accounting-cutover-schedule-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    schedule = get_object_or_404(CutoverBalanceSchedule, entity=entity, pk=pk)
+    if schedule.status == 'voided':
+        messages.error(request, 'This cutover balance schedule is read-only.')
+        return redirect('accounting-cutover-schedule-detail', pk=schedule.pk)
+
+    if request.method == 'POST':
+        form = CutoverBalanceScheduleLineForm(request.POST, entity=entity)
+        if form.is_valid():
+            line = form.save(commit=False)
+            line.schedule = schedule
+            line.entity = entity
+            try:
+                line.full_clean()
+                line.save()
+                refresh_cutover_balance_schedule(schedule)
+                AuditLog.log(
+                    'create',
+                    'accounting',
+                    f"Cutover schedule line added: {line.account.code}",
+                    user=request.user,
+                )
+                messages.success(request, 'Schedule line added.')
+                return redirect('accounting-cutover-schedule-detail', pk=schedule.pk)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        form = CutoverBalanceScheduleLineForm(entity=entity)
+
+    return render(request, 'accounting/cutover_schedule_line_form.html', {
+        'entity': entity,
+        'plan': schedule.cutover_plan,
+        'schedule': schedule,
+        'form': form,
+    })
+
+
+@login_required
+def cutover_schedule_validate(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cutoverbalanceschedule',
+        'accounting-cutover-schedule-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    if request.method != 'POST':
+        return redirect('accounting-cutover-schedule-detail', pk=pk)
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    schedule = get_object_or_404(CutoverBalanceSchedule, entity=entity, pk=pk)
+    try:
+        validate_cutover_balance_schedule(schedule)
+        schedule.refresh_from_db()
+        if schedule.status == 'reconciled':
+            messages.success(request, 'Cutover balance schedule reconciles to opening balances.')
+        else:
+            messages.warning(request, 'Cutover balance schedule has differences to review.')
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-cutover-schedule-detail', pk=pk)
 
 
 @login_required

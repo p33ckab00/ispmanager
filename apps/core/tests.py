@@ -27,6 +27,7 @@ class RolePresetTests(TestCase):
         self.assertIn('add_payment', permission_codenames)
         self.assertIn('change_accountcreditadjustment', permission_codenames)
         self.assertIn('add_expenserecord', permission_codenames)
+        self.assertIn('view_cutoverbalanceschedule', permission_codenames)
         self.assertIn('view_cutoverplan', permission_codenames)
         self.assertIn('view_cutoverreconciliationsnapshot', permission_codenames)
         self.assertIn('view_openingbalanceimport', permission_codenames)

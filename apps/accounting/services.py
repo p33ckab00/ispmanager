@@ -16,6 +16,8 @@ from apps.accounting.models import (
     AccountingSourcePosting,
     AlphanumericTaxCode,
     ChartOfAccount,
+    CutoverBalanceSchedule,
+    CutoverBalanceScheduleLine,
     CutoverPlan,
     CutoverReconciliationSnapshot,
     CutoverSubscriberBalanceLine,
@@ -361,6 +363,60 @@ def get_active_cutover_plan(entity):
     )
 
 
+CUTOVER_BALANCE_SCHEDULE_CONFIG = {
+    'cash_on_hand': {
+        'label': 'Cash on Hand',
+        'opening_line_types': ['cash'],
+        'account_codes': ['1000'],
+    },
+    'bank_account': {
+        'label': 'Bank Accounts',
+        'opening_line_types': ['bank'],
+        'account_codes': ['1010'],
+    },
+    'wallet_gateway': {
+        'label': 'Wallet / Gateway Clearing',
+        'opening_line_types': ['wallet_gateway'],
+        'account_codes': ['1020'],
+    },
+    'accounts_payable': {
+        'label': 'Accounts Payable',
+        'opening_line_types': ['ap_vendor'],
+        'account_codes': ['2000'],
+    },
+    'tax_balance': {
+        'label': 'Tax Balances',
+        'opening_line_types': ['tax'],
+        'account_codes': ['1200', '1210', '2300', '2310', '2320', '2330'],
+    },
+}
+
+
+def available_cutover_balance_schedule_types():
+    return [
+        {'key': key, 'label': value['label']}
+        for key, value in CUTOVER_BALANCE_SCHEDULE_CONFIG.items()
+    ]
+
+
+def get_cutover_balance_schedule_config(schedule_type):
+    try:
+        return CUTOVER_BALANCE_SCHEDULE_CONFIG[schedule_type]
+    except KeyError as exc:
+        raise ValidationError(f"Unsupported cutover balance schedule type: {schedule_type}.") from exc
+
+
+def get_active_cutover_balance_schedule(plan, schedule_type):
+    if not plan:
+        return None
+    return (
+        CutoverBalanceSchedule.objects
+        .filter(cutover_plan=plan, schedule_type=schedule_type)
+        .exclude(status='voided')
+        .first()
+    )
+
+
 @transaction.atomic
 def create_cutover_plan(entity, cutover_date, prepared_by=None, notes='', source_policy='opening_balances_only_pre_cutover'):
     plan = get_active_cutover_plan(entity)
@@ -390,6 +446,242 @@ def create_cutover_plan(entity, cutover_date, prepared_by=None, notes='', source
     plan.full_clean()
     plan.save()
     return plan, True
+
+
+@transaction.atomic
+def create_cutover_balance_schedule(plan, schedule_type, created_by=None, notes=''):
+    get_cutover_balance_schedule_config(schedule_type)
+    schedule = get_active_cutover_balance_schedule(plan, schedule_type)
+    if schedule:
+        if notes:
+            schedule.notes = notes
+            schedule.save(update_fields=['notes', 'updated_at'])
+        return schedule, False
+
+    schedule = CutoverBalanceSchedule(
+        entity=plan.entity,
+        cutover_plan=plan,
+        schedule_type=schedule_type,
+        created_by=created_by,
+        notes=notes,
+    )
+    schedule.full_clean()
+    schedule.save()
+    return schedule, True
+
+
+def _opening_balance_lines_for_schedule(schedule):
+    config = get_cutover_balance_schedule_config(schedule.schedule_type)
+    criteria = Q(line_type__in=config['opening_line_types'])
+    if config.get('account_codes'):
+        criteria |= Q(account__code__in=config['account_codes'])
+    return OpeningBalanceLine.objects.filter(
+        criteria,
+        import_batch__cutover_plan=schedule.cutover_plan,
+        import_batch__status__in=['validated', 'journal_created', 'posted'],
+    )
+
+
+def _account_amount_map(qs):
+    rows = (
+        qs.values('account_id', 'account__code', 'account__name')
+        .annotate(debit_total=Sum('debit'), credit_total=Sum('credit'))
+        .order_by('account__code')
+    )
+    return {
+        row['account_id']: {
+            'account_id': row['account_id'],
+            'account_code': row['account__code'],
+            'account_name': row['account__name'],
+            'debit': row['debit_total'] or Decimal('0.00'),
+            'credit': row['credit_total'] or Decimal('0.00'),
+        }
+        for row in rows
+    }
+
+
+def build_cutover_balance_schedule_reconciliation(schedule):
+    schedule_totals = _account_amount_map(schedule.lines.select_related('account'))
+    opening_totals = _account_amount_map(_opening_balance_lines_for_schedule(schedule).select_related('account'))
+    account_ids = sorted(
+        set(schedule_totals) | set(opening_totals),
+        key=lambda account_id: (
+            (schedule_totals.get(account_id) or opening_totals.get(account_id))['account_code'],
+            account_id,
+        ),
+    )
+    rows = []
+    for account_id in account_ids:
+        schedule_row = schedule_totals.get(account_id, {})
+        opening_row = opening_totals.get(account_id, {})
+        account_code = schedule_row.get('account_code') or opening_row.get('account_code')
+        account_name = schedule_row.get('account_name') or opening_row.get('account_name')
+        schedule_debit = schedule_row.get('debit', Decimal('0.00'))
+        schedule_credit = schedule_row.get('credit', Decimal('0.00'))
+        opening_debit = opening_row.get('debit', Decimal('0.00'))
+        opening_credit = opening_row.get('credit', Decimal('0.00'))
+        difference = (schedule_debit - schedule_credit) - (opening_debit - opening_credit)
+        if schedule_debit == opening_debit and schedule_credit == opening_credit:
+            status = 'matched'
+        elif schedule_debit == Decimal('0.00') and schedule_credit == Decimal('0.00'):
+            status = 'missing_schedule'
+        elif opening_debit == Decimal('0.00') and opening_credit == Decimal('0.00'):
+            status = 'missing_opening'
+        else:
+            status = 'difference'
+        rows.append({
+            'account_id': account_id,
+            'account_code': account_code,
+            'account_name': account_name,
+            'schedule_debit': schedule_debit,
+            'schedule_credit': schedule_credit,
+            'opening_debit': opening_debit,
+            'opening_credit': opening_credit,
+            'difference': difference,
+            'status': status,
+        })
+    return rows
+
+
+def refresh_cutover_balance_schedule(schedule):
+    schedule_totals = schedule.lines.aggregate(
+        debit_total=Sum('debit'),
+        credit_total=Sum('credit'),
+    )
+    opening_totals = _opening_balance_lines_for_schedule(schedule).aggregate(
+        debit_total=Sum('debit'),
+        credit_total=Sum('credit'),
+    )
+    schedule.total_debit = schedule_totals['debit_total'] or Decimal('0.00')
+    schedule.total_credit = schedule_totals['credit_total'] or Decimal('0.00')
+    schedule.opening_total_debit = opening_totals['debit_total'] or Decimal('0.00')
+    schedule.opening_total_credit = opening_totals['credit_total'] or Decimal('0.00')
+    schedule.difference = (
+        (schedule.total_debit - schedule.total_credit)
+        - (schedule.opening_total_debit - schedule.opening_total_credit)
+    )
+    schedule.save(update_fields=[
+        'total_debit',
+        'total_credit',
+        'opening_total_debit',
+        'opening_total_credit',
+        'difference',
+        'updated_at',
+    ])
+    return schedule
+
+
+@transaction.atomic
+def validate_cutover_balance_schedule(schedule):
+    schedule = (
+        CutoverBalanceSchedule.objects
+        .select_for_update()
+        .select_related('cutover_plan')
+        .get(pk=schedule.pk)
+    )
+    if schedule.status == 'voided':
+        raise ValidationError('Voided cutover balance schedules cannot be validated.')
+
+    errors = []
+    lines = list(schedule.lines.select_related('account').order_by('account__code', 'label', 'id'))
+    for line in lines:
+        try:
+            line.full_clean()
+        except ValidationError as exc:
+            message = _validation_message(exc)
+            line.validation_status = 'error'
+            line.validation_message = message
+            line.save(update_fields=['validation_status', 'validation_message', 'updated_at'])
+            errors.append(f"Line {line.pk}: {message}")
+            continue
+
+        warnings = []
+        if schedule.schedule_type in ('bank_account', 'wallet_gateway') and not line.reference:
+            warnings.append('Reference is recommended for bank, wallet, and gateway balances.')
+        if schedule.schedule_type == 'tax_balance' and not line.source_document_number:
+            warnings.append('Tax balance schedule should cite a return, ledger, or worksheet reference.')
+        if warnings:
+            line.validation_status = 'warning'
+            line.validation_message = ' '.join(warnings)
+            line.save(update_fields=['validation_status', 'validation_message', 'updated_at'])
+        else:
+            line.validation_status = 'valid'
+            line.validation_message = ''
+            line.save(update_fields=['validation_status', 'validation_message', 'updated_at'])
+
+    schedule = refresh_cutover_balance_schedule(schedule)
+    rows = build_cutover_balance_schedule_reconciliation(schedule)
+    row_errors = [
+        f"{row['account_code']} {row['account_name']}: {row['status']}"
+        for row in rows
+        if row['status'] != 'matched'
+    ]
+    if not lines:
+        errors.append('Schedule needs at least one detail line.')
+    errors.extend(row_errors)
+    schedule.validation_errors = '\n'.join(errors)
+    schedule.status = 'reconciled' if not errors else 'needs_review'
+    schedule.save(update_fields=['status', 'validation_errors', 'updated_at'])
+    return schedule
+
+
+def build_cutover_balance_schedule_summary(plan):
+    summaries = []
+    if not plan:
+        return summaries
+    for item in available_cutover_balance_schedule_types():
+        schedule = get_active_cutover_balance_schedule(plan, item['key'])
+        if schedule:
+            refresh_cutover_balance_schedule(schedule)
+            rows = build_cutover_balance_schedule_reconciliation(schedule)
+        else:
+            config = get_cutover_balance_schedule_config(item['key'])
+            opening_qs = OpeningBalanceLine.objects.filter(
+                import_batch__cutover_plan=plan,
+                import_batch__status__in=['validated', 'journal_created', 'posted'],
+            ).filter(
+                Q(line_type__in=config['opening_line_types'])
+                | Q(account__code__in=config['account_codes'])
+            )
+            opening_totals = opening_qs.aggregate(debit_total=Sum('debit'), credit_total=Sum('credit'))
+            rows = []
+            opening_debit = opening_totals['debit_total'] or Decimal('0.00')
+            opening_credit = opening_totals['credit_total'] or Decimal('0.00')
+            opening_net = opening_debit - opening_credit
+            summaries.append({
+                'key': item['key'],
+                'label': item['label'],
+                'schedule': None,
+                'status': 'missing' if opening_debit or opening_credit else 'not_needed',
+                'required': bool(opening_debit or opening_credit),
+                'line_count': 0,
+                'total_debit': Decimal('0.00'),
+                'total_credit': Decimal('0.00'),
+                'schedule_net': Decimal('0.00'),
+                'opening_total_debit': opening_debit,
+                'opening_total_credit': opening_credit,
+                'opening_net': opening_net,
+                'difference': Decimal('0.00') - opening_net,
+                'rows': rows,
+            })
+            continue
+        summaries.append({
+            'key': item['key'],
+            'label': item['label'],
+            'schedule': schedule,
+            'status': schedule.status,
+            'required': True,
+            'line_count': schedule.lines.count(),
+            'total_debit': schedule.total_debit,
+            'total_credit': schedule.total_credit,
+            'schedule_net': schedule.total_debit - schedule.total_credit,
+            'opening_total_debit': schedule.opening_total_debit,
+            'opening_total_credit': schedule.opening_total_credit,
+            'opening_net': schedule.opening_total_debit - schedule.opening_total_credit,
+            'difference': schedule.difference,
+            'rows': rows,
+        })
+    return summaries
 
 
 def refresh_opening_balance_totals(import_batch):
@@ -906,6 +1198,21 @@ def build_cutover_readiness(entity):
             f"{line_difference_count} subscriber line(s) need review.",
         )
 
+    balance_schedule_summary = build_cutover_balance_schedule_summary(plan)
+    for schedule_item in balance_schedule_summary:
+        if not schedule_item['required']:
+            continue
+        add(
+            f"cutover_balance_schedule_{schedule_item['key']}",
+            f"{schedule_item['label']} schedule is reconciled",
+            schedule_item['status'] == 'reconciled' and schedule_item['difference'] == Decimal('0.00'),
+            (
+                f"Schedule net {schedule_item['total_debit'] - schedule_item['total_credit']}; "
+                f"opening net {schedule_item['opening_total_debit'] - schedule_item['opening_total_credit']}; "
+                f"difference {schedule_item['difference']}."
+            ),
+        )
+
     all_passed = all(item['passed'] for item in checks if item['severity'] == 'error')
     return {
         'checks': checks,
@@ -915,6 +1222,7 @@ def build_cutover_readiness(entity):
         'open_ar_total': open_ar_total,
         'customer_advance_total': customer_advance_total,
         'reconciliation_snapshot': latest_snapshot,
+        'balance_schedule_summary': balance_schedule_summary,
     }
 
 

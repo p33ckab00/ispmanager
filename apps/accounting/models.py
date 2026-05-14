@@ -898,6 +898,166 @@ class CutoverSubscriberBalanceLine(models.Model):
         return f"{self.get_balance_type_display()} {self.subscriber}: {self.difference}"
 
 
+class CutoverBalanceSchedule(models.Model):
+    SCHEDULE_TYPE_CHOICES = [
+        ('cash_on_hand', 'Cash on Hand'),
+        ('bank_account', 'Bank Accounts'),
+        ('wallet_gateway', 'Wallet / Gateway Clearing'),
+        ('accounts_payable', 'Accounts Payable'),
+        ('tax_balance', 'Tax Balances'),
+    ]
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('needs_review', 'Needs Review'),
+        ('reconciled', 'Reconciled'),
+        ('voided', 'Voided'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='cutover_balance_schedules',
+    )
+    cutover_plan = models.ForeignKey(
+        CutoverPlan,
+        on_delete=models.PROTECT,
+        related_name='balance_schedules',
+    )
+    schedule_type = models.CharField(max_length=30, choices=SCHEDULE_TYPE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    total_debit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    total_credit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    opening_total_debit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    opening_total_credit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    difference = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    validation_errors = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_cutover_balance_schedules',
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_cutover_balance_schedules',
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['cutover_plan', 'schedule_type']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cutover_plan', 'schedule_type'],
+                condition=~Q(status='voided'),
+                name='accounting_unique_active_cutover_balance_schedule',
+            ),
+        ]
+        permissions = [
+            ('manage_cutoverbalanceschedule', 'Can manage Accounting v2 cutover balance schedules'),
+        ]
+
+    @property
+    def all_matched(self):
+        return self.status == 'reconciled' and self.difference == MONEY_ZERO
+
+    def clean(self):
+        if self.cutover_plan_id and self.entity_id and self.cutover_plan.entity_id != self.entity_id:
+            raise ValidationError('Cutover balance schedule must use the same entity as the cutover plan.')
+
+    def __str__(self):
+        return f"{self.cutover_plan.cutover_date} - {self.get_schedule_type_display()}"
+
+
+class CutoverBalanceScheduleLine(models.Model):
+    VALIDATION_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('valid', 'Valid'),
+        ('warning', 'Warning'),
+        ('error', 'Error'),
+    ]
+
+    schedule = models.ForeignKey(
+        CutoverBalanceSchedule,
+        on_delete=models.CASCADE,
+        related_name='lines',
+    )
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='cutover_balance_schedule_lines',
+    )
+    account = models.ForeignKey(
+        ChartOfAccount,
+        on_delete=models.PROTECT,
+        related_name='cutover_balance_schedule_lines',
+    )
+    label = models.CharField(max_length=255)
+    reference = models.CharField(max_length=255, blank=True)
+    counterparty_name = models.CharField(max_length=255, blank=True)
+    statement_date = models.DateField(null=True, blank=True)
+    debit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    credit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    source_document_number = models.CharField(max_length=120, blank=True)
+    notes = models.TextField(blank=True)
+    validation_status = models.CharField(
+        max_length=20,
+        choices=VALIDATION_STATUS_CHOICES,
+        default='pending',
+    )
+    validation_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['schedule', 'account__code', 'label', 'id']
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    Q(debit__gt=0, credit=MONEY_ZERO)
+                    | Q(credit__gt=0, debit=MONEY_ZERO)
+                ),
+                name='accounting_cutover_schedule_line_one_side',
+            ),
+        ]
+
+    def clean(self):
+        debit = self.debit or MONEY_ZERO
+        credit = self.credit or MONEY_ZERO
+        if (debit > MONEY_ZERO and credit > MONEY_ZERO) or (debit <= MONEY_ZERO and credit <= MONEY_ZERO):
+            raise ValidationError('Schedule line must have either a debit or a credit amount, not both.')
+        if self.schedule_id and self.entity_id and self.schedule.entity_id != self.entity_id:
+            raise ValidationError('Schedule line must use the same entity as the schedule.')
+        if self.account_id and self.entity_id and self.account.entity_id != self.entity_id:
+            raise ValidationError('Schedule line account must belong to the same entity.')
+        if self.schedule_id and self.schedule.schedule_type == 'accounts_payable' and not self.counterparty_name:
+            raise ValidationError('Accounts payable schedule lines require a vendor or payee name.')
+
+    def _assert_schedule_mutable(self):
+        if not self.schedule_id:
+            return
+        if CutoverBalanceSchedule.objects.filter(pk=self.schedule_id, status='voided').exists():
+            raise ValidationError('Voided cutover balance schedules are read-only.')
+
+    def save(self, *args, **kwargs):
+        self._assert_schedule_mutable()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        self._assert_schedule_mutable()
+        return super().delete(*args, **kwargs)
+
+    def __str__(self):
+        side = 'Dr' if self.debit else 'Cr'
+        amount = self.debit or self.credit
+        return f"{side} {self.account.code} {amount} - {self.label}"
+
+
 class AlphanumericTaxCode(models.Model):
     TAX_FAMILY_CHOICES = [
         ('expanded_withholding_tax', 'Expanded Withholding Tax'),

@@ -87,7 +87,37 @@ Still not included in Slice 2B:
 - CSV/XLSX export of reconciliation differences.
 - Account-level drilldown for one GL control line without subscriber-level
   opening detail.
-- Cash, bank, wallet, AP, tax, asset, loan, and equity schedules.
+- Asset, loan, and equity schedules.
+- Final cutover approval/live gate.
+
+Slice 2C has also been implemented for non-subscriber operational balances.
+
+Implemented:
+
+- `CutoverBalanceSchedule` for cash, bank, wallet/gateway, AP, and tax schedule
+  groups.
+- `CutoverBalanceScheduleLine` for detailed schedule rows with account,
+  reference, vendor/payee, statement date, debit/credit amount, and validation
+  status.
+- One active schedule per cutover plan and schedule type.
+- Schedule validation against opening balance lines by account.
+- Account-level reconciliation so offsetting differences cannot hide inside a
+  net-zero total.
+- AP schedule lines require vendor/payee names.
+- Bank and wallet/gateway schedule lines warn when references are missing.
+- Tax schedule lines warn when no return, ledger, worksheet, or statement
+  reference is cited.
+- Cutover schedule pages at `/accounting/cutover/schedules/`.
+- Readiness checks for required operational schedules when matching opening
+  balance categories exist.
+
+Still not included in Slice 2C:
+
+- Bank or wallet statement upload/import.
+- AP vendor ledger module.
+- Formal VAT/percentage tax ledger module.
+- Inventory, fixed asset, accumulated depreciation, loan, and equity schedules.
+- CSV/XLSX export of schedule differences.
 - Final cutover approval/live gate.
 
 ## Locked Decisions
@@ -145,13 +175,18 @@ Add non-subscriber balance schedules and reconciliation checks.
 
 Deliverables:
 
-- cash on hand schedule
-- bank account opening balances
-- GCash/Maya/gateway clearing opening balances
-- AP/vendor opening balances
-- CWT/EWT receivable opening balance
-- VAT/percentage tax payable opening balance placeholders
-- tax and clearing account reconciliation warnings
+- cash on hand schedule: implemented
+- bank account opening balances: implemented as manual schedule lines
+- GCash/Maya/gateway clearing opening balances: implemented as manual schedule
+  lines
+- AP/vendor opening balances: implemented with vendor/payee-required schedule
+  lines
+- CWT/EWT receivable opening balance: implemented through tax schedules and
+  account matching
+- VAT/percentage tax payable opening balance placeholders: implemented through
+  tax schedules and configured tax account codes
+- tax and clearing account reconciliation warnings: implemented through
+  validation warnings and readiness checks
 
 ### Slice 2D - Inventory, Fixed Assets, Loans, and Equity
 
@@ -539,13 +574,22 @@ Resolved in Slice 2B:
 - Customer advances use cutover as-of payment/allocation/adjustment dates
   instead of the live current account credit helper.
 
+Resolved in Slice 2C:
+
+- Cash, bank, wallet/gateway, AP, and tax schedule models now exist.
+- Operational schedules reconcile to opening balance lines by account.
+- AP schedule lines require vendor/payee names.
+- Tax and clearing schedules surface reference warnings and account-level
+  differences.
+
 Remaining gaps:
 
 - No account mapping table exists beyond service-level default posting codes.
 - No formal frozen source-detail table exists for every invoice/payment row
   represented by the subscriber balance snapshot.
 - No bank/wallet statement or settlement model exists yet.
-- No AP, inventory, fixed asset, loan, or depreciation modules exist yet.
+- No AP vendor ledger, inventory, fixed asset, loan, or depreciation modules
+  exist yet.
 - VAT invoice tax breakdown is still blocked, so VAT cutover can only start
   with manual tax opening balances.
 - 2307 attachments and finalized SAWT/2307 exports are not yet implemented.

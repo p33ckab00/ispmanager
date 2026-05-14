@@ -5,6 +5,8 @@ from django import forms
 from apps.accounting.models import (
     AlphanumericTaxCode,
     ChartOfAccount,
+    CutoverBalanceSchedule,
+    CutoverBalanceScheduleLine,
     CutoverPlan,
     ExpenseRecord,
     IncomeRecord,
@@ -13,7 +15,10 @@ from apps.accounting.models import (
     OpeningBalanceLine,
     WithholdingTaxClass,
 )
-from apps.accounting.services import available_coa_templates
+from apps.accounting.services import (
+    available_coa_templates,
+    available_cutover_balance_schedule_types,
+)
 from apps.subscribers.models import Subscriber
 
 
@@ -94,6 +99,71 @@ class OpeningBalanceLineForm(forms.ModelForm):
         self.fields['subscriber'].queryset = Subscriber.objects.order_by('username')
         self.fields['subscriber'].required = False
         self.fields['subscriber'].empty_label = 'No subscriber'
+        self.fields['debit'].required = False
+        self.fields['credit'].required = False
+
+    def clean_debit(self):
+        return self.cleaned_data.get('debit') or Decimal('0.00')
+
+    def clean_credit(self):
+        return self.cleaned_data.get('credit') or Decimal('0.00')
+
+
+class CutoverBalanceScheduleForm(forms.ModelForm):
+    class Meta:
+        model = CutoverBalanceSchedule
+        fields = ['schedule_type', 'notes']
+        widgets = {
+            'notes': forms.Textarea(attrs={'rows': 4}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['schedule_type'].choices = [
+            (item['key'], item['label'])
+            for item in available_cutover_balance_schedule_types()
+        ]
+
+
+class CutoverBalanceScheduleLineForm(forms.ModelForm):
+    class Meta:
+        model = CutoverBalanceScheduleLine
+        fields = [
+            'account',
+            'label',
+            'reference',
+            'counterparty_name',
+            'statement_date',
+            'debit',
+            'credit',
+            'source_document_number',
+            'notes',
+        ]
+        widgets = {
+            'statement_date': forms.DateInput(attrs={'type': 'date'}),
+            'label': forms.TextInput(attrs={'placeholder': 'Cash count, BDO ending balance, GCash clearing, vendor, or tax account'}),
+            'reference': forms.TextInput(attrs={'placeholder': 'Statement number, wallet report, invoice, or worksheet'}),
+            'counterparty_name': forms.TextInput(attrs={'placeholder': 'Vendor/payee for AP; optional otherwise'}),
+            'source_document_number': forms.TextInput(attrs={'placeholder': 'Return, ledger, worksheet, or statement reference'}),
+            'notes': forms.Textarea(attrs={'rows': 3}),
+        }
+
+    def __init__(self, *args, entity=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['account'].queryset = ChartOfAccount.objects.none()
+        if entity:
+            self.fields['account'].queryset = ChartOfAccount.objects.filter(
+                entity=entity,
+                is_active=True,
+            ).order_by('code')
+        self.fields['debit'].required = False
+        self.fields['credit'].required = False
+
+    def clean_debit(self):
+        return self.cleaned_data.get('debit') or Decimal('0.00')
+
+    def clean_credit(self):
+        return self.cleaned_data.get('credit') or Decimal('0.00')
 
 
 class IncomeForm(forms.ModelForm):
