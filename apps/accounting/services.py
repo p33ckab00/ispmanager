@@ -79,6 +79,9 @@ COMMON_ISP_ACCOUNTS = [
 ]
 
 CASH_EQUIVALENT_ACCOUNT_CODES = ('1000', '1010', '1020')
+AR_CONTROL_ACCOUNT_CODE = '1100'
+AP_CONTROL_ACCOUNT_CODE = '2000'
+TAX_LEDGER_ACCOUNT_CODES = ('1200', '1210', '2300', '2310', '2320', '2330', '6060')
 
 VAT_ACCOUNTS = [
     _account('1200', 'Input VAT', 'asset', 'debit'),
@@ -1491,6 +1494,53 @@ def _account_activity_balance(account, start_date=None, end_date=None):
     }
 
 
+def _aging_bucket(days_overdue):
+    if days_overdue <= 0:
+        return 'current'
+    if days_overdue <= 30:
+        return '1_30'
+    if days_overdue <= 60:
+        return '31_60'
+    if days_overdue <= 90:
+        return '61_90'
+    return 'over_90'
+
+
+def _empty_aging_totals():
+    return {
+        'current': Decimal('0.00'),
+        '1_30': Decimal('0.00'),
+        '31_60': Decimal('0.00'),
+        '61_90': Decimal('0.00'),
+        'over_90': Decimal('0.00'),
+    }
+
+
+def _bucket_labels():
+    return {
+        'current': 'Current',
+        '1_30': '1-30 Days',
+        '31_60': '31-60 Days',
+        '61_90': '61-90 Days',
+        'over_90': 'Over 90 Days',
+    }
+
+
+def _bucket_total_rows(totals):
+    labels = _bucket_labels()
+    return [
+        {'key': key, 'label': labels[key], 'amount': totals[key]}
+        for key in ('current', '1_30', '31_60', '61_90', 'over_90')
+    ]
+
+
+def _account_balance_for_code(entity, code, as_of_date=None):
+    account = ChartOfAccount.objects.filter(entity=entity, code=code).first()
+    if not account:
+        return None, Decimal('0.00')
+    return account, _account_balance_as_of(account, as_of_date)
+
+
 def build_trial_balance_report(entity, start_date=None, end_date=None):
     rows = _account_activity_rows(entity, start_date=start_date, end_date=end_date)
     total_debit = sum((row['debit'] for row in rows), Decimal('0.00'))
@@ -1741,6 +1791,212 @@ def build_changes_in_equity_report(entity, start_date=None, end_date=None):
         'ending_equity': ending_equity,
         'balance_sheet_equity': balance_sheet['totals']['equity'],
         'difference': ending_equity - balance_sheet['totals']['equity'],
+        'start_date': start_date,
+        'end_date': end_date,
+    }
+
+
+def build_ar_aging_report(entity, as_of_date=None):
+    as_of_date = as_of_date or timezone.localdate()
+    totals = _empty_aging_totals()
+    rows = []
+    invoices = (
+        Invoice.objects
+        .select_related('subscriber')
+        .exclude(status__in=['paid', 'voided', 'waived'])
+        .order_by('subscriber__username', 'due_date', 'invoice_number')
+    )
+    for invoice in invoices:
+        balance = max(_decimal_amount(invoice.remaining_balance), Decimal('0.00'))
+        if balance <= Decimal('0.00'):
+            continue
+        days_overdue = max((as_of_date - invoice.due_date).days, 0)
+        bucket = _aging_bucket(days_overdue)
+        totals[bucket] += balance
+        rows.append({
+            'subscriber': invoice.subscriber,
+            'invoice': invoice,
+            'invoice_number': invoice.invoice_number,
+            'due_date': invoice.due_date,
+            'status': invoice.get_status_display(),
+            'balance': balance,
+            'days_overdue': days_overdue,
+            'bucket': bucket,
+            'bucket_label': _bucket_labels()[bucket],
+        })
+
+    total = sum(totals.values(), Decimal('0.00'))
+    control_account, control_balance = _account_balance_for_code(entity, AR_CONTROL_ACCOUNT_CODE, as_of_date)
+    return {
+        'rows': rows,
+        'totals': totals,
+        'bucket_totals': _bucket_total_rows(totals),
+        'total': total,
+        'bucket_labels': _bucket_labels(),
+        'control_account': control_account,
+        'control_balance': control_balance,
+        'control_difference': control_balance - total,
+        'as_of_date': as_of_date,
+        'source_note': 'Subscriber invoice aging is based on current unpaid invoice balances as of the selected date.',
+    }
+
+
+def _ap_amount_from_line(line):
+    return max((line.credit or Decimal('0.00')) - (line.debit or Decimal('0.00')), Decimal('0.00'))
+
+
+def build_ap_aging_report(entity, as_of_date=None):
+    as_of_date = as_of_date or timezone.localdate()
+    totals = _empty_aging_totals()
+    rows = []
+    schedule_lines = (
+        CutoverBalanceScheduleLine.objects
+        .filter(
+            entity=entity,
+            schedule__schedule_type='accounts_payable',
+        )
+        .exclude(schedule__status='voided')
+        .select_related('account', 'schedule')
+        .order_by('counterparty_name', 'statement_date', 'source_document_number', 'id')
+    )
+    if schedule_lines.exists():
+        for line in schedule_lines:
+            reference_date = line.maturity_date or line.statement_date or as_of_date
+            if reference_date and reference_date > as_of_date:
+                bucket = 'current'
+                days_overdue = 0
+            else:
+                days_overdue = max((as_of_date - reference_date).days, 0)
+                bucket = _aging_bucket(days_overdue)
+            amount = _ap_amount_from_line(line)
+            if amount <= Decimal('0.00'):
+                continue
+            totals[bucket] += amount
+            rows.append({
+                'vendor_name': line.counterparty_name or line.label,
+                'reference': line.source_document_number or line.reference,
+                'document_date': line.statement_date,
+                'due_date': reference_date,
+                'account': line.account,
+                'amount': amount,
+                'days_overdue': days_overdue,
+                'bucket': bucket,
+                'bucket_label': _bucket_labels()[bucket],
+                'source': 'Cutover AP schedule',
+            })
+    else:
+        opening_lines = (
+            OpeningBalanceLine.objects
+            .filter(
+                entity=entity,
+                line_type='ap_vendor',
+                import_batch__status__in=['validated', 'journal_created', 'posted'],
+            )
+            .select_related('account', 'import_batch')
+            .order_by('vendor_name', 'reference', 'id')
+        )
+        for line in opening_lines:
+            amount = _ap_amount_from_line(line)
+            if amount <= Decimal('0.00'):
+                continue
+            totals['current'] += amount
+            rows.append({
+                'vendor_name': line.vendor_name,
+                'reference': line.reference,
+                'document_date': None,
+                'due_date': as_of_date,
+                'account': line.account,
+                'amount': amount,
+                'days_overdue': 0,
+                'bucket': 'current',
+                'bucket_label': _bucket_labels()['current'],
+                'source': 'Opening AP vendor line',
+            })
+
+    total = sum(totals.values(), Decimal('0.00'))
+    control_account, control_balance = _account_balance_for_code(entity, AP_CONTROL_ACCOUNT_CODE, as_of_date)
+    return {
+        'rows': rows,
+        'totals': totals,
+        'bucket_totals': _bucket_total_rows(totals),
+        'total': total,
+        'bucket_labels': _bucket_labels(),
+        'control_account': control_account,
+        'control_balance': control_balance,
+        'control_difference': control_balance - total,
+        'as_of_date': as_of_date,
+        'source_note': 'AP aging uses cutover AP schedule lines when present, otherwise validated opening AP vendor lines.',
+    }
+
+
+def build_tax_ledger_report(entity, start_date=None, end_date=None):
+    day_before_start = start_date - timedelta(days=1) if start_date else None
+    accounts = (
+        ChartOfAccount.objects
+        .filter(entity=entity, is_active=True, code__in=TAX_LEDGER_ACCOUNT_CODES)
+        .order_by('code')
+    )
+    rows = []
+    for account in accounts:
+        activity = _account_activity_balance(account, start_date=start_date, end_date=end_date)
+        opening_balance = _account_balance_as_of(account, day_before_start)
+        ending_balance = _account_balance_as_of(account, end_date)
+        rows.append({
+            'account': account,
+            'opening_balance': opening_balance,
+            'debit': activity['debit'],
+            'credit': activity['credit'],
+            'movement': activity['balance'],
+            'ending_balance': ending_balance,
+        })
+
+    balances_by_code = {row['account'].code: row['ending_balance'] for row in rows}
+    input_vat = balances_by_code.get('1200', Decimal('0.00'))
+    output_vat = balances_by_code.get('2300', Decimal('0.00'))
+    vat_payable = balances_by_code.get('2320', Decimal('0.00'))
+    cwt_receivable = balances_by_code.get('1210', Decimal('0.00'))
+    percentage_tax_payable = balances_by_code.get('2330', Decimal('0.00'))
+
+    claims = CustomerWithholdingTaxClaim.objects.filter(Q(entity=entity) | Q(entity__isnull=True))
+    claim_rows = []
+    claim_status_totals = {}
+    for claim in claims.select_related('subscriber', 'withholding_class', 'atc_code'):
+        claim_date = claim.received_date or claim.certificate_date or claim.period_to or claim.created_at.date()
+        if start_date and claim_date < start_date:
+            continue
+        if end_date and claim_date > end_date:
+            continue
+        claim_rows.append({
+            'claim': claim,
+            'claim_date': claim_date,
+            'subscriber': claim.subscriber,
+            'payor_name': claim.payor_name,
+            'atc': claim.atc or (claim.atc_code.code if claim.atc_code else ''),
+            'gross_amount': claim.gross_amount,
+            'tax_withheld': claim.tax_withheld,
+            'status': claim.get_status_display(),
+        })
+        claim_status_totals[claim.status] = claim_status_totals.get(claim.status, Decimal('0.00')) + claim.tax_withheld
+
+    return {
+        'rows': rows,
+        'claim_rows': claim_rows,
+        'claim_status_totals': [
+            {
+                'status': dict(CustomerWithholdingTaxClaim.STATUS_CHOICES).get(status, status),
+                'amount': amount,
+            }
+            for status, amount in sorted(claim_status_totals.items())
+        ],
+        'total_debit': sum((row['debit'] for row in rows), Decimal('0.00')),
+        'total_credit': sum((row['credit'] for row in rows), Decimal('0.00')),
+        'input_vat': input_vat,
+        'output_vat': output_vat,
+        'vat_due_estimate': output_vat - input_vat,
+        'vat_payable': vat_payable,
+        'vat_difference': vat_payable - (output_vat - input_vat),
+        'cwt_receivable': cwt_receivable,
+        'percentage_tax_payable': percentage_tax_payable,
         'start_date': start_date,
         'end_date': end_date,
     }

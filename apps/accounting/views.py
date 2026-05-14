@@ -41,6 +41,8 @@ from apps.accounting.services import (
     build_cutover_balance_schedule_reconciliation,
     build_cutover_balance_schedule_summary,
     approve_cutover_plan,
+    build_ap_aging_report,
+    build_ar_aging_report,
     build_balance_sheet_report,
     build_cash_flow_report,
     build_changes_in_equity_report,
@@ -49,6 +51,7 @@ from apps.accounting.services import (
     create_cutover_plan,
     build_general_ledger_report,
     build_income_statement_report,
+    build_tax_ledger_report,
     build_trial_balance_report,
     create_manual_journal_entry,
     create_opening_balance_journal,
@@ -322,6 +325,96 @@ def _changes_in_equity_csv_rows(report):
         ['Summary', '', 'Balance Sheet Equity', '', '', report['balance_sheet_equity']],
         ['Summary', '', 'Difference', '', '', report['difference']],
     ])
+    return rows
+
+
+def _ar_aging_csv_rows(report):
+    rows = []
+    for row in report['rows']:
+        rows.append([
+            row['subscriber'].username,
+            row['subscriber'].display_name,
+            row['invoice_number'],
+            row['due_date'],
+            row['status'],
+            row['days_overdue'],
+            row['bucket_label'],
+            row['balance'],
+        ])
+    rows.extend([
+        ['Summary', '', 'Current', '', '', '', '', report['totals']['current']],
+        ['Summary', '', '1-30 Days', '', '', '', '', report['totals']['1_30']],
+        ['Summary', '', '31-60 Days', '', '', '', '', report['totals']['31_60']],
+        ['Summary', '', '61-90 Days', '', '', '', '', report['totals']['61_90']],
+        ['Summary', '', 'Over 90 Days', '', '', '', '', report['totals']['over_90']],
+        ['Summary', '', 'Total', '', '', '', '', report['total']],
+        ['Summary', '', 'GL AR Control', '', '', '', '', report['control_balance']],
+        ['Summary', '', 'Difference', '', '', '', '', report['control_difference']],
+    ])
+    return rows
+
+
+def _ap_aging_csv_rows(report):
+    rows = []
+    for row in report['rows']:
+        rows.append([
+            row['vendor_name'],
+            row['reference'],
+            row['document_date'] or '',
+            row['due_date'],
+            row['account'].code,
+            row['account'].name,
+            row['days_overdue'],
+            row['bucket_label'],
+            row['amount'],
+            row['source'],
+        ])
+    rows.extend([
+        ['Summary', 'Current', '', '', '', '', '', '', report['totals']['current'], ''],
+        ['Summary', '1-30 Days', '', '', '', '', '', '', report['totals']['1_30'], ''],
+        ['Summary', '31-60 Days', '', '', '', '', '', '', report['totals']['31_60'], ''],
+        ['Summary', '61-90 Days', '', '', '', '', '', '', report['totals']['61_90'], ''],
+        ['Summary', 'Over 90 Days', '', '', '', '', '', '', report['totals']['over_90'], ''],
+        ['Summary', 'Total', '', '', '', '', '', '', report['total'], ''],
+        ['Summary', 'GL AP Control', '', '', '', '', '', '', report['control_balance'], ''],
+        ['Summary', 'Difference', '', '', '', '', '', '', report['control_difference'], ''],
+    ])
+    return rows
+
+
+def _tax_ledger_csv_rows(report):
+    rows = []
+    for row in report['rows']:
+        rows.append([
+            'Tax Account',
+            row['account'].code,
+            row['account'].name,
+            row['opening_balance'],
+            row['debit'],
+            row['credit'],
+            row['movement'],
+            row['ending_balance'],
+        ])
+    rows.extend([
+        ['Summary', '', 'Input VAT', '', '', '', '', report['input_vat']],
+        ['Summary', '', 'Output VAT', '', '', '', '', report['output_vat']],
+        ['Summary', '', 'VAT Due Estimate', '', '', '', '', report['vat_due_estimate']],
+        ['Summary', '', 'VAT Payable', '', '', '', '', report['vat_payable']],
+        ['Summary', '', 'VAT Difference', '', '', '', '', report['vat_difference']],
+        ['Summary', '', 'Creditable Withholding Tax Receivable', '', '', '', '', report['cwt_receivable']],
+        ['Summary', '', 'Percentage Tax Payable', '', '', '', '', report['percentage_tax_payable']],
+    ])
+    for claim in report['claim_rows']:
+        rows.append([
+            '2307 Claim',
+            claim['atc'],
+            claim['payor_name'] or claim['subscriber'].display_name,
+            claim['claim_date'],
+            claim['gross_amount'],
+            claim['tax_withheld'],
+            claim['status'],
+            '',
+        ])
     return rows
 
 
@@ -692,6 +785,72 @@ def changes_in_equity(request):
             _changes_in_equity_csv_rows(report),
         )
     return render(request, 'accounting/changes_in_equity.html', {
+        'entity': entity,
+        'start_date': start_date,
+        'end_date': end_date,
+        'report': report,
+        'export_query': _report_query(request, format='csv'),
+    })
+
+
+@login_required
+def ar_aging(request):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    as_of_date = _parse_report_date(request.GET.get('as_of'), date.today())
+    report = build_ar_aging_report(entity, as_of_date=as_of_date)
+    if _wants_csv(request):
+        return csv_response(
+            f'accounting-ar-aging-{as_of_date}.csv',
+            ['subscriber_username', 'subscriber_name', 'invoice_number', 'due_date', 'status', 'days_overdue', 'bucket', 'balance'],
+            _ar_aging_csv_rows(report),
+        )
+    return render(request, 'accounting/ar_aging.html', {
+        'entity': entity,
+        'as_of_date': as_of_date,
+        'report': report,
+        'export_query': _report_query(request, format='csv'),
+    })
+
+
+@login_required
+def ap_aging(request):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    as_of_date = _parse_report_date(request.GET.get('as_of'), date.today())
+    report = build_ap_aging_report(entity, as_of_date=as_of_date)
+    if _wants_csv(request):
+        return csv_response(
+            f'accounting-ap-aging-{as_of_date}.csv',
+            ['vendor_name', 'reference', 'document_date', 'due_date', 'account_code', 'account_name', 'days_overdue', 'bucket', 'amount', 'source'],
+            _ap_aging_csv_rows(report),
+        )
+    return render(request, 'accounting/ap_aging.html', {
+        'entity': entity,
+        'as_of_date': as_of_date,
+        'report': report,
+        'export_query': _report_query(request, format='csv'),
+    })
+
+
+@login_required
+def tax_ledger(request):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    today = date.today()
+    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
+    end_date = _parse_report_date(request.GET.get('end'), today)
+    report = build_tax_ledger_report(entity, start_date=start_date, end_date=end_date)
+    if _wants_csv(request):
+        return csv_response(
+            f'accounting-tax-ledger-{start_date}-{end_date}.csv',
+            ['section', 'code', 'name', 'opening_balance', 'debit_or_gross', 'credit_or_withheld', 'movement_or_status', 'ending_balance'],
+            _tax_ledger_csv_rows(report),
+        )
+    return render(request, 'accounting/tax_ledger.html', {
         'entity': entity,
         'start_date': start_date,
         'end_date': end_date,

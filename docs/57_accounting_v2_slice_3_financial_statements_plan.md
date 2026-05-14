@@ -8,6 +8,8 @@ basic export and print ergonomics while still avoiding BIR/NTC claims,
 immutable filing packages, and full subledger engines.
 Slice 3C-A adds the two remaining ledger-derived statements that can be built
 without vendor/subscriber aging subledgers.
+Slice 3C-B adds operational aging and tax workpapers tied back to GL control
+accounts where the current data model allows it.
 
 ## Slice 3A Implemented
 
@@ -67,6 +69,26 @@ Implemented:
   are included because closing entries are not posted.
 - Accounting dashboard and statement navigation now link to the new statements.
 
+## Slice 3C-B Implemented
+
+Implemented:
+
+- AR Aging page at `/accounting/ar-aging/`.
+- AP Aging page at `/accounting/ap-aging/`.
+- Tax Ledger page at `/accounting/tax-ledger/`.
+- CSV exports and print-friendly layouts for all three new schedules.
+- AR Aging uses current unpaid subscriber invoices and compares the schedule
+  total to the posted GL AR control account.
+- AP Aging uses cutover AP vendor schedule lines when available, then falls
+  back to validated opening AP vendor lines, and compares the schedule total
+  to the posted GL AP control account.
+- Tax Ledger reports opening balance, debit, credit, movement, and ending
+  balance for active VAT, percentage tax, withholding, and CWT accounts.
+- Tax Ledger also includes optional 2307/EWT claim rows for the selected
+  period so claimed customer withholding can be reviewed beside tax GL
+  balances.
+- Dashboard and statement navigation now link to the aging and tax schedules.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -78,14 +100,18 @@ Implemented:
   cash-equivalent accounts.
 - Changes in Equity is a date-range report that includes unclosed income when
   period closing entries are not posted yet.
+- AR Aging is an operational schedule based on current invoice balances as of
+  the selected date, with a GL AR control comparison.
+- AP Aging is a cutover/vendor schedule based on AP support lines, with a GL AP
+  control comparison.
+- Tax Ledger is a date-range GL tax account report with optional 2307/EWT claim
+  support rows.
 - Trial Balance is period-based for now.
 - General Ledger is date-range based and can show all active accounts or one
   selected account.
 
 ## Remaining Slice 3 Gaps
 
-- AR aging and AP aging are not implemented as formal statement schedules yet.
-- VAT ledger and tax reconciliation reports remain manual/cutover-level only.
 - PDF and XLSX exports are not implemented for the new reports.
 - CSV exports are direct downloads only; they are not yet archived as immutable
   compliance packages or tracked in Data Exchange history.
@@ -95,13 +121,18 @@ Implemented:
 - Cash Flow classification is GL-account based. It will become more exact once
   journal lines carry service area, asset class, settlement, and source document
   dimensions.
+- AR Aging is not historical-payment accurate yet because invoice balances are
+  current-state operational balances.
+- AP Aging is not a full post-live vendor invoice subledger yet; it depends on
+  cutover/opening AP support until expense/AP posting is upgraded.
+- Tax Ledger is a GL workpaper and optional 2307 support schedule, not a
+  finalized BIR return package or SLSP/QAP/MAP file.
 
 ## Next Slice Candidate
 
-Slice 3C-B should add the aging and tax schedules that accountants will need
-before BIR/NTC books:
+Slice 3D should harden report operations before BIR/NTC books:
 
-- AR aging schedule tied to the AR control account.
-- AP aging schedule tied to the AP control account.
-- VAT ledger and tax reconciliation schedule.
 - Optional zero-balance account toggle and report date presets.
+- PDF/XLSX export support for the report set.
+- Archived report package manifests and generated-file hashes.
+- Full post-live AP vendor invoice subledger design.

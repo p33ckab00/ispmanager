@@ -115,6 +115,9 @@ filter-preserving CSV downloads and browser print views.
 Slice 3C-A is now implemented for ledger-derived statement coverage: Cash Flow,
 Changes in Equity, CSV/print support for both, and a Balance Sheet warning when
 unclosed current earnings are included before formal closing entries.
+Slice 3C-B is now implemented for aging and tax workpapers: AR Aging, AP Aging,
+and Tax Ledger pages with CSV/print support and GL control comparisons where
+available.
 
 ## 2. Locked Decisions
 
@@ -352,8 +355,18 @@ Slice 3C-A is implemented as ledger-derived statement completion:
   income, ending equity, and difference against Balance Sheet equity.
 - Balance Sheet warns when it relies on unclosed current earnings because
   closing entries are not posted yet.
-- Remaining Slice 3 work starts with AR/AP aging, VAT ledgers, PDF/XLSX
-  exports, archived report packages, report presets, and formal closing entries.
+
+Slice 3C-B is implemented as aging and tax workpapers:
+
+- AR Aging reports current unpaid subscriber invoices and compares the schedule
+  total to the posted GL AR control account.
+- AP Aging reports AP vendor support lines from cutover/opening schedules and
+  compares the schedule total to the posted GL AP control account.
+- Tax Ledger reports VAT, percentage tax, withholding, and CWT GL accounts plus
+  optional 2307/EWT claim rows for the selected period.
+- Remaining Slice 3 work starts with PDF/XLSX exports, archived report
+  packages, report presets, formal closing entries, and a full post-live AP
+  vendor invoice subledger.
 
 ### Slice 4 - BIR Books and Guides
 

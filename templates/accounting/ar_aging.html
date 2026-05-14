@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}AR Aging - {{ isp_name }}{% endblock %}
+{% block extra_css %}{% include "accounting/partials/report_print_css.html" %}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">AR Aging</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ entity }} · as of {{ as_of_date }}</p>
+  </div>
+  <div class="flex flex-wrap gap-2 no-print">
+    <a href="?{{ export_query }}" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">CSV</a>
+    <button type="button" onclick="window.print()" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Print</button>
+    <a href="{% url 'accounting-balance-sheet' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Balance Sheet</a>
+    <a href="{% url 'accounting-ap-aging' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">AP Aging</a>
+    <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Accounting</a>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6 no-print">
+  <form method="get" class="flex flex-wrap items-end gap-3">
+    <div>
+      <label class="block text-sm font-medium text-gray-700 mb-1">As Of</label>
+      <input type="date" name="as_of" value="{{ as_of_date|date:'Y-m-d' }}" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+    </div>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm">Run</button>
+  </form>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 report-panel">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide">AR Schedule</p>
+    <p class="text-2xl font-bold text-gray-800 mt-1">PHP {{ report.total }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide">GL AR Control</p>
+    <p class="text-2xl font-bold text-gray-800 mt-1">PHP {{ report.control_balance }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide">Difference</p>
+    <p class="text-2xl font-bold {% if report.control_difference == 0 %}text-green-700{% else %}text-red-600{% endif %} mt-1">PHP {{ report.control_difference }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase tracking-wide">Open Invoices</p>
+    <p class="text-2xl font-bold text-gray-800 mt-1">{{ report.rows|length }}</p>
+  </div>
+</div>
+
+<div class="bg-blue-50 border border-blue-100 text-blue-800 rounded-xl p-4 mb-6 report-panel">
+  <p class="text-sm">{{ report.source_note }}</p>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-6 report-panel">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Bucket</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Amount</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for bucket in report.bucket_totals %}
+      <tr>
+        <td class="px-4 py-3 font-medium">{{ bucket.label }}</td>
+        <td class="px-4 py-3 text-right">PHP {{ bucket.amount }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden report-panel">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Subscriber</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Invoice</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Due Date</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Days</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Bucket</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Balance</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for row in report.rows %}
+      <tr>
+        <td class="px-4 py-3">
+          <p class="font-medium text-gray-800">{{ row.subscriber.display_name }}</p>
+          <p class="text-xs text-gray-500">{{ row.subscriber.username }}</p>
+        </td>
+        <td class="px-4 py-3">{{ row.invoice_number }}</td>
+        <td class="px-4 py-3">{{ row.due_date }}</td>
+        <td class="px-4 py-3 text-right">{{ row.days_overdue }}</td>
+        <td class="px-4 py-3">{{ row.bucket_label }}</td>
+        <td class="px-4 py-3 text-right font-medium">PHP {{ row.balance }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="px-4 py-8 text-center text-gray-500">No unpaid subscriber invoices for this date.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

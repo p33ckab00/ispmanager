@@ -11,6 +11,7 @@ from apps.accounting.models import (
     AccountingSourcePosting,
     AlphanumericTaxCode,
     ChartOfAccount,
+    CutoverBalanceSchedule,
     CutoverBalanceScheduleLine,
     CutoverPlan,
     CutoverSubscriberBalanceLine,
@@ -24,12 +25,15 @@ from apps.accounting.models import (
 )
 from apps.accounting.services import (
     approve_cutover_plan,
+    build_ap_aging_report,
+    build_ar_aging_report,
     build_balance_sheet_report,
     build_cash_flow_report,
     build_changes_in_equity_report,
     build_cutover_readiness,
     build_general_ledger_report,
     build_income_statement_report,
+    build_tax_ledger_report,
     build_trial_balance_report,
     create_accounting_foundation,
     create_cutover_balance_schedule,
@@ -291,6 +295,143 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(equity['ending_equity'], Decimal('1380.00'))
         self.assertEqual(equity['difference'], Decimal('0.00'))
 
+    def test_ar_aging_reconciles_invoice_schedule_to_ar_control(self):
+        entity = self._foundation()
+        subscriber = Subscriber.objects.create(
+            username='aging-client',
+            full_name='Aging Client',
+            status='active',
+            is_billable=True,
+        )
+        invoice = Invoice.objects.create(
+            subscriber=subscriber,
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 1, 31),
+            due_date=date(2026, 1, 31),
+            amount=Decimal('1000.00'),
+            amount_paid=Decimal('250.00'),
+            status='partial',
+        )
+        ar = ChartOfAccount.objects.get(entity=entity, code='1100')
+        revenue = ChartOfAccount.objects.get(entity=entity, code='4000')
+        journal_entry = create_manual_journal_entry(
+            entity,
+            date(2026, 1, 15),
+            'Invoice AR control',
+            [
+                {'account': ar, 'debit': Decimal('750.00')},
+                {'account': revenue, 'credit': Decimal('750.00')},
+            ],
+        )
+        post_journal_entry(journal_entry)
+
+        report = build_ar_aging_report(entity, as_of_date=date(2026, 3, 15))
+
+        self.assertEqual(invoice.remaining_balance, Decimal('750.00'))
+        self.assertEqual(report['totals']['31_60'], Decimal('750.00'))
+        self.assertEqual(report['total'], Decimal('750.00'))
+        self.assertEqual(report['control_balance'], Decimal('750.00'))
+        self.assertEqual(report['control_difference'], Decimal('0.00'))
+
+    def test_ap_aging_reconciles_vendor_schedule_to_ap_control(self):
+        entity = self._foundation()
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        journal_entry = create_manual_journal_entry(
+            entity,
+            date(2026, 1, 20),
+            'Vendor payable',
+            [
+                {'account': expense, 'debit': Decimal('700.00')},
+                {'account': ap, 'credit': Decimal('700.00')},
+            ],
+        )
+        post_journal_entry(journal_entry)
+        plan = CutoverPlan.objects.create(entity=entity, cutover_date=date(2026, 1, 1))
+        schedule = CutoverBalanceSchedule.objects.create(
+            entity=entity,
+            cutover_plan=plan,
+            schedule_type='accounts_payable',
+        )
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=ap,
+            label='Bandwidth supplier',
+            counterparty_name='Upstream Provider',
+            statement_date=date(2026, 1, 20),
+            source_document_number='BILL-100',
+            credit=Decimal('700.00'),
+        )
+
+        report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+
+        self.assertEqual(report['totals']['31_60'], Decimal('700.00'))
+        self.assertEqual(report['total'], Decimal('700.00'))
+        self.assertEqual(report['control_balance'], Decimal('700.00'))
+        self.assertEqual(report['control_difference'], Decimal('0.00'))
+
+    def test_tax_ledger_reports_vat_and_optional_2307_claims(self):
+        entity = create_accounting_foundation(
+            entity_name='VAT Statement ISP',
+            template_key='isp_vat_corporation',
+            fiscal_year=2026,
+        )['entity']
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        ar = ChartOfAccount.objects.get(entity=entity, code='1100')
+        input_vat = ChartOfAccount.objects.get(entity=entity, code='1200')
+        output_vat = ChartOfAccount.objects.get(entity=entity, code='2300')
+        revenue = ChartOfAccount.objects.get(entity=entity, code='4000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        subscriber = Subscriber.objects.create(username='vat-client', full_name='VAT Client')
+        for journal_entry in [
+            create_manual_journal_entry(
+                entity,
+                date(2026, 1, 12),
+                'VAT sale',
+                [
+                    {'account': ar, 'debit': Decimal('1120.00')},
+                    {'account': revenue, 'credit': Decimal('1000.00')},
+                    {'account': output_vat, 'credit': Decimal('120.00')},
+                ],
+            ),
+            create_manual_journal_entry(
+                entity,
+                date(2026, 1, 18),
+                'Input VAT expense',
+                [
+                    {'account': expense, 'debit': Decimal('500.00')},
+                    {'account': input_vat, 'debit': Decimal('60.00')},
+                    {'account': cash, 'credit': Decimal('560.00')},
+                ],
+            ),
+        ]:
+            post_journal_entry(journal_entry)
+        CustomerWithholdingTaxClaim.objects.create(
+            entity=entity,
+            subscriber=subscriber,
+            gross_amount=Decimal('1000.00'),
+            tax_withheld=Decimal('20.00'),
+            withholding_rate=Decimal('2.0000'),
+            atc='WI158',
+            period_from=date(2026, 1, 1),
+            period_to=date(2026, 1, 31),
+            payor_name='Corporate Client',
+            status='pending_2307',
+        )
+
+        report = build_tax_ledger_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+        )
+
+        self.assertEqual(report['input_vat'], Decimal('60.00'))
+        self.assertEqual(report['output_vat'], Decimal('120.00'))
+        self.assertEqual(report['vat_due_estimate'], Decimal('60.00'))
+        self.assertEqual(len(report['claim_rows']), 1)
+        self.assertEqual(report['claim_rows'][0]['tax_withheld'], Decimal('20.00'))
+
     def test_financial_statement_pages_export_csv(self):
         entity, cash = self._post_sample_activity()
         user = get_user_model().objects.create_user(
@@ -310,6 +451,9 @@ class AccountingV2FinancialStatementTests(TestCase):
             ('/accounting/balance-sheet/?as_of=2026-01-31&format=csv', b'account_code'),
             ('/accounting/cash-flow/?start=2026-01-01&end=2026-01-31&format=csv', b'section'),
             ('/accounting/changes-in-equity/?start=2026-01-01&end=2026-01-31&format=csv', b'account_code'),
+            ('/accounting/ar-aging/?as_of=2026-01-31&format=csv', b'subscriber_username'),
+            ('/accounting/ap-aging/?as_of=2026-01-31&format=csv', b'vendor_name'),
+            ('/accounting/tax-ledger/?start=2026-01-01&end=2026-01-31&format=csv', b'section'),
         ]
 
         for endpoint, expected_header in endpoints:
