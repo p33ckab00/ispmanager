@@ -618,6 +618,204 @@ class AccountingV2CutoverBalanceScheduleTests(TestCase):
         with self.assertRaisesMessage(ValidationError, 'vendor or payee'):
             line.full_clean()
 
+    def test_inventory_schedule_reconciles_and_requires_quantity(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        inventory = ChartOfAccount.objects.get(entity=entity, code='1300')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=inventory,
+            line_type='inventory',
+            debit=Decimal('750.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=capital,
+            line_type='equity',
+            credit=Decimal('750.00'),
+        )
+        refresh_opening_balance_totals(import_batch)
+        validate_opening_balance_import(import_batch)
+        schedule = create_cutover_balance_schedule(plan, 'inventory')[0]
+        missing_quantity = CutoverBalanceScheduleLine(
+            entity=entity,
+            schedule=schedule,
+            account=inventory,
+            label='ONU stock count',
+            debit=Decimal('750.00'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'quantity'):
+            missing_quantity.full_clean()
+
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=inventory,
+            label='ONU stock count',
+            debit=Decimal('750.00'),
+            quantity=Decimal('10.0000'),
+            unit='pcs',
+            location='Main warehouse',
+        )
+        validate_cutover_balance_schedule(schedule)
+        schedule.refresh_from_db()
+
+        self.assertEqual(schedule.status, 'reconciled')
+        self.assertEqual(schedule.difference, Decimal('0.00'))
+
+    def test_fixed_asset_schedule_reconciles_cost_and_accumulated_depreciation(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        network_asset = ChartOfAccount.objects.get(entity=entity, code='1500')
+        accumulated_depreciation = ChartOfAccount.objects.get(entity=entity, code='1590')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=network_asset,
+            line_type='fixed_asset',
+            debit=Decimal('1000.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=accumulated_depreciation,
+            line_type='accumulated_depreciation',
+            credit=Decimal('200.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=capital,
+            line_type='equity',
+            credit=Decimal('800.00'),
+        )
+        refresh_opening_balance_totals(import_batch)
+        validate_opening_balance_import(import_batch)
+        schedule = create_cutover_balance_schedule(plan, 'fixed_assets')[0]
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=network_asset,
+            label='Core router',
+            debit=Decimal('1000.00'),
+            asset_identifier='RTR-CORE-001',
+            acquisition_date=date(2025, 1, 15),
+            useful_life_months=60,
+            source_document_number='Asset register',
+        )
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=accumulated_depreciation,
+            label='Core router accumulated depreciation',
+            credit=Decimal('200.00'),
+            asset_identifier='RTR-CORE-001',
+            source_document_number='Depreciation worksheet',
+        )
+
+        validate_cutover_balance_schedule(schedule)
+        schedule.refresh_from_db()
+
+        self.assertEqual(schedule.status, 'reconciled')
+        self.assertEqual(schedule.total_debit, Decimal('1000.00'))
+        self.assertEqual(schedule.total_credit, Decimal('200.00'))
+
+    def test_loan_schedule_reconciles_and_requires_lender(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        bank = ChartOfAccount.objects.get(entity=entity, code='1010')
+        loans = ChartOfAccount.objects.get(entity=entity, code='2400')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=bank,
+            line_type='bank',
+            debit=Decimal('500.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=loans,
+            line_type='loan',
+            credit=Decimal('500.00'),
+        )
+        refresh_opening_balance_totals(import_batch)
+        validate_opening_balance_import(import_batch)
+        schedule = create_cutover_balance_schedule(plan, 'loans_payable')[0]
+        missing_lender = CutoverBalanceScheduleLine(
+            entity=entity,
+            schedule=schedule,
+            account=loans,
+            label='Equipment loan',
+            credit=Decimal('500.00'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'lender'):
+            missing_lender.full_clean()
+
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=loans,
+            label='Equipment loan',
+            credit=Decimal('500.00'),
+            counterparty_name='Local Bank',
+            source_document_number='Loan agreement',
+            maturity_date=date(2028, 12, 31),
+        )
+        validate_cutover_balance_schedule(schedule)
+        schedule.refresh_from_db()
+
+        self.assertEqual(schedule.status, 'reconciled')
+        self.assertEqual(schedule.difference, Decimal('0.00'))
+
+    def test_equity_schedule_reconciles_opening_equity_accounts(self):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=cash,
+            line_type='cash',
+            debit=Decimal('700.00'),
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=capital,
+            line_type='equity',
+            credit=Decimal('700.00'),
+            reference='Opening capital support',
+        )
+        refresh_opening_balance_totals(import_batch)
+        validate_opening_balance_import(import_batch)
+        schedule = create_cutover_balance_schedule(plan, 'equity_balance')[0]
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=schedule,
+            account=capital,
+            label='Owner capital',
+            credit=Decimal('700.00'),
+            source_document_number='Opening equity worksheet',
+        )
+
+        validate_cutover_balance_schedule(schedule)
+        schedule.refresh_from_db()
+
+        self.assertEqual(schedule.status, 'reconciled')
+        self.assertEqual(schedule.difference, Decimal('0.00'))
+
 
 class AccountingV2SourcePostingTests(TestCase):
     def _subscriber(self):

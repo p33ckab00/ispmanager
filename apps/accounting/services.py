@@ -389,6 +389,26 @@ CUTOVER_BALANCE_SCHEDULE_CONFIG = {
         'opening_line_types': ['tax'],
         'account_codes': ['1200', '1210', '2300', '2310', '2320', '2330'],
     },
+    'inventory': {
+        'label': 'Inventory',
+        'opening_line_types': ['inventory'],
+        'account_codes': ['1300'],
+    },
+    'fixed_assets': {
+        'label': 'Fixed Assets and Depreciation',
+        'opening_line_types': ['fixed_asset', 'accumulated_depreciation'],
+        'account_codes': ['1500', '1590'],
+    },
+    'loans_payable': {
+        'label': 'Loans Payable',
+        'opening_line_types': ['loan'],
+        'account_codes': ['2400'],
+    },
+    'equity_balance': {
+        'label': 'Equity Balances',
+        'opening_line_types': ['equity'],
+        'account_codes': ['3000', '3050', '3100', '3200'],
+    },
 }
 
 
@@ -600,6 +620,26 @@ def validate_cutover_balance_schedule(schedule):
             warnings.append('Reference is recommended for bank, wallet, and gateway balances.')
         if schedule.schedule_type == 'tax_balance' and not line.source_document_number:
             warnings.append('Tax balance schedule should cite a return, ledger, or worksheet reference.')
+        if schedule.schedule_type == 'inventory' and not line.location:
+            warnings.append('Inventory schedule should include storage or deployment location.')
+        if schedule.schedule_type == 'fixed_assets':
+            if line.debit > Decimal('0.00') and not line.asset_identifier:
+                warnings.append('Fixed asset cost lines should include an asset tag, serial number, or batch identifier.')
+            if line.debit > Decimal('0.00') and not line.acquisition_date:
+                warnings.append('Fixed asset cost lines should include acquisition date when known.')
+            if line.debit > Decimal('0.00') and not line.useful_life_months:
+                warnings.append('Fixed asset cost lines should include useful life in months when known.')
+            if line.credit > Decimal('0.00') and not (line.asset_identifier or line.reference or line.source_document_number):
+                warnings.append('Accumulated depreciation lines should cite the related asset or depreciation worksheet.')
+        if schedule.schedule_type == 'loans_payable':
+            if not (line.source_document_number or line.reference):
+                warnings.append('Loan schedule should cite loan agreement, statement, or amortization reference.')
+            if not line.maturity_date:
+                warnings.append('Loan schedule should include maturity date when known.')
+        if schedule.schedule_type == 'equity_balance' and not (
+            line.source_document_number or line.reference or line.notes
+        ):
+            warnings.append('Equity schedule should cite capital, retained earnings, or owner equity support.')
         if warnings:
             line.validation_status = 'warning'
             line.validation_message = ' '.join(warnings)

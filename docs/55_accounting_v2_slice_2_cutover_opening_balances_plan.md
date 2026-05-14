@@ -116,7 +116,31 @@ Still not included in Slice 2C:
 - Bank or wallet statement upload/import.
 - AP vendor ledger module.
 - Formal VAT/percentage tax ledger module.
-- Inventory, fixed asset, accumulated depreciation, loan, and equity schedules.
+- CSV/XLSX export of schedule differences.
+- Final cutover approval/live gate.
+
+Slice 2D has also been implemented for remaining operational opening balances.
+
+Implemented:
+
+- Inventory schedules for CPE, supplies, and network stock.
+- Fixed asset and accumulated depreciation schedules in one asset register
+  workflow.
+- Loans payable schedules with lender-required detail lines.
+- Equity balance schedules for owner capital, share capital, drawings,
+  dividends, retained earnings, and current year earnings accounts.
+- Additional schedule-line metadata for quantity, unit, location, asset
+  identifier, acquisition date, useful life, and loan maturity date.
+- Inventory schedule lines require quantity and unit of measure.
+- Loan schedule lines require lender name.
+- Asset, loan, and equity schedules reconcile to opening balance lines by
+  account, so offsetting control-account differences remain visible.
+
+Still not included in Slice 2D:
+
+- Full inventory item ledger and CPE issuance workflow.
+- Full fixed asset/depreciation subledger and depreciation calculator.
+- Full loan amortization ledger.
 - CSV/XLSX export of schedule differences.
 - Final cutover approval/live gate.
 
@@ -195,11 +219,13 @@ readiness.
 
 Deliverables:
 
-- CPE and network inventory opening schedule
-- fixed asset opening schedule
-- accumulated depreciation opening line support
-- loans payable opening schedule
-- owner capital/share capital/retained earnings balancing workflow
+- CPE and network inventory opening schedule: implemented
+- fixed asset opening schedule: implemented
+- accumulated depreciation opening line support: implemented through the fixed
+  asset schedule
+- loans payable opening schedule: implemented
+- owner capital/share capital/retained earnings balancing workflow:
+  implemented through equity balance schedules
 
 ### Slice 2E - Cutover Approval and Live Gate
 
@@ -582,14 +608,25 @@ Resolved in Slice 2C:
 - Tax and clearing schedules surface reference warnings and account-level
   differences.
 
+Resolved in Slice 2D:
+
+- Inventory, fixed asset, accumulated depreciation, loan, and equity schedule
+  types now exist.
+- Inventory schedule lines capture quantity, unit, location, and value.
+- Fixed asset schedules capture asset identifier, acquisition date, useful
+  life, and accumulated depreciation rows.
+- Loan schedules capture lender, loan references, maturity date, and balance.
+- Equity schedules reconcile capital, retained earnings/current earnings, and
+  related equity accounts by account.
+
 Remaining gaps:
 
 - No account mapping table exists beyond service-level default posting codes.
 - No formal frozen source-detail table exists for every invoice/payment row
   represented by the subscriber balance snapshot.
 - No bank/wallet statement or settlement model exists yet.
-- No AP vendor ledger, inventory, fixed asset, loan, or depreciation modules
-  exist yet.
+- No AP vendor ledger, full inventory ledger, fixed asset depreciation engine,
+  or loan amortization module exists yet.
 - VAT invoice tax breakdown is still blocked, so VAT cutover can only start
   with manual tax opening balances.
 - 2307 attachments and finalized SAWT/2307 exports are not yet implemented.

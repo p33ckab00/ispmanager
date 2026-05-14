@@ -134,6 +134,13 @@ class CutoverBalanceScheduleLineForm(forms.ModelForm):
             'reference',
             'counterparty_name',
             'statement_date',
+            'quantity',
+            'unit',
+            'location',
+            'asset_identifier',
+            'acquisition_date',
+            'useful_life_months',
+            'maturity_date',
             'debit',
             'credit',
             'source_document_number',
@@ -141,10 +148,15 @@ class CutoverBalanceScheduleLineForm(forms.ModelForm):
         ]
         widgets = {
             'statement_date': forms.DateInput(attrs={'type': 'date'}),
-            'label': forms.TextInput(attrs={'placeholder': 'Cash count, BDO ending balance, GCash clearing, vendor, or tax account'}),
-            'reference': forms.TextInput(attrs={'placeholder': 'Statement number, wallet report, invoice, or worksheet'}),
-            'counterparty_name': forms.TextInput(attrs={'placeholder': 'Vendor/payee for AP; optional otherwise'}),
-            'source_document_number': forms.TextInput(attrs={'placeholder': 'Return, ledger, worksheet, or statement reference'}),
+            'acquisition_date': forms.DateInput(attrs={'type': 'date'}),
+            'maturity_date': forms.DateInput(attrs={'type': 'date'}),
+            'label': forms.TextInput(attrs={'placeholder': 'Cash count, CPE batch, asset, lender, equity support, or tax account'}),
+            'reference': forms.TextInput(attrs={'placeholder': 'Statement, inventory count, asset register, loan, invoice, or worksheet'}),
+            'counterparty_name': forms.TextInput(attrs={'placeholder': 'Vendor/payee/lender; required for AP and loan schedules'}),
+            'unit': forms.TextInput(attrs={'placeholder': 'pcs, meters, units, lots'}),
+            'location': forms.TextInput(attrs={'placeholder': 'Warehouse, POP, cabinet, site, or area'}),
+            'asset_identifier': forms.TextInput(attrs={'placeholder': 'Asset tag, serial number, batch, or loan account'}),
+            'source_document_number': forms.TextInput(attrs={'placeholder': 'Return, ledger, deed, asset register, loan agreement, or worksheet'}),
             'notes': forms.Textarea(attrs={'rows': 3}),
         }
 
@@ -158,12 +170,17 @@ class CutoverBalanceScheduleLineForm(forms.ModelForm):
             ).order_by('code')
         self.fields['debit'].required = False
         self.fields['credit'].required = False
+        self.fields['quantity'].required = False
+        self.fields['useful_life_months'].required = False
 
     def clean_debit(self):
         return self.cleaned_data.get('debit') or Decimal('0.00')
 
     def clean_credit(self):
         return self.cleaned_data.get('credit') or Decimal('0.00')
+
+    def clean_quantity(self):
+        return self.cleaned_data.get('quantity') or Decimal('0.0000')
 
 
 class IncomeForm(forms.ModelForm):

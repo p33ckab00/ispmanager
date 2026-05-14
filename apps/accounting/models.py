@@ -905,6 +905,10 @@ class CutoverBalanceSchedule(models.Model):
         ('wallet_gateway', 'Wallet / Gateway Clearing'),
         ('accounts_payable', 'Accounts Payable'),
         ('tax_balance', 'Tax Balances'),
+        ('inventory', 'Inventory'),
+        ('fixed_assets', 'Fixed Assets and Depreciation'),
+        ('loans_payable', 'Loans Payable'),
+        ('equity_balance', 'Equity Balances'),
     ]
     STATUS_CHOICES = [
         ('draft', 'Draft'),
@@ -1001,6 +1005,13 @@ class CutoverBalanceScheduleLine(models.Model):
     reference = models.CharField(max_length=255, blank=True)
     counterparty_name = models.CharField(max_length=255, blank=True)
     statement_date = models.DateField(null=True, blank=True)
+    quantity = models.DecimalField(max_digits=14, decimal_places=4, default=Decimal('0.0000'))
+    unit = models.CharField(max_length=40, blank=True)
+    location = models.CharField(max_length=255, blank=True)
+    asset_identifier = models.CharField(max_length=120, blank=True)
+    acquisition_date = models.DateField(null=True, blank=True)
+    useful_life_months = models.PositiveIntegerField(null=True, blank=True)
+    maturity_date = models.DateField(null=True, blank=True)
     debit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
     credit = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
     source_document_number = models.CharField(max_length=120, blank=True)
@@ -1037,6 +1048,13 @@ class CutoverBalanceScheduleLine(models.Model):
             raise ValidationError('Schedule line account must belong to the same entity.')
         if self.schedule_id and self.schedule.schedule_type == 'accounts_payable' and not self.counterparty_name:
             raise ValidationError('Accounts payable schedule lines require a vendor or payee name.')
+        if self.schedule_id and self.schedule.schedule_type == 'inventory':
+            if (self.quantity or Decimal('0.0000')) <= Decimal('0.0000'):
+                raise ValidationError('Inventory schedule lines require quantity.')
+            if not self.unit:
+                raise ValidationError('Inventory schedule lines require a unit of measure.')
+        if self.schedule_id and self.schedule.schedule_type == 'loans_payable' and not self.counterparty_name:
+            raise ValidationError('Loan schedule lines require a lender name.')
 
     def _assert_schedule_mutable(self):
         if not self.schedule_id:

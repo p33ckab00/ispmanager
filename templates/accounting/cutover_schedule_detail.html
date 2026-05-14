@@ -75,6 +75,18 @@
             <p class="font-medium">{{ line.label }}</p>
             <p class="text-xs text-gray-400">{{ line.reference|default:"-" }}</p>
             {% if line.counterparty_name %}<p class="text-xs text-gray-500">{{ line.counterparty_name }}</p>{% endif %}
+            {% if line.quantity %}
+            <p class="text-xs text-gray-500">Qty {{ line.quantity }} {{ line.unit }}</p>
+            {% endif %}
+            {% if line.location %}<p class="text-xs text-gray-500">{{ line.location }}</p>{% endif %}
+            {% if line.asset_identifier %}<p class="text-xs text-gray-500">{{ line.asset_identifier }}</p>{% endif %}
+            {% if line.acquisition_date or line.useful_life_months %}
+            <p class="text-xs text-gray-500">
+              {% if line.acquisition_date %}Acquired {{ line.acquisition_date }}{% endif %}
+              {% if line.useful_life_months %}{% if line.acquisition_date %} · {% endif %}Life {{ line.useful_life_months }} months{% endif %}
+            </p>
+            {% endif %}
+            {% if line.maturity_date %}<p class="text-xs text-gray-500">Matures {{ line.maturity_date }}</p>{% endif %}
           </td>
           <td class="px-4 py-3 text-right">{% if line.debit %}PHP {{ line.debit }}{% else %}-{% endif %}</td>
           <td class="px-4 py-3 text-right">{% if line.credit %}PHP {{ line.credit }}{% else %}-{% endif %}</td>
