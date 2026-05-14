@@ -23,7 +23,11 @@ from apps.accounting.models import (
 )
 from apps.accounting.services import (
     approve_cutover_plan,
+    build_balance_sheet_report,
     build_cutover_readiness,
+    build_general_ledger_report,
+    build_income_statement_report,
+    build_trial_balance_report,
     create_accounting_foundation,
     create_cutover_balance_schedule,
     create_cutover_plan,
@@ -167,6 +171,97 @@ class AccountingV2FoundationTests(TestCase):
 
         with self.assertRaisesMessage(ValidationError, 'either a debit or a credit'):
             bad_line.full_clean()
+
+
+class AccountingV2FinancialStatementTests(TestCase):
+    def _foundation(self):
+        return create_accounting_foundation(
+            entity_name='Statement ISP',
+            template_key='isp_non_vat_sole_prop',
+            fiscal_year=2026,
+        )['entity']
+
+    def _post_sample_activity(self):
+        entity = self._foundation()
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        revenue = ChartOfAccount.objects.get(entity=entity, code='4000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6010')
+        opening = create_manual_journal_entry(
+            entity,
+            date(2026, 1, 1),
+            'Opening capital',
+            [
+                {'account': cash, 'debit': Decimal('1000.00')},
+                {'account': capital, 'credit': Decimal('1000.00')},
+            ],
+        )
+        sale = create_manual_journal_entry(
+            entity,
+            date(2026, 1, 10),
+            'Monthly service revenue',
+            [
+                {'account': cash, 'debit': Decimal('500.00')},
+                {'account': revenue, 'credit': Decimal('500.00')},
+            ],
+        )
+        utility = create_manual_journal_entry(
+            entity,
+            date(2026, 1, 15),
+            'Power bill',
+            [
+                {'account': expense, 'debit': Decimal('120.00')},
+                {'account': cash, 'credit': Decimal('120.00')},
+            ],
+        )
+        for journal_entry in (opening, sale, utility):
+            post_journal_entry(journal_entry)
+        return entity, cash
+
+    def test_trial_balance_uses_posted_journals_only_and_balances(self):
+        entity, _cash = self._post_sample_activity()
+
+        report = build_trial_balance_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+        )
+
+        self.assertTrue(report['is_balanced'])
+        self.assertEqual(report['total_debit'], Decimal('1620.00'))
+        self.assertEqual(report['total_credit'], Decimal('1620.00'))
+
+    def test_income_statement_and_balance_sheet_include_current_earnings(self):
+        entity, _cash = self._post_sample_activity()
+
+        income = build_income_statement_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+        )
+        balance_sheet = build_balance_sheet_report(entity, as_of_date=date(2026, 1, 31))
+
+        self.assertEqual(income['totals']['revenue'], Decimal('500.00'))
+        self.assertEqual(income['totals']['expense'], Decimal('120.00'))
+        self.assertEqual(income['net_income'], Decimal('380.00'))
+        self.assertEqual(balance_sheet['totals']['asset'], Decimal('1380.00'))
+        self.assertEqual(balance_sheet['totals']['equity'], Decimal('1380.00'))
+        self.assertTrue(balance_sheet['is_balanced'])
+
+    def test_general_ledger_carries_opening_balance_into_date_range(self):
+        entity, cash = self._post_sample_activity()
+
+        report = build_general_ledger_report(
+            entity,
+            start_date=date(2026, 1, 2),
+            end_date=date(2026, 1, 31),
+            account=cash,
+        )
+        section = report['sections'][0]
+
+        self.assertEqual(section['opening_balance'], Decimal('1000.00'))
+        self.assertEqual(section['closing_balance'], Decimal('1380.00'))
+        self.assertEqual(len(section['lines']), 2)
 
 
 class AccountingV2CutoverTests(TestCase):

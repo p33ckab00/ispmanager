@@ -1392,6 +1392,226 @@ def mark_accounting_live(plan, live_by=None):
     return plan
 
 
+def _posted_line_criteria(entity, start_date=None, end_date=None):
+    criteria = Q(
+        journal_lines__journal_entry__entity=entity,
+        journal_lines__journal_entry__status='posted',
+    )
+    if start_date:
+        criteria &= Q(journal_lines__journal_entry__entry_date__gte=start_date)
+    if end_date:
+        criteria &= Q(journal_lines__journal_entry__entry_date__lte=end_date)
+    return criteria
+
+
+def _line_queryset(entity, start_date=None, end_date=None):
+    qs = (
+        JournalLine.objects
+        .filter(
+            journal_entry__entity=entity,
+            journal_entry__status='posted',
+        )
+        .select_related('journal_entry', 'account')
+    )
+    if start_date:
+        qs = qs.filter(journal_entry__entry_date__gte=start_date)
+    if end_date:
+        qs = qs.filter(journal_entry__entry_date__lte=end_date)
+    return qs
+
+
+def _statement_balance(account, debit, credit):
+    debit = debit or Decimal('0.00')
+    credit = credit or Decimal('0.00')
+    if account.account_type in ('asset', 'direct_cost', 'expense', 'other_expense'):
+        return debit - credit
+    return credit - debit
+
+
+def _account_activity_rows(entity, start_date=None, end_date=None, account_types=None, include_zero=False):
+    line_filter = _posted_line_criteria(entity, start_date=start_date, end_date=end_date)
+    accounts = ChartOfAccount.objects.filter(entity=entity, is_active=True)
+    if account_types:
+        accounts = accounts.filter(account_type__in=account_types)
+    accounts = accounts.annotate(
+        debit_total=Sum('journal_lines__debit', filter=line_filter),
+        credit_total=Sum('journal_lines__credit', filter=line_filter),
+    ).order_by('code')
+
+    rows = []
+    for account in accounts:
+        debit = account.debit_total or Decimal('0.00')
+        credit = account.credit_total or Decimal('0.00')
+        if not include_zero and debit == Decimal('0.00') and credit == Decimal('0.00'):
+            continue
+        rows.append({
+            'account': account,
+            'debit': debit,
+            'credit': credit,
+            'balance': _statement_balance(account, debit, credit),
+        })
+    return rows
+
+
+def build_trial_balance_report(entity, start_date=None, end_date=None):
+    rows = _account_activity_rows(entity, start_date=start_date, end_date=end_date)
+    total_debit = sum((row['debit'] for row in rows), Decimal('0.00'))
+    total_credit = sum((row['credit'] for row in rows), Decimal('0.00'))
+    return {
+        'rows': rows,
+        'total_debit': total_debit,
+        'total_credit': total_credit,
+        'is_balanced': total_debit == total_credit,
+        'start_date': start_date,
+        'end_date': end_date,
+    }
+
+
+def build_income_statement_report(entity, start_date=None, end_date=None):
+    rows = _account_activity_rows(
+        entity,
+        start_date=start_date,
+        end_date=end_date,
+        account_types=['revenue', 'direct_cost', 'expense', 'other_income', 'other_expense'],
+    )
+    sections = {
+        'revenue': [],
+        'direct_cost': [],
+        'expense': [],
+        'other_income': [],
+        'other_expense': [],
+    }
+    for row in rows:
+        sections[row['account'].account_type].append(row)
+
+    totals = {
+        key: sum((row['balance'] for row in value), Decimal('0.00'))
+        for key, value in sections.items()
+    }
+    gross_profit = totals['revenue'] - totals['direct_cost']
+    operating_income = gross_profit - totals['expense']
+    net_income = operating_income + totals['other_income'] - totals['other_expense']
+    return {
+        'sections': sections,
+        'totals': totals,
+        'gross_profit': gross_profit,
+        'operating_income': operating_income,
+        'net_income': net_income,
+        'start_date': start_date,
+        'end_date': end_date,
+    }
+
+
+def build_balance_sheet_report(entity, as_of_date=None):
+    balance_rows = _account_activity_rows(
+        entity,
+        end_date=as_of_date,
+        account_types=['asset', 'liability', 'equity'],
+    )
+    sections = {
+        'asset': [],
+        'liability': [],
+        'equity': [],
+    }
+    for row in balance_rows:
+        sections[row['account'].account_type].append(row)
+
+    income_report = build_income_statement_report(entity, end_date=as_of_date)
+    current_earnings = income_report['net_income']
+    if current_earnings != Decimal('0.00'):
+        sections['equity'].append({
+            'account': None,
+            'label': 'Unclosed Current Earnings',
+            'debit': Decimal('0.00'),
+            'credit': Decimal('0.00'),
+            'balance': current_earnings,
+        })
+
+    totals = {
+        key: sum((row['balance'] for row in value), Decimal('0.00'))
+        for key, value in sections.items()
+    }
+    total_liabilities_equity = totals['liability'] + totals['equity']
+    difference = totals['asset'] - total_liabilities_equity
+    return {
+        'sections': sections,
+        'totals': totals,
+        'total_liabilities_equity': total_liabilities_equity,
+        'difference': difference,
+        'is_balanced': difference == Decimal('0.00'),
+        'as_of_date': as_of_date,
+        'current_earnings': current_earnings,
+    }
+
+
+def build_general_ledger_report(entity, start_date=None, end_date=None, account=None):
+    accounts = ChartOfAccount.objects.filter(entity=entity, is_active=True).order_by('code')
+    if account:
+        accounts = accounts.filter(pk=account.pk)
+    line_qs = _line_queryset(entity, start_date=start_date, end_date=end_date)
+    if account:
+        line_qs = line_qs.filter(account=account)
+    line_qs = line_qs.order_by(
+        'account__code',
+        'journal_entry__entry_date',
+        'journal_entry__entry_number',
+        'line_number',
+        'id',
+    )
+
+    lines_by_account = {}
+    for line in line_qs:
+        lines_by_account.setdefault(line.account_id, []).append(line)
+
+    sections = []
+    for item in accounts:
+        opening_balance = Decimal('0.00')
+        if start_date:
+            opening_totals = (
+                JournalLine.objects
+                .filter(
+                    account=item,
+                    journal_entry__entity=entity,
+                    journal_entry__status='posted',
+                    journal_entry__entry_date__lt=start_date,
+                )
+                .aggregate(debit_total=Sum('debit'), credit_total=Sum('credit'))
+            )
+            opening_balance = _statement_balance(
+                item,
+                opening_totals['debit_total'] or Decimal('0.00'),
+                opening_totals['credit_total'] or Decimal('0.00'),
+            )
+
+        running_balance = opening_balance
+        ledger_lines = []
+        for line in lines_by_account.get(item.pk, []):
+            movement = _statement_balance(item, line.debit, line.credit)
+            running_balance += movement
+            ledger_lines.append({
+                'line': line,
+                'journal_entry': line.journal_entry,
+                'debit': line.debit,
+                'credit': line.credit,
+                'movement': movement,
+                'running_balance': running_balance,
+            })
+        if ledger_lines or opening_balance != Decimal('0.00'):
+            sections.append({
+                'account': item,
+                'opening_balance': opening_balance,
+                'lines': ledger_lines,
+                'closing_balance': running_balance,
+            })
+
+    return {
+        'sections': sections,
+        'start_date': start_date,
+        'end_date': end_date,
+        'account': account,
+    }
+
+
 def _resolve_account(entity, account):
     if isinstance(account, ChartOfAccount):
         if account.entity_id != entity.id:

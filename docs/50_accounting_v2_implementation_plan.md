@@ -106,6 +106,9 @@ and account-level cutover reconciliation.
 Slice 2E is now implemented for the cutover approval/live gate: readiness now
 requires a posted opening journal, approved/live cutovers are locked, and
 Accounting settings can move to `live` through an explicit go-live action.
+Slice 3A is now implemented for financial statement foundations: posted-only
+Trial Balance service math, General Ledger, Income Statement, and Balance Sheet
+pages with current earnings included in equity for unclosed income accounts.
 
 ## 2. Locked Decisions
 
@@ -317,6 +320,18 @@ schedule differences, and full subledger engines.
 Add General Ledger, Balance Sheet, Income Statement, Cash Flow, Changes in
 Equity, AR aging, AP aging, VAT ledger, fixed asset schedule, depreciation
 schedule, and CPE/inventory schedule.
+
+Slice 3A is implemented as the statement foundation:
+
+- Trial Balance now uses shared report service logic.
+- General Ledger page supports date range and account filters with opening and
+  running balances.
+- Income Statement page reports revenue, direct costs, operating expenses,
+  other income/expenses, and net income from posted journals.
+- Balance Sheet page reports assets, liabilities, equity, and unclosed current
+  earnings so the report can balance before formal closing entries exist.
+- Remaining Slice 3 work starts with Cash Flow, Changes in Equity, AR/AP aging,
+  VAT ledgers, and richer report exports.
 
 ### Slice 4 - BIR Books and Guides
 

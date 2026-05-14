@@ -41,9 +41,13 @@ from apps.accounting.services import (
     build_cutover_balance_schedule_reconciliation,
     build_cutover_balance_schedule_summary,
     approve_cutover_plan,
+    build_balance_sheet_report,
     create_accounting_foundation,
     create_cutover_balance_schedule,
     create_cutover_plan,
+    build_general_ledger_report,
+    build_income_statement_report,
+    build_trial_balance_report,
     create_manual_journal_entry,
     create_opening_balance_journal,
     generate_cutover_reconciliation_snapshot,
@@ -128,6 +132,15 @@ def _money(value):
         return Decimal(str(value)).quantize(Decimal('0.01'))
     except (InvalidOperation, ValueError):
         raise ValidationError('Line amounts must be valid numbers.')
+
+
+def _parse_report_date(value, fallback=None):
+    if not value:
+        return fallback
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return fallback
 
 
 def _cutover_is_locked(plan):
@@ -335,43 +348,79 @@ def trial_balance(request):
     period_id = request.GET.get('period')
     periods = AccountingPeriod.objects.filter(entity=entity).order_by('-start_date')
     period = periods.filter(pk=period_id).first() if period_id else periods.first()
-    rows = []
-    total_debit = Decimal('0.00')
-    total_credit = Decimal('0.00')
-    if period:
-        line_filter = Q(
-            journal_lines__journal_entry__entity=entity,
-            journal_lines__journal_entry__status='posted',
-            journal_lines__journal_entry__entry_date__gte=period.start_date,
-            journal_lines__journal_entry__entry_date__lte=period.end_date,
-        )
-        accounts = ChartOfAccount.objects.filter(entity=entity, is_active=True).annotate(
-            debit_total=Sum('journal_lines__debit', filter=line_filter),
-            credit_total=Sum('journal_lines__credit', filter=line_filter),
-        ).order_by('code')
-        for account in accounts:
-            debit = account.debit_total or Decimal('0.00')
-            credit = account.credit_total or Decimal('0.00')
-            if not debit and not credit:
-                continue
-            total_debit += debit
-            total_credit += credit
-            balance = debit - credit if account.normal_balance == 'debit' else credit - debit
-            rows.append({
-                'account': account,
-                'debit': debit,
-                'credit': credit,
-                'balance': balance,
-            })
+    report = build_trial_balance_report(
+        entity,
+        start_date=period.start_date if period else None,
+        end_date=period.end_date if period else None,
+    )
 
     return render(request, 'accounting/trial_balance.html', {
         'entity': entity,
         'periods': periods,
         'period': period,
-        'rows': rows,
-        'total_debit': total_debit,
-        'total_credit': total_credit,
-        'is_balanced': total_debit == total_credit,
+        'report': report,
+        'rows': report['rows'],
+        'total_debit': report['total_debit'],
+        'total_credit': report['total_credit'],
+        'is_balanced': report['is_balanced'],
+    })
+
+
+@login_required
+def general_ledger(request):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    today = date.today()
+    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
+    end_date = _parse_report_date(request.GET.get('end'), today)
+    account_id = request.GET.get('account')
+    accounts = ChartOfAccount.objects.filter(entity=entity, is_active=True).order_by('code')
+    selected_account = accounts.filter(pk=account_id).first() if account_id else None
+    report = build_general_ledger_report(
+        entity,
+        start_date=start_date,
+        end_date=end_date,
+        account=selected_account,
+    )
+    return render(request, 'accounting/general_ledger.html', {
+        'entity': entity,
+        'accounts': accounts,
+        'selected_account': selected_account,
+        'start_date': start_date,
+        'end_date': end_date,
+        'report': report,
+    })
+
+
+@login_required
+def income_statement(request):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    today = date.today()
+    start_date = _parse_report_date(request.GET.get('start'), today.replace(month=1, day=1))
+    end_date = _parse_report_date(request.GET.get('end'), today)
+    report = build_income_statement_report(entity, start_date=start_date, end_date=end_date)
+    return render(request, 'accounting/income_statement.html', {
+        'entity': entity,
+        'start_date': start_date,
+        'end_date': end_date,
+        'report': report,
+    })
+
+
+@login_required
+def balance_sheet(request):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    as_of_date = _parse_report_date(request.GET.get('as_of'), date.today())
+    report = build_balance_sheet_report(entity, as_of_date=as_of_date)
+    return render(request, 'accounting/balance_sheet.html', {
+        'entity': entity,
+        'as_of_date': as_of_date,
+        'report': report,
     })
 
 
