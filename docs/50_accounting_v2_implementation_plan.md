@@ -103,6 +103,9 @@ opening balance lines with account-level differences surfaced in readiness.
 Slice 2D is now implemented for inventory, fixed assets, accumulated
 depreciation, loans, and equity balance schedules, with operational metadata
 and account-level cutover reconciliation.
+Slice 2E is now implemented for the cutover approval/live gate: readiness now
+requires a posted opening journal, approved/live cutovers are locked, and
+Accounting settings can move to `live` through an explicit go-live action.
 
 ## 2. Locked Decisions
 
@@ -305,9 +308,9 @@ The detailed Slice 2 implementation plan is in
 
 Slice 2A should start with cutover plan setup, opening balance imports, opening
 balance lines, balanced draft opening journal generation, and a readiness page.
-Slice 2A through 2D foundations are implemented. Remaining Slice 2 work starts
-with final cutover approval, live gating, lock controls, and post-cutover
-blocking warnings.
+Slice 2A through 2E foundations are implemented. Remaining cutover hardening
+starts with formal period close, cutover exception waivers, richer export of
+schedule differences, and full subledger engines.
 
 ### Slice 3 - Financial Statements and Subledgers
 

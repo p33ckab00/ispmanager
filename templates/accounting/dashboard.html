@@ -20,6 +20,12 @@
 
 {% include "partials/messages.html" %}
 
+{% if accounting_settings.setup_status == 'live' and source_blocked_count %}
+<div class="bg-orange-50 border border-orange-100 rounded-xl p-4 mb-6 text-sm text-orange-700">
+  {{ source_blocked_count }} source posting(s) are blocked after Accounting v2 go-live. Open the review queue before closing the period.
+</div>
+{% endif %}
+
 <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
   <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
     <div>

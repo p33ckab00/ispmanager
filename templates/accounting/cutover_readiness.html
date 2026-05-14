@@ -24,11 +24,39 @@
         {% if readiness.all_passed %}Ready for accountant review{% else %}Open items remain{% endif %}
       </p>
     </div>
-    {% if readiness.opening_journal %}
-    <a href="{% url 'accounting-journal-detail' readiness.opening_journal.pk %}" class="text-sm text-blue-600 hover:underline">{{ readiness.opening_journal.entry_number }}</a>
-    {% endif %}
+    <div class="flex flex-wrap gap-2 items-center justify-end">
+      {% if readiness.opening_journal %}
+      <a href="{% url 'accounting-journal-detail' readiness.opening_journal.pk %}" class="text-sm text-blue-600 hover:underline">{{ readiness.opening_journal.entry_number }}</a>
+      {% endif %}
+      {% if plan and perms.accounting.manage_cutoverplan %}
+        {% if readiness.can_mark_ready %}
+        <form method="post" action="{% url 'accounting-cutover-mark-ready' %}">
+          {% csrf_token %}
+          <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Mark Ready</button>
+        </form>
+        {% endif %}
+        {% if readiness.can_approve %}
+        <form method="post" action="{% url 'accounting-cutover-approve' %}">
+          {% csrf_token %}
+          <button type="submit" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Approve</button>
+        </form>
+        {% endif %}
+        {% if readiness.can_go_live %}
+        <form method="post" action="{% url 'accounting-cutover-go-live' %}">
+          {% csrf_token %}
+          <button type="submit" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Go Live</button>
+        </form>
+        {% endif %}
+      {% endif %}
+    </div>
   </div>
 </div>
+
+{% if plan.status == 'live' and readiness.blocked_source_count %}
+<div class="bg-orange-50 border border-orange-100 rounded-xl p-4 mb-6 text-sm text-orange-700">
+  {{ readiness.blocked_source_count }} source posting(s) are blocked after go-live. Review them before closing the period.
+</div>
+{% endif %}
 
 <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
   <table class="w-full text-sm">

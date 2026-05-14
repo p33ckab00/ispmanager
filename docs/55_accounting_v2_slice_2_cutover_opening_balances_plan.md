@@ -142,7 +142,31 @@ Still not included in Slice 2D:
 - Full fixed asset/depreciation subledger and depreciation calculator.
 - Full loan amortization ledger.
 - CSV/XLSX export of schedule differences.
-- Final cutover approval/live gate.
+
+Slice 2E has also been implemented for final cutover approval and go-live.
+
+Implemented:
+
+- Readiness now requires the opening journal to be posted before final cutover
+  approval/live.
+- Cutover dashboard and readiness page expose explicit Mark Ready, Approve
+  Cutover, and Go Live actions.
+- `mark_cutover_ready`, `approve_cutover_plan`, and `mark_accounting_live`
+  service functions enforce readiness before state changes.
+- Go-live moves `AccountingSettings.setup_status` from `foundation_ready` to
+  `live`.
+- Go-live marks the linked opening balance import as posted after the opening
+  journal is posted.
+- Approved and live cutover plans lock opening balance imports, opening balance
+  lines, new schedules, schedule validation, and schedule line edits.
+- Accounting dashboard and cutover readiness show post-live blocked source
+  posting warnings.
+
+Still not included in Slice 2E:
+
+- Formal period close workflow.
+- Waiver workflow for intentionally accepted cutover exceptions.
+- CSV/XLSX export of schedule differences.
 
 ## Locked Decisions
 
@@ -233,14 +257,17 @@ Add final readiness gate and live status transition.
 
 Deliverables:
 
-- all required reconciliation checks green or explicitly waived
-- opening journal posted
-- cutover lock that prevents editing finalized opening imports
-- Accounting settings status can move from `foundation_ready` to `live`
-- post-cutover dashboard warning if source postings are blocked
+- all required reconciliation checks green or explicitly waived: implemented
+  for required checks without waiver support yet
+- opening journal posted: implemented as a readiness requirement
+- cutover lock that prevents editing finalized opening imports: implemented
+  for approved/live cutovers
+- Accounting settings status can move from `foundation_ready` to `live`:
+  implemented
+- post-cutover dashboard warning if source postings are blocked: implemented
 - post-cutover source posting policy:
-  - draft-only
-  - block official close if unreconciled
+  - draft-only: already used by source posting services
+  - block official close if unreconciled: deferred until formal period close
 
 ## Data Model Plan
 
@@ -619,6 +646,15 @@ Resolved in Slice 2D:
 - Equity schedules reconcile capital, retained earnings/current earnings, and
   related equity accounts by account.
 
+Resolved in Slice 2E:
+
+- Cutover approval and go-live state transitions now exist.
+- Readiness requires a posted opening journal before final approval/live.
+- Accounting settings move to `live` only through the go-live service.
+- Approved and live cutover plans lock opening balance and schedule edits.
+- Post-live blocked source postings are surfaced on the accounting and cutover
+  dashboards.
+
 Remaining gaps:
 
 - No account mapping table exists beyond service-level default posting codes.
@@ -630,8 +666,7 @@ Remaining gaps:
 - VAT invoice tax breakdown is still blocked, so VAT cutover can only start
   with manual tax opening balances.
 - 2307 attachments and finalized SAWT/2307 exports are not yet implemented.
-- Source posting backfill now exists, but Slice 2 must prevent pre-cutover
-  backfill from becoming duplicate official GL history after cutover is live.
+- Formal period close and cutover exception-waiver workflows do not exist yet.
 - PostgreSQL test database creation is blocked in the current environment, so
   implementation verification still needs rollback smokes unless DB privileges
   are updated.

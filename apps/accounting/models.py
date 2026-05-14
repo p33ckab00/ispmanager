@@ -10,6 +10,7 @@ from apps.billing.models import Payment
 
 
 MONEY_ZERO = Decimal('0.00')
+CUTOVER_LOCKED_STATUSES = ('approved', 'live')
 
 
 class AccountingEntity(models.Model):
@@ -650,6 +651,14 @@ class OpeningBalanceImport(models.Model):
             raise ValidationError('Posted opening balance imports must be linked to a journal entry.')
 
     def _assert_mutable(self):
+        if (
+            self.cutover_plan_id
+            and CutoverPlan.objects.filter(
+                pk=self.cutover_plan_id,
+                status__in=CUTOVER_LOCKED_STATUSES,
+            ).exists()
+        ):
+            raise ValidationError('Approved or live cutover plans are locked.')
         if not self.pk:
             return
         old = (
@@ -766,7 +775,9 @@ class OpeningBalanceLine(models.Model):
     def _assert_import_mutable(self):
         if not self.import_batch_id:
             return
-        import_batch = OpeningBalanceImport.objects.select_related('journal_entry').get(pk=self.import_batch_id)
+        import_batch = OpeningBalanceImport.objects.select_related('cutover_plan', 'journal_entry').get(pk=self.import_batch_id)
+        if import_batch.cutover_plan.status in CUTOVER_LOCKED_STATUSES:
+            raise ValidationError('Approved or live cutover plans are locked.')
         if import_batch.status in ('journal_created', 'posted', 'voided') or import_batch.journal_entry_id:
             raise ValidationError('Opening balance lines linked to a journal are read-only.')
 
@@ -1061,6 +1072,11 @@ class CutoverBalanceScheduleLine(models.Model):
             return
         if CutoverBalanceSchedule.objects.filter(pk=self.schedule_id, status='voided').exists():
             raise ValidationError('Voided cutover balance schedules are read-only.')
+        if CutoverBalanceSchedule.objects.filter(
+            pk=self.schedule_id,
+            cutover_plan__status__in=CUTOVER_LOCKED_STATUSES,
+        ).exists():
+            raise ValidationError('Approved or live cutover plans are locked.')
 
     def save(self, *args, **kwargs):
         self._assert_schedule_mutable()

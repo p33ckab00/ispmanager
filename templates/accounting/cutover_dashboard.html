@@ -10,16 +10,56 @@
     <a href="{% url 'accounting-dashboard' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Accounting</a>
     <a href="{% url 'accounting-cutover-reconciliation' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Reconciliation</a>
     <a href="{% url 'accounting-cutover-schedule-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Schedules</a>
-    {% if perms.accounting.manage_cutoverplan %}
+    {% if perms.accounting.manage_cutoverplan and not cutover_locked %}
     <a href="{% url 'accounting-cutover-setup' %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Setup Cutover</a>
     {% endif %}
-    {% if plan and perms.accounting.manage_openingbalanceimport %}
+    {% if plan and perms.accounting.manage_openingbalanceimport and not cutover_locked %}
     <a href="{% url 'accounting-opening-balance-import-add' %}" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Add Opening Import</a>
     {% endif %}
   </div>
 </div>
 
 {% include "partials/messages.html" %}
+
+{% if plan and perms.accounting.manage_cutoverplan %}
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <div>
+      <h3 class="text-lg font-semibold text-gray-800">Cutover Gate</h3>
+      <p class="text-sm text-gray-500">Approval locks opening balances and schedules. Go live updates Accounting v2 status after the opening journal is posted.</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      {% if readiness.can_mark_ready %}
+      <form method="post" action="{% url 'accounting-cutover-mark-ready' %}">
+        {% csrf_token %}
+        <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Mark Ready</button>
+      </form>
+      {% endif %}
+      {% if readiness.can_approve %}
+      <form method="post" action="{% url 'accounting-cutover-approve' %}">
+        {% csrf_token %}
+        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Approve Cutover</button>
+      </form>
+      {% endif %}
+      {% if readiness.can_go_live %}
+      <form method="post" action="{% url 'accounting-cutover-go-live' %}">
+        {% csrf_token %}
+        <button type="submit" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg">Go Live</button>
+      </form>
+      {% endif %}
+      {% if not readiness.can_mark_ready and not readiness.can_approve and not readiness.can_go_live %}
+      <span class="bg-gray-100 text-gray-600 text-sm font-semibold px-4 py-2 rounded-lg">{{ plan.get_status_display }}</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if plan.status == 'live' and readiness.blocked_source_count %}
+<div class="bg-orange-50 border border-orange-100 rounded-xl p-4 mb-6 text-sm text-orange-700">
+  {{ readiness.blocked_source_count }} source posting(s) are blocked after go-live. Review them before closing the period.
+</div>
+{% endif %}
 
 <div class="grid gap-4 md:grid-cols-4 mb-6">
   <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
@@ -46,7 +86,7 @@
   <div class="flex items-center justify-between mb-4">
     <div>
       <h3 class="text-lg font-semibold text-gray-800">Readiness Checks</h3>
-      <p class="text-sm text-gray-500">Slice 2A validates setup, balanced opening imports, draft journal, and basic AR/credit presence.</p>
+      <p class="text-sm text-gray-500">Readiness validates reconciled schedules, subscriber balances, and a posted opening journal before go-live.</p>
     </div>
     <a href="{% url 'accounting-cutover-readiness' %}" class="text-sm text-blue-600 hover:underline">Open readiness page</a>
   </div>
@@ -71,7 +111,7 @@
       <h3 class="text-lg font-semibold text-gray-800">Opening Balance Imports</h3>
       <p class="text-sm text-gray-500">Manual batches can be validated and converted into draft opening journals.</p>
     </div>
-    {% if plan and perms.accounting.manage_openingbalanceimport %}
+    {% if plan and perms.accounting.manage_openingbalanceimport and not cutover_locked %}
     <a href="{% url 'accounting-opening-balance-import-add' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Add Import</a>
     {% endif %}
   </div>

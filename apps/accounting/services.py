@@ -16,6 +16,7 @@ from apps.accounting.models import (
     AccountingSourcePosting,
     AlphanumericTaxCode,
     ChartOfAccount,
+    CUTOVER_LOCKED_STATUSES,
     CutoverBalanceSchedule,
     CutoverBalanceScheduleLine,
     CutoverPlan,
@@ -441,6 +442,8 @@ def get_active_cutover_balance_schedule(plan, schedule_type):
 def create_cutover_plan(entity, cutover_date, prepared_by=None, notes='', source_policy='opening_balances_only_pre_cutover'):
     plan = get_active_cutover_plan(entity)
     if plan:
+        if plan.status in CUTOVER_LOCKED_STATUSES:
+            raise ValidationError('Approved or live cutover plans are locked.')
         plan.cutover_date = cutover_date
         plan.source_policy = source_policy
         plan.notes = notes
@@ -471,6 +474,8 @@ def create_cutover_plan(entity, cutover_date, prepared_by=None, notes='', source
 @transaction.atomic
 def create_cutover_balance_schedule(plan, schedule_type, created_by=None, notes=''):
     get_cutover_balance_schedule_config(schedule_type)
+    if plan.status in CUTOVER_LOCKED_STATUSES:
+        raise ValidationError('Approved or live cutover plans are locked.')
     schedule = get_active_cutover_balance_schedule(plan, schedule_type)
     if schedule:
         if notes:
@@ -601,6 +606,8 @@ def validate_cutover_balance_schedule(schedule):
     )
     if schedule.status == 'voided':
         raise ValidationError('Voided cutover balance schedules cannot be validated.')
+    if schedule.cutover_plan.status in CUTOVER_LOCKED_STATUSES:
+        raise ValidationError('Approved or live cutover plans are locked.')
 
     errors = []
     lines = list(schedule.lines.select_related('account').order_by('account__code', 'label', 'id'))
@@ -751,6 +758,8 @@ def validate_opening_balance_import(import_batch):
     )
     if import_batch.status in ('journal_created', 'posted', 'voided') or import_batch.journal_entry_id:
         raise ValidationError('Opening balance imports linked to a journal are read-only.')
+    if import_batch.cutover_plan.status in CUTOVER_LOCKED_STATUSES:
+        raise ValidationError('Approved or live cutover plans are locked.')
     refresh_opening_balance_totals(import_batch)
     errors = []
     lines = list(import_batch.lines.select_related('account', 'subscriber').order_by('id'))
@@ -812,6 +821,8 @@ def create_opening_balance_journal(import_batch, created_by=None):
     )
     if import_batch.status == 'voided':
         raise ValidationError('Voided opening balance imports cannot create journals.')
+    if import_batch.cutover_plan.status in CUTOVER_LOCKED_STATUSES:
+        raise ValidationError('Approved or live cutover plans are locked.')
     if import_batch.journal_entry_id:
         return import_batch.journal_entry
 
@@ -1180,6 +1191,12 @@ def build_cutover_readiness(entity):
         bool(opening_journal and opening_journal.is_balanced()),
         opening_journal.get_status_display() if opening_journal else 'No opening journal yet.',
     )
+    add(
+        'opening_journal_posted',
+        'Opening journal is posted',
+        bool(opening_journal and opening_journal.status == 'posted'),
+        opening_journal.get_status_display() if opening_journal else 'No opening journal yet.',
+    )
 
     inactive_lines = OpeningBalanceLine.objects.filter(import_batch__cutover_plan=plan, account__is_active=False).count()
     add('active_accounts', 'Opening lines use active accounts', inactive_lines == 0, f"{inactive_lines} inactive-account line(s).")
@@ -1253,6 +1270,23 @@ def build_cutover_readiness(entity):
             ),
         )
 
+    blocked_source_count = AccountingSourcePosting.objects.filter(
+        Q(entity=entity) | Q(entity__isnull=True),
+        status='blocked',
+    ).count()
+    try:
+        settings_status = entity.settings.setup_status
+    except AccountingSettings.DoesNotExist:
+        settings_status = ''
+    if plan.status == 'live' or settings_status == 'live':
+        add(
+            'post_cutover_blocked_source_postings',
+            'No blocked source postings after cutover live',
+            blocked_source_count == 0,
+            f"{blocked_source_count} blocked source posting(s).",
+            severity='warning',
+        )
+
     all_passed = all(item['passed'] for item in checks if item['severity'] == 'error')
     return {
         'checks': checks,
@@ -1263,7 +1297,99 @@ def build_cutover_readiness(entity):
         'customer_advance_total': customer_advance_total,
         'reconciliation_snapshot': latest_snapshot,
         'balance_schedule_summary': balance_schedule_summary,
+        'blocked_source_count': blocked_source_count,
+        'can_mark_ready': all_passed and plan.status in ('draft', 'reconciling'),
+        'can_approve': all_passed and plan.status == 'ready_for_review',
+        'can_go_live': all_passed and plan.status == 'approved',
     }
+
+
+def _readiness_failure_message(readiness):
+    failures = [
+        item['label']
+        for item in readiness['checks']
+        if item['severity'] == 'error' and not item['passed']
+    ]
+    if not failures:
+        return ''
+    return 'Cutover is not ready: ' + '; '.join(failures[:5])
+
+
+@transaction.atomic
+def mark_cutover_ready(plan, reviewed_by=None):
+    plan = CutoverPlan.objects.select_for_update().select_related('entity').get(pk=plan.pk)
+    if plan.status == 'voided':
+        raise ValidationError('Voided cutover plans cannot be marked ready.')
+    if plan.status == 'live':
+        raise ValidationError('Live cutover plans are already locked.')
+    readiness = build_cutover_readiness(plan.entity)
+    failure_message = _readiness_failure_message(readiness)
+    if failure_message:
+        raise ValidationError(failure_message)
+    if plan.status == 'approved':
+        return plan
+    plan.status = 'ready_for_review'
+    plan.reviewed_by = reviewed_by or plan.reviewed_by
+    plan.full_clean()
+    plan.save(update_fields=['status', 'reviewed_by', 'updated_at'])
+    return plan
+
+
+@transaction.atomic
+def approve_cutover_plan(plan, approved_by=None):
+    plan = CutoverPlan.objects.select_for_update().select_related('entity').get(pk=plan.pk)
+    if plan.status == 'voided':
+        raise ValidationError('Voided cutover plans cannot be approved.')
+    if plan.status == 'live':
+        raise ValidationError('Live cutover plans are already locked.')
+    if plan.status != 'ready_for_review':
+        raise ValidationError('Cutover plan must be ready for review before approval.')
+    readiness = build_cutover_readiness(plan.entity)
+    failure_message = _readiness_failure_message(readiness)
+    if failure_message:
+        raise ValidationError(failure_message)
+    plan.status = 'approved'
+    plan.reviewed_by = plan.reviewed_by or approved_by
+    plan.approved_by = approved_by or plan.approved_by
+    plan.approved_at = timezone.now()
+    plan.full_clean()
+    plan.save(update_fields=['status', 'reviewed_by', 'approved_by', 'approved_at', 'updated_at'])
+    return plan
+
+
+@transaction.atomic
+def mark_accounting_live(plan, live_by=None):
+    plan = CutoverPlan.objects.select_for_update().select_related('entity').get(pk=plan.pk)
+    if plan.status == 'voided':
+        raise ValidationError('Voided cutover plans cannot be moved live.')
+    if plan.status == 'live':
+        return plan
+    if plan.status != 'approved':
+        raise ValidationError('Cutover plan must be approved before going live.')
+    readiness = build_cutover_readiness(plan.entity)
+    failure_message = _readiness_failure_message(readiness)
+    if failure_message:
+        raise ValidationError(failure_message)
+    opening_journal = readiness.get('opening_journal')
+    if not opening_journal or opening_journal.status != 'posted':
+        raise ValidationError('Opening journal must be posted before Accounting v2 goes live.')
+
+    plan.status = 'live'
+    plan.approved_by = plan.approved_by or live_by
+    plan.approved_at = plan.approved_at or timezone.now()
+    plan.live_at = timezone.now()
+    plan.full_clean()
+    plan.save(update_fields=['status', 'approved_by', 'approved_at', 'live_at', 'updated_at'])
+
+    AccountingSettings.objects.update_or_create(
+        entity=plan.entity,
+        defaults={'setup_status': 'live'},
+    )
+    OpeningBalanceImport.objects.filter(
+        cutover_plan=plan,
+        journal_entry=opening_journal,
+    ).update(status='posted')
+    return plan
 
 
 def _resolve_account(entity, account):

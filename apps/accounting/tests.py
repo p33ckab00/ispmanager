@@ -22,6 +22,7 @@ from apps.accounting.models import (
     WithholdingTaxClass,
 )
 from apps.accounting.services import (
+    approve_cutover_plan,
     build_cutover_readiness,
     create_accounting_foundation,
     create_cutover_balance_schedule,
@@ -34,6 +35,8 @@ from apps.accounting.services import (
     create_opening_balance_journal,
     create_payment_source_draft,
     generate_cutover_reconciliation_snapshot,
+    mark_accounting_live,
+    mark_cutover_ready,
     post_journal_entry,
     refresh_opening_balance_totals,
     validate_cutover_balance_schedule,
@@ -284,7 +287,106 @@ class AccountingV2CutoverTests(TestCase):
         self.assertEqual(journal_entry.source_type, 'opening_balance')
         self.assertTrue(journal_entry.is_balanced())
         self.assertEqual(journal_entry.lines.count(), 2)
-        self.assertTrue(readiness['all_passed'])
+        self.assertFalse(readiness['all_passed'])
+        self.assertIn(
+            'opening_journal_posted',
+            [
+                item['key']
+                for item in readiness['checks']
+                if not item['passed'] and item['severity'] == 'error'
+            ],
+        )
+
+    def _cash_equity_cutover_ready(self, post_opening=False):
+        entity = self._foundation()
+        plan = self._plan(entity)
+        import_batch = self._import_batch(entity, plan)
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=cash,
+            line_type='cash',
+            debit=Decimal('1000.00'),
+            reference='Cash count',
+        )
+        OpeningBalanceLine.objects.create(
+            entity=entity,
+            import_batch=import_batch,
+            account=capital,
+            line_type='equity',
+            credit=Decimal('1000.00'),
+            reference='Owner capital',
+        )
+        refresh_opening_balance_totals(import_batch)
+        validate_opening_balance_import(import_batch)
+        journal_entry = create_opening_balance_journal(import_batch)
+
+        cash_schedule = create_cutover_balance_schedule(plan, 'cash_on_hand')[0]
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=cash_schedule,
+            account=cash,
+            label='Cash count',
+            debit=Decimal('1000.00'),
+        )
+        validate_cutover_balance_schedule(cash_schedule)
+        equity_schedule = create_cutover_balance_schedule(plan, 'equity_balance')[0]
+        CutoverBalanceScheduleLine.objects.create(
+            entity=entity,
+            schedule=equity_schedule,
+            account=capital,
+            label='Owner capital',
+            credit=Decimal('1000.00'),
+            source_document_number='Opening equity worksheet',
+        )
+        validate_cutover_balance_schedule(equity_schedule)
+        if post_opening:
+            post_journal_entry(journal_entry)
+            journal_entry.refresh_from_db()
+        return entity, plan, import_batch, journal_entry, cash
+
+    def test_cutover_ready_requires_posted_opening_journal(self):
+        entity, plan, _import_batch, _journal_entry, _cash = self._cash_equity_cutover_ready()
+
+        readiness = build_cutover_readiness(entity)
+
+        self.assertFalse(readiness['all_passed'])
+        with self.assertRaisesMessage(ValidationError, 'Opening journal is posted'):
+            mark_cutover_ready(plan)
+
+    def test_cutover_approval_live_and_lock_controls(self):
+        entity, plan, import_batch, journal_entry, cash = self._cash_equity_cutover_ready(post_opening=True)
+
+        ready = mark_cutover_ready(plan)
+        approved = approve_cutover_plan(ready)
+        live = mark_accounting_live(approved)
+        entity.settings.refresh_from_db()
+        import_batch.refresh_from_db()
+
+        self.assertEqual(journal_entry.status, 'posted')
+        self.assertEqual(ready.status, 'ready_for_review')
+        self.assertEqual(approved.status, 'approved')
+        self.assertEqual(live.status, 'live')
+        self.assertEqual(entity.settings.setup_status, 'live')
+        self.assertEqual(import_batch.status, 'posted')
+        with self.assertRaisesMessage(ValidationError, 'locked'):
+            OpeningBalanceImport.objects.create(
+                entity=entity,
+                cutover_plan=live,
+                import_type='manual',
+            )
+        with self.assertRaisesMessage(ValidationError, 'locked'):
+            OpeningBalanceLine.objects.create(
+                entity=entity,
+                import_batch=import_batch,
+                account=cash,
+                line_type='cash',
+                debit=Decimal('1.00'),
+            )
+        with self.assertRaisesMessage(ValidationError, 'locked'):
+            create_cutover_plan(entity, date(2026, 2, 1))
 
 
 class AccountingV2CutoverReconciliationTests(TestCase):

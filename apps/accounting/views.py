@@ -40,6 +40,7 @@ from apps.accounting.services import (
     build_cutover_readiness,
     build_cutover_balance_schedule_reconciliation,
     build_cutover_balance_schedule_summary,
+    approve_cutover_plan,
     create_accounting_foundation,
     create_cutover_balance_schedule,
     create_cutover_plan,
@@ -49,6 +50,8 @@ from apps.accounting.services import (
     get_active_cutover_plan,
     refresh_cutover_balance_schedule,
     get_latest_cutover_reconciliation_snapshot,
+    mark_accounting_live,
+    mark_cutover_ready,
     post_journal_entry,
     refresh_opening_balance_totals,
     retry_source_posting,
@@ -125,6 +128,10 @@ def _money(value):
         return Decimal(str(value)).quantize(Decimal('0.01'))
     except (InvalidOperation, ValueError):
         raise ValidationError('Line amounts must be valid numbers.')
+
+
+def _cutover_is_locked(plan):
+    return bool(plan and plan.status in ('approved', 'live'))
 
 
 @login_required
@@ -471,6 +478,7 @@ def cutover_dashboard(request):
         'plan': plan,
         'imports': imports,
         'readiness': readiness,
+        'cutover_locked': _cutover_is_locked(plan),
     })
 
 
@@ -483,6 +491,9 @@ def cutover_setup(request):
     if not isinstance(entity, AccountingEntity):
         return entity
     plan = get_active_cutover_plan(entity)
+    if _cutover_is_locked(plan):
+        messages.error(request, 'Approved or live cutover plans are locked.')
+        return redirect('accounting-cutover-dashboard')
 
     if request.method == 'POST':
         form = CutoverPlanForm(request.POST, instance=plan)
@@ -531,6 +542,9 @@ def opening_balance_import_add(request):
     if not plan:
         messages.info(request, 'Create a cutover plan before entering opening balances.')
         return redirect('accounting-cutover-setup')
+    if _cutover_is_locked(plan):
+        messages.error(request, 'Approved or live cutover plans are locked.')
+        return redirect('accounting-cutover-dashboard')
 
     if request.method == 'POST':
         form = OpeningBalanceImportForm(request.POST)
@@ -581,7 +595,11 @@ def opening_balance_import_detail(request, pk):
         'import_batch': import_batch,
         'plan': import_batch.cutover_plan,
         'lines': lines,
-        'can_edit': not import_batch.journal_entry_id and import_batch.status not in ('journal_created', 'posted', 'voided'),
+        'can_edit': (
+            not import_batch.journal_entry_id
+            and import_batch.status not in ('journal_created', 'posted', 'voided')
+            and not _cutover_is_locked(import_batch.cutover_plan)
+        ),
     })
 
 
@@ -604,6 +622,9 @@ def opening_balance_line_add(request, pk):
     )
     if import_batch.journal_entry_id or import_batch.status in ('journal_created', 'posted', 'voided'):
         messages.error(request, 'This opening balance import is read-only.')
+        return redirect('accounting-opening-balance-import-detail', pk=import_batch.pk)
+    if _cutover_is_locked(import_batch.cutover_plan):
+        messages.error(request, 'Approved or live cutover plans are locked.')
         return redirect('accounting-opening-balance-import-detail', pk=import_batch.pk)
 
     if request.method == 'POST':
@@ -652,6 +673,9 @@ def opening_balance_import_validate(request, pk):
     if not isinstance(entity, AccountingEntity):
         return entity
     import_batch = get_object_or_404(OpeningBalanceImport, entity=entity, pk=pk)
+    if _cutover_is_locked(import_batch.cutover_plan):
+        messages.error(request, 'Approved or live cutover plans are locked.')
+        return redirect('accounting-opening-balance-import-detail', pk=pk)
     try:
         validate_opening_balance_import(import_batch)
         import_batch.refresh_from_db()
@@ -679,6 +703,9 @@ def opening_balance_import_create_journal(request, pk):
     if not isinstance(entity, AccountingEntity):
         return entity
     import_batch = get_object_or_404(OpeningBalanceImport, entity=entity, pk=pk)
+    if _cutover_is_locked(import_batch.cutover_plan):
+        messages.error(request, 'Approved or live cutover plans are locked.')
+        return redirect('accounting-opening-balance-import-detail', pk=pk)
     try:
         journal_entry = create_opening_balance_journal(import_batch, created_by=request.user)
         AuditLog.log(
@@ -708,6 +735,87 @@ def cutover_readiness(request):
         'readiness': readiness,
         'plan': readiness.get('plan'),
     })
+
+
+@login_required
+def cutover_mark_ready(request):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cutoverplan',
+        'accounting-cutover-dashboard',
+    )
+    if permission_check is not True:
+        return permission_check
+    if request.method != 'POST':
+        return redirect('accounting-cutover-dashboard')
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    plan = get_active_cutover_plan(entity)
+    if not plan:
+        messages.info(request, 'Create a cutover plan before marking it ready.')
+        return redirect('accounting-cutover-setup')
+    try:
+        mark_cutover_ready(plan, reviewed_by=request.user)
+        AuditLog.log('update', 'accounting', f"Cutover marked ready for review: {plan.cutover_date}", user=request.user)
+        messages.success(request, 'Cutover marked ready for review.')
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-cutover-dashboard')
+
+
+@login_required
+def cutover_approve(request):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cutoverplan',
+        'accounting-cutover-dashboard',
+    )
+    if permission_check is not True:
+        return permission_check
+    if request.method != 'POST':
+        return redirect('accounting-cutover-dashboard')
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    plan = get_active_cutover_plan(entity)
+    if not plan:
+        messages.info(request, 'Create a cutover plan before approval.')
+        return redirect('accounting-cutover-setup')
+    try:
+        approve_cutover_plan(plan, approved_by=request.user)
+        AuditLog.log('update', 'accounting', f"Cutover approved: {plan.cutover_date}", user=request.user)
+        messages.success(request, 'Cutover approved and locked.')
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-cutover-dashboard')
+
+
+@login_required
+def cutover_go_live(request):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cutoverplan',
+        'accounting-cutover-dashboard',
+    )
+    if permission_check is not True:
+        return permission_check
+    if request.method != 'POST':
+        return redirect('accounting-cutover-dashboard')
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    plan = get_active_cutover_plan(entity)
+    if not plan:
+        messages.info(request, 'Create a cutover plan before going live.')
+        return redirect('accounting-cutover-setup')
+    try:
+        mark_accounting_live(plan, live_by=request.user)
+        AuditLog.log('update', 'accounting', f"Accounting v2 moved live: {plan.cutover_date}", user=request.user)
+        messages.success(request, 'Accounting v2 is live for this cutover.')
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-cutover-dashboard')
 
 
 @login_required
@@ -808,6 +916,7 @@ def cutover_schedule_list(request):
         'plan': plan,
         'schedules': schedules,
         'summary': summary,
+        'cutover_locked': _cutover_is_locked(plan),
     })
 
 
@@ -827,6 +936,9 @@ def cutover_schedule_add(request):
     if not plan:
         messages.info(request, 'Create a cutover plan before adding cutover balance schedules.')
         return redirect('accounting-cutover-setup')
+    if _cutover_is_locked(plan):
+        messages.error(request, 'Approved or live cutover plans are locked.')
+        return redirect('accounting-cutover-schedule-list')
 
     if request.method == 'POST':
         form = CutoverBalanceScheduleForm(request.POST)
@@ -880,7 +992,7 @@ def cutover_schedule_detail(request, pk):
         'schedule': schedule,
         'lines': schedule.lines.select_related('account').order_by('account__code', 'label', 'id'),
         'rows': rows,
-        'can_edit': schedule.status != 'voided',
+        'can_edit': schedule.status != 'voided' and not _cutover_is_locked(schedule.cutover_plan),
     })
 
 
@@ -899,6 +1011,9 @@ def cutover_schedule_line_add(request, pk):
     schedule = get_object_or_404(CutoverBalanceSchedule, entity=entity, pk=pk)
     if schedule.status == 'voided':
         messages.error(request, 'This cutover balance schedule is read-only.')
+        return redirect('accounting-cutover-schedule-detail', pk=schedule.pk)
+    if _cutover_is_locked(schedule.cutover_plan):
+        messages.error(request, 'Approved or live cutover plans are locked.')
         return redirect('accounting-cutover-schedule-detail', pk=schedule.pk)
 
     if request.method == 'POST':
@@ -947,6 +1062,9 @@ def cutover_schedule_validate(request, pk):
     if not isinstance(entity, AccountingEntity):
         return entity
     schedule = get_object_or_404(CutoverBalanceSchedule, entity=entity, pk=pk)
+    if _cutover_is_locked(schedule.cutover_plan):
+        messages.error(request, 'Approved or live cutover plans are locked.')
+        return redirect('accounting-cutover-schedule-detail', pk=pk)
     try:
         validate_cutover_balance_schedule(schedule)
         schedule.refresh_from_db()
