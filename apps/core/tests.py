@@ -31,7 +31,9 @@ class RolePresetTests(TestCase):
         self.assertIn('view_cutoverplan', permission_codenames)
         self.assertIn('view_cutoverreconciliationsnapshot', permission_codenames)
         self.assertIn('view_openingbalanceimport', permission_codenames)
+        self.assertIn('view_apvendor', permission_codenames)
         self.assertIn('view_apvendorbill', permission_codenames)
+        self.assertIn('view_apvendorbillattachment', permission_codenames)
         self.assertIn('view_apvendorpayment', permission_codenames)
 
     def test_read_only_auditor_gets_only_view_permissions(self):

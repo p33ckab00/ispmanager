@@ -1,5 +1,6 @@
 from calendar import monthrange
 from datetime import date, timedelta
+import hashlib
 from decimal import Decimal
 
 from django.apps import apps
@@ -15,7 +16,9 @@ from apps.accounting.models import (
     AccountingSettings,
     AccountingSourcePosting,
     AlphanumericTaxCode,
+    APVendor,
     APVendorBill,
+    APVendorBillAttachment,
     APVendorPayment,
     ChartOfAccount,
     CUTOVER_LOCKED_STATUSES,
@@ -2545,6 +2548,7 @@ def create_ap_vendor_bill_draft(
     expense_account,
     ap_account,
     amount,
+    vendor=None,
     tax_treatment='non_vat',
     base_amount=None,
     input_vat_amount=Decimal('0.00'),
@@ -2554,8 +2558,13 @@ def create_ap_vendor_bill_draft(
     amount = _decimal_amount(amount)
     base_amount = amount if base_amount is None else _decimal_amount(base_amount)
     input_vat_amount = _decimal_amount(input_vat_amount)
+    vendor = vendor if isinstance(vendor, APVendor) else None
+    if vendor and vendor.entity_id != entity.id:
+        raise ValidationError('AP vendor bill vendor must belong to the same accounting entity.')
+    vendor_name = vendor_name or (vendor.display_name if vendor else '')
     bill = APVendorBill(
         entity=entity,
+        vendor=vendor,
         vendor_name=vendor_name,
         bill_number=bill_number,
         document_date=document_date,
@@ -2594,6 +2603,30 @@ def create_ap_vendor_bill_draft(
     bill.full_clean()
     bill.save(update_fields=['journal_entry', 'updated_at'])
     return bill
+
+
+@transaction.atomic
+def create_ap_vendor_bill_attachment(bill, upload, document_type='supplier_invoice', note='', uploaded_by=None):
+    upload.seek(0)
+    digest = hashlib.sha256()
+    for chunk in upload.chunks():
+        digest.update(chunk)
+    upload.seek(0)
+    attachment = APVendorBillAttachment(
+        entity=bill.entity,
+        bill=bill,
+        document_type=document_type,
+        file=upload,
+        original_filename=upload.name,
+        content_type=getattr(upload, 'content_type', '') or '',
+        file_size=upload.size,
+        sha256=digest.hexdigest(),
+        note=note,
+        uploaded_by=uploaded_by if getattr(uploaded_by, 'is_authenticated', False) else None,
+    )
+    attachment.full_clean()
+    attachment.save()
+    return attachment
 
 
 def _ap_vendor_bill_journal_lines(bill):

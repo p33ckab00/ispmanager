@@ -1,4 +1,5 @@
 from decimal import Decimal
+from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -501,6 +502,84 @@ class AccountingReportArchive(models.Model):
         return f"{self.report_name} {self.export_format} {self.generated_at:%Y-%m-%d %H:%M}"
 
 
+class APVendor(models.Model):
+    TAX_CLASSIFICATION_CHOICES = [
+        ('unknown', 'Unknown'),
+        ('non_vat', 'Non-VAT'),
+        ('vat', 'VAT'),
+        ('vat_exempt', 'VAT Exempt'),
+        ('zero_rated', 'Zero-Rated'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='ap_vendors',
+    )
+    code = models.CharField(max_length=40)
+    name = models.CharField(max_length=255)
+    registered_name = models.CharField(max_length=255, blank=True)
+    tin = models.CharField(max_length=50, blank=True)
+    registered_address = models.TextField(blank=True)
+    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=50, blank=True)
+    tax_classification = models.CharField(
+        max_length=20,
+        choices=TAX_CLASSIFICATION_CHOICES,
+        default='unknown',
+    )
+    default_expense_account = models.ForeignKey(
+        ChartOfAccount,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ap_vendors_as_default_expense',
+    )
+    default_ap_account = models.ForeignKey(
+        ChartOfAccount,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ap_vendors_as_default_payable',
+    )
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name', 'code']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['entity', 'code'],
+                name='accounting_unique_ap_vendor_code',
+            ),
+        ]
+        permissions = [
+            ('manage_apvendor', 'Can manage AP vendors'),
+        ]
+
+    def clean(self):
+        for field_name in ('default_expense_account', 'default_ap_account'):
+            account = getattr(self, field_name, None)
+            if account and self.entity_id and account.entity_id != self.entity_id:
+                raise ValidationError('AP vendor default accounts must belong to the same accounting entity.')
+        if (
+            self.default_expense_account_id
+            and self.default_expense_account.account_type not in ('direct_cost', 'expense', 'other_expense', 'asset')
+        ):
+            raise ValidationError('Default expense account must be an expense, direct cost, other expense, or asset account.')
+        if self.default_ap_account_id and self.default_ap_account.account_type != 'liability':
+            raise ValidationError('Default AP account must be a liability account.')
+
+    @property
+    def display_name(self):
+        return self.registered_name or self.name
+
+    def __str__(self):
+        return f"{self.code} - {self.display_name}"
+
+
 class APVendorBill(models.Model):
     TAX_TREATMENT_CHOICES = [
         ('non_vat', 'Non-VAT'),
@@ -521,6 +600,13 @@ class APVendorBill(models.Model):
         AccountingEntity,
         on_delete=models.CASCADE,
         related_name='ap_vendor_bills',
+    )
+    vendor = models.ForeignKey(
+        APVendor,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='bills',
     )
     vendor_name = models.CharField(max_length=255)
     bill_number = models.CharField(max_length=120)
@@ -609,6 +695,8 @@ class APVendorBill(models.Model):
             account = getattr(self, field_name, None)
             if account and self.entity_id and account.entity_id != self.entity_id:
                 raise ValidationError('AP vendor bill accounts must belong to the same accounting entity.')
+        if self.vendor_id and self.entity_id and self.vendor.entity_id != self.entity_id:
+            raise ValidationError('AP vendor bill vendor must belong to the same accounting entity.')
         if self.expense_account_id and self.expense_account.account_type not in ('direct_cost', 'expense', 'other_expense', 'asset'):
             raise ValidationError('Expense account must be an expense, direct cost, other expense, or asset account.')
         if self.ap_account_id and self.ap_account.account_type != 'liability':
@@ -689,6 +777,64 @@ class APVendorPayment(models.Model):
 
     def __str__(self):
         return f"{self.bill.vendor_name} payment - PHP {self.amount}"
+
+
+def ap_vendor_bill_attachment_upload_to(instance, filename):
+    safe_name = Path(filename).name
+    return f"accounting/ap_bills/{instance.entity_id}/{instance.bill_id}/{safe_name}"
+
+
+class APVendorBillAttachment(models.Model):
+    DOCUMENT_TYPE_CHOICES = [
+        ('supplier_invoice', 'Supplier Invoice'),
+        ('receipt', 'Receipt'),
+        ('statement', 'Statement'),
+        ('supporting_document', 'Supporting Document'),
+        ('other', 'Other'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='ap_vendor_bill_attachments',
+    )
+    bill = models.ForeignKey(
+        APVendorBill,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+    )
+    document_type = models.CharField(
+        max_length=30,
+        choices=DOCUMENT_TYPE_CHOICES,
+        default='supplier_invoice',
+    )
+    file = models.FileField(upload_to=ap_vendor_bill_attachment_upload_to)
+    original_filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=120, blank=True)
+    file_size = models.PositiveBigIntegerField(default=0)
+    sha256 = models.CharField(max_length=64)
+    note = models.CharField(max_length=255, blank=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploaded_ap_vendor_bill_attachments',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+        permissions = [
+            ('manage_apvendorbillattachment', 'Can manage AP vendor bill attachments'),
+        ]
+
+    def clean(self):
+        if self.bill_id and self.entity_id and self.bill.entity_id != self.entity_id:
+            raise ValidationError('AP vendor bill attachment must use the same accounting entity as the bill.')
+
+    def __str__(self):
+        return f"{self.bill.bill_number} - {self.original_filename}"
 
 
 class AccountingSourcePosting(models.Model):

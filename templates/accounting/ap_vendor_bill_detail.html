@@ -21,6 +21,9 @@
     <a href="{% url 'accounting-ap-vendor-payment-add' bill.pk %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Add Payment</a>
     {% endif %}
     {% endif %}
+    {% if perms.accounting.manage_apvendorbillattachment %}
+    <a href="{% url 'accounting-ap-vendor-bill-attachment-add' bill.pk %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Add Attachment</a>
+    {% endif %}
     <a href="{% url 'accounting-ap-vendor-bill-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">AP Bills</a>
   </div>
 </div>
@@ -48,6 +51,7 @@
 
 <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
   <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+    <div><dt class="text-gray-500">Vendor Master</dt><dd class="font-medium">{% if bill.vendor %}{{ bill.vendor }}{% else %}-{% endif %}</dd></div>
     <div><dt class="text-gray-500">Tax Treatment</dt><dd class="font-medium">{{ bill.get_tax_treatment_display }}</dd></div>
     <div><dt class="text-gray-500">Base Amount</dt><dd class="font-medium">PHP {{ bill.base_amount }}</dd></div>
     <div><dt class="text-gray-500">Input VAT</dt><dd class="font-medium">PHP {{ bill.input_vat_amount }}</dd></div>
@@ -58,6 +62,42 @@
     {% endif %}
     <div class="md:col-span-2"><dt class="text-gray-500">Notes</dt><dd>{{ bill.notes|default:"-" }}</dd></div>
   </dl>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-6">
+  <div class="px-5 py-4 border-b border-gray-100">
+    <h3 class="font-semibold text-gray-800">Attachments</h3>
+  </div>
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Document</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">File</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Hash</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Action</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for attachment in attachments %}
+      <tr>
+        <td class="px-4 py-3">
+          <div>{{ attachment.get_document_type_display }}</div>
+          {% if attachment.note %}<div class="text-xs text-gray-500">{{ attachment.note }}</div>{% endif %}
+        </td>
+        <td class="px-4 py-3">
+          <div>{{ attachment.original_filename }}</div>
+          <div class="text-xs text-gray-500">{{ attachment.file_size }} bytes</div>
+        </td>
+        <td class="px-4 py-3 font-mono text-xs text-gray-500">{{ attachment.sha256|slice:":16" }}...</td>
+        <td class="px-4 py-3 text-right">
+          <a href="{% url 'accounting-ap-vendor-bill-attachment-download' bill.pk attachment.pk %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg">Download</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="4" class="px-4 py-8 text-center text-gray-500">No bill attachments yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 
 <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

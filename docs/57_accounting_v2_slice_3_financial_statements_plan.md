@@ -18,6 +18,7 @@ Slice 3F adds immutable report archive records and a guarded period reopen
 workflow with reversing closing entries.
 Slice 3G-A adds the first post-live AP vendor bill subledger.
 Slice 3G-B adds AP void/reversal handling and purchase tax breakdowns.
+Slice 3G-C adds AP vendor masters and bill attachment storage.
 
 ## Slice 3A Implemented
 
@@ -230,6 +231,26 @@ Implemented:
 - Regression coverage was added for VAT purchase posting and AP bill reversal
   behavior.
 
+## Slice 3G-C Implemented
+
+Implemented:
+
+- `APVendor` stores reusable supplier master data, including code, registered
+  name, TIN, address, tax classification, default expense/AP accounts, and active
+  status.
+- AP bills may link to a vendor master while preserving their own vendor-name
+  snapshot for historical reporting.
+- Vendor list/add/edit pages were added, and selecting a vendor can prefill bill
+  defaults for faster entry.
+- `APVendorBillAttachment` stores supplier invoice/supporting-file uploads with
+  document type, original filename, content type, byte size, note, uploader, and
+  SHA-256 hash.
+- Bill detail pages now expose attachment lists and permission-gated upload and
+  download flows.
+- Cashier role presets receive read-only vendor and attachment permissions.
+- Regression coverage was added for vendor snapshotting and attachment metadata
+  hashing.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -275,8 +296,7 @@ Implemented:
   dimensions.
 - AR Aging is not historical-payment accurate yet because invoice balances are
   current-state operational balances.
-- AP vendor bills do not yet have vendor master records, attachment storage, AP
-  payment void/reversal, or payment settlement matching.
+- AP vendor payments do not yet have void/reversal or settlement matching.
 - AP Aging selects the post-live AP bill subledger ahead of cutover/opening
   fallbacks; a merged historical cutover plus post-live AP view is still future
   work.
@@ -286,9 +306,8 @@ Implemented:
 
 ## Next Slice Candidate
 
-Slice 3G-C should continue AP hardening before BIR/NTC books:
+Slice 3G-D should continue AP hardening before BIR/NTC books:
 
-- Vendor master records and bill attachment storage.
 - AP payment void/reversal and payment settlement matching.
 - Binary archive/package storage for generated export files.
 - Saved report presets per user.

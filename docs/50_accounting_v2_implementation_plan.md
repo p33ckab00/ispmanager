@@ -139,6 +139,9 @@ presets receive read-only AP bill/payment access.
 Slice 3G-B is now implemented for AP hardening: AP bills can carry purchase tax
 breakdowns, VAT bills split base amount and input VAT in the draft journal, and
 posted bills use a draft reversal workflow before becoming voided.
+Slice 3G-C is now implemented for AP support records: reusable vendor masters
+hold tax/account defaults, bills keep vendor snapshots, and uploaded bill
+attachments keep file metadata plus SHA-256 hashes.
 
 ## 2. Locked Decisions
 
@@ -445,9 +448,8 @@ Slice 3G-A is implemented as post-live AP vendor bill foundation:
   draft-then-approve behavior.
 - Existing cutover/opening AP fallback remains available when no posted AP
   vendor bills exist.
-- Remaining Slice 3 work starts with vendor master records, bill attachments,
-  AP payment void/reversal and settlement matching, binary archive/package
-  storage, and saved report presets.
+- Remaining Slice 3 work starts with AP payment void/reversal and settlement
+  matching, binary archive/package storage, and saved report presets.
 
 ### Slice 4 - BIR Books and Guides
 

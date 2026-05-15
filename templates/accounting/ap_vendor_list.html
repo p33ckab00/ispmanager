@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}AP Vendors - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">AP Vendors</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ entity }}</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    {% if perms.accounting.manage_apvendor %}
+    <a href="{% url 'accounting-ap-vendor-add' %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Add Vendor</a>
+    {% endif %}
+    <a href="{% url 'accounting-ap-vendor-bill-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">AP Bills</a>
+  </div>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Vendor</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">TIN</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Tax</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Defaults</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Action</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for vendor in page_obj %}
+      <tr>
+        <td class="px-4 py-3">
+          <div class="font-medium text-gray-800">{{ vendor.display_name }}</div>
+          <div class="text-xs text-gray-500">{{ vendor.code }}</div>
+        </td>
+        <td class="px-4 py-3">{{ vendor.tin|default:"-" }}</td>
+        <td class="px-4 py-3">{{ vendor.get_tax_classification_display }}</td>
+        <td class="px-4 py-3 text-xs">
+          <div>{{ vendor.default_expense_account|default:"-" }}</div>
+          <div>{{ vendor.default_ap_account|default:"-" }}</div>
+        </td>
+        <td class="px-4 py-3">
+          <span class="px-2 py-0.5 rounded text-xs {% if vendor.is_active %}bg-green-50 text-green-700{% else %}bg-gray-100 text-gray-600{% endif %}">
+            {% if vendor.is_active %}Active{% else %}Inactive{% endif %}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-right">
+          <div class="flex justify-end gap-2">
+            <a href="{% url 'accounting-ap-vendor-bill-add' %}?vendor={{ vendor.pk }}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg">New Bill</a>
+            {% if perms.accounting.manage_apvendor %}
+            <a href="{% url 'accounting-ap-vendor-edit' vendor.pk %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg">Edit</a>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="px-4 py-12 text-center text-gray-400">No AP vendors yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if page_obj.has_other_pages %}
+<div class="flex items-center justify-between mt-4 text-sm">
+  <div class="text-gray-500">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+  <div class="flex gap-2">
+    {% if page_obj.has_previous %}
+    <a href="?page={{ page_obj.previous_page_number }}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg">Previous</a>
+    {% endif %}
+    {% if page_obj.has_next %}
+    <a href="?page={{ page_obj.next_page_number }}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-lg">Next</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

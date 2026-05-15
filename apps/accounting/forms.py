@@ -5,7 +5,9 @@ from django.db.models import Sum
 
 from apps.accounting.models import (
     AlphanumericTaxCode,
+    APVendor,
     APVendorBill,
+    APVendorBillAttachment,
     APVendorPayment,
     ChartOfAccount,
     CutoverBalanceSchedule,
@@ -190,6 +192,7 @@ class APVendorBillForm(forms.ModelForm):
     class Meta:
         model = APVendorBill
         fields = [
+            'vendor',
             'vendor_name',
             'bill_number',
             'document_date',
@@ -213,9 +216,16 @@ class APVendorBillForm(forms.ModelForm):
     def __init__(self, *args, entity=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.entity = entity
+        self.fields['vendor'].queryset = APVendor.objects.none()
+        self.fields['vendor'].required = False
+        self.fields['vendor_name'].required = False
         self.fields['expense_account'].queryset = ChartOfAccount.objects.none()
         self.fields['ap_account'].queryset = ChartOfAccount.objects.none()
         if entity:
+            self.fields['vendor'].queryset = APVendor.objects.filter(
+                entity=entity,
+                is_active=True,
+            ).order_by('name', 'code')
             if entity.tax_classification != 'vat':
                 self.fields['tax_treatment'].choices = [
                     choice for choice in self.fields['tax_treatment'].choices
@@ -231,6 +241,70 @@ class APVendorBillForm(forms.ModelForm):
                 is_active=True,
                 account_type='liability',
             ).order_by('code')
+
+    def clean_vendor_name(self):
+        vendor_name = self.cleaned_data.get('vendor_name', '').strip()
+        vendor = self.cleaned_data.get('vendor')
+        if not vendor_name and vendor:
+            return vendor.display_name
+        if not vendor_name:
+            raise forms.ValidationError('Enter a vendor name or choose an AP vendor.')
+        return vendor_name
+
+
+class APVendorForm(forms.ModelForm):
+    class Meta:
+        model = APVendor
+        fields = [
+            'code',
+            'name',
+            'registered_name',
+            'tin',
+            'registered_address',
+            'email',
+            'phone',
+            'tax_classification',
+            'default_expense_account',
+            'default_ap_account',
+            'is_active',
+            'notes',
+        ]
+        widgets = {
+            'registered_address': forms.Textarea(attrs={'rows': 3}),
+            'notes': forms.Textarea(attrs={'rows': 3}),
+        }
+
+    def __init__(self, *args, entity=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['default_expense_account'].queryset = ChartOfAccount.objects.none()
+        self.fields['default_ap_account'].queryset = ChartOfAccount.objects.none()
+        if entity:
+            self.fields['default_expense_account'].queryset = ChartOfAccount.objects.filter(
+                entity=entity,
+                is_active=True,
+                account_type__in=['direct_cost', 'expense', 'other_expense', 'asset'],
+            ).order_by('code')
+            self.fields['default_ap_account'].queryset = ChartOfAccount.objects.filter(
+                entity=entity,
+                is_active=True,
+                account_type='liability',
+            ).order_by('code')
+
+
+class APVendorBillAttachmentForm(forms.ModelForm):
+    class Meta:
+        model = APVendorBillAttachment
+        fields = ['document_type', 'file', 'note']
+
+    def clean_file(self):
+        upload = self.cleaned_data['file']
+        filename = upload.name.lower()
+        allowed_suffixes = ('.pdf', '.jpg', '.jpeg', '.png', '.csv', '.xls', '.xlsx')
+        if not filename.endswith(allowed_suffixes):
+            raise forms.ValidationError('Upload a PDF, image, CSV, or Excel supporting file.')
+        if upload.size > 10 * 1024 * 1024:
+            raise forms.ValidationError('Upload a file no larger than 10 MB.')
+        return upload
 
 
 class APVendorBillVoidForm(forms.Form):

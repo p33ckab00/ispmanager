@@ -1,9 +1,12 @@
 import json
+import hashlib
+import tempfile
 from datetime import date, datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 
@@ -12,7 +15,9 @@ from apps.accounting.models import (
     AccountingReportArchive,
     AccountingSourcePosting,
     AlphanumericTaxCode,
+    APVendor,
     APVendorBill,
+    APVendorBillAttachment,
     APVendorPayment,
     ChartOfAccount,
     CutoverBalanceSchedule,
@@ -42,6 +47,7 @@ from apps.accounting.services import (
     build_tax_ledger_report,
     build_trial_balance_report,
     close_accounting_period,
+    create_ap_vendor_bill_attachment,
     create_ap_vendor_bill_draft,
     create_ap_vendor_bill_void_draft,
     create_ap_vendor_payment_draft,
@@ -678,6 +684,67 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(bill.status, 'voided')
         self.assertEqual(bill.journal_entry.status, 'voided')
         self.assertEqual(build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))['total'], Decimal('0.00'))
+
+    def test_ap_vendor_master_supplies_bill_snapshot_and_defaults(self):
+        entity = self._foundation()
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        vendor = APVendor.objects.create(
+            entity=entity,
+            code='UPSTREAM',
+            name='Upstream Provider',
+            registered_name='Upstream Provider Inc.',
+            tax_classification='non_vat',
+            default_expense_account=expense,
+            default_ap_account=ap,
+        )
+
+        bill = create_ap_vendor_bill_draft(
+            entity,
+            '',
+            'BILL-MASTER-001',
+            date(2026, 1, 20),
+            date(2026, 1, 31),
+            expense,
+            ap,
+            Decimal('700.00'),
+            vendor=vendor,
+        )
+
+        self.assertEqual(bill.vendor, vendor)
+        self.assertEqual(bill.vendor_name, 'Upstream Provider Inc.')
+
+    def test_ap_vendor_bill_attachment_stores_file_metadata(self):
+        entity = self._foundation()
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        bill = create_ap_vendor_bill_draft(
+            entity,
+            'Attachment Supplier',
+            'BILL-ATTACH-001',
+            date(2026, 1, 20),
+            date(2026, 1, 31),
+            expense,
+            ap,
+            Decimal('700.00'),
+        )
+        payload = b'supplier invoice pdf bytes'
+        upload = SimpleUploadedFile('supplier-invoice.pdf', payload, content_type='application/pdf')
+
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            attachment = create_ap_vendor_bill_attachment(
+                bill,
+                upload,
+                document_type='supplier_invoice',
+                note='January bill',
+            )
+            attachment.refresh_from_db()
+
+            self.assertEqual(APVendorBillAttachment.objects.count(), 1)
+            self.assertEqual(attachment.original_filename, 'supplier-invoice.pdf')
+            self.assertEqual(attachment.file_size, len(payload))
+            self.assertEqual(attachment.sha256, hashlib.sha256(payload).hexdigest())
+            self.assertTrue(attachment.file.storage.exists(attachment.file.name))
 
     def test_tax_ledger_reports_vat_and_optional_2307_claims(self):
         entity = create_accounting_foundation(
