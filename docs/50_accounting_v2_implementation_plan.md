@@ -142,6 +142,10 @@ posted bills use a draft reversal workflow before becoming voided.
 Slice 3G-C is now implemented for AP support records: reusable vendor masters
 hold tax/account defaults, bills keep vendor snapshots, and uploaded bill
 attachments keep file metadata plus SHA-256 hashes.
+Slice 3G-D is now implemented for AP payment hardening: draft payments can be
+voided directly, posted payments use reversal drafts, and posted payments can be
+manually matched to external settlement references. AP as-of reports preserve
+pre-reversal history until the reversal journal date is reached.
 
 ## 2. Locked Decisions
 
@@ -448,8 +452,8 @@ Slice 3G-A is implemented as post-live AP vendor bill foundation:
   draft-then-approve behavior.
 - Existing cutover/opening AP fallback remains available when no posted AP
   vendor bills exist.
-- Remaining Slice 3 work starts with AP payment void/reversal and settlement
-  matching, binary archive/package storage, and saved report presets.
+- Remaining Slice 3 work starts with binary archive/package storage, saved
+  report presets, and fuller bank/wallet/gateway reconciliation.
 
 ### Slice 4 - BIR Books and Guides
 

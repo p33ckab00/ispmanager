@@ -19,6 +19,7 @@ workflow with reversing closing entries.
 Slice 3G-A adds the first post-live AP vendor bill subledger.
 Slice 3G-B adds AP void/reversal handling and purchase tax breakdowns.
 Slice 3G-C adds AP vendor masters and bill attachment storage.
+Slice 3G-D adds AP payment reversals and manual settlement matching.
 
 ## Slice 3A Implemented
 
@@ -251,6 +252,27 @@ Implemented:
 - Regression coverage was added for vendor snapshotting and attachment metadata
   hashing.
 
+## Slice 3G-D Implemented
+
+Implemented:
+
+- `APVendorPayment` now tracks draft, posted, void-pending, and voided states.
+- Draft AP payments can be voided directly; posted AP payments create a reversing
+  draft journal before becoming voided.
+- AP Aging and bill open balances keep void-pending payments effective until the
+  reversal journal is posted, then reopen the payable after reversal.
+- Historical AP Aging stays date-aware: bills and payments remain effective on
+  as-of dates before their posted reversal journals.
+- Posted AP payments can be manually matched to a settlement date and external
+  reference, with matcher metadata and a clear-match action.
+- Matched AP payments must be cleared before they can be voided, preventing a
+  settled disbursement from being reversed silently.
+- Existing posted AP payments are migrated to the correct `posted` status.
+- AP bill detail pages now show payment status, settlement state, and payment
+  match/clear/void actions.
+- Regression coverage was added for reversal-driven payable reopening and
+  settlement-match void blocking.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -296,7 +318,8 @@ Implemented:
   dimensions.
 - AR Aging is not historical-payment accurate yet because invoice balances are
   current-state operational balances.
-- AP vendor payments do not yet have void/reversal or settlement matching.
+- AP payment settlement matching is manual only; full bank/wallet/gateway import
+  reconciliation is still future work.
 - AP Aging selects the post-live AP bill subledger ahead of cutover/opening
   fallbacks; a merged historical cutover plus post-live AP view is still future
   work.
@@ -306,8 +329,9 @@ Implemented:
 
 ## Next Slice Candidate
 
-Slice 3G-D should continue AP hardening before BIR/NTC books:
+Slice 3H should continue report/export hardening before BIR/NTC books:
 
-- AP payment void/reversal and payment settlement matching.
 - Binary archive/package storage for generated export files.
 - Saved report presets per user.
+- Full bank/wallet/gateway import reconciliation remains a later reconciliation
+  slice.

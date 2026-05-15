@@ -51,6 +51,7 @@ from apps.accounting.services import (
     create_ap_vendor_bill_draft,
     create_ap_vendor_bill_void_draft,
     create_ap_vendor_payment_draft,
+    create_ap_vendor_payment_void_draft,
     create_accounting_foundation,
     create_cutover_balance_schedule,
     create_cutover_plan,
@@ -64,8 +65,10 @@ from apps.accounting.services import (
     generate_cutover_reconciliation_snapshot,
     mark_accounting_live,
     mark_cutover_ready,
+    match_ap_vendor_payment_settlement,
     post_journal_entry,
     refresh_ap_vendor_bill_status,
+    refresh_ap_vendor_payment_status,
     refresh_opening_balance_totals,
     reopen_accounting_period,
     validate_cutover_balance_schedule,
@@ -585,6 +588,95 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(APVendorPayment.objects.count(), 1)
         self.assertEqual(bill.remaining_balance, Decimal('500.00'))
 
+    def test_ap_vendor_payment_void_uses_reversal_draft_until_posted(self):
+        entity = self._foundation()
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        bill = create_ap_vendor_bill_draft(
+            entity,
+            'Upstream Provider',
+            'BILL-PAY-VOID-001',
+            date(2026, 1, 20),
+            date(2026, 1, 31),
+            expense,
+            ap,
+            Decimal('700.00'),
+        )
+        post_journal_entry(bill.journal_entry)
+        payment = create_ap_vendor_payment_draft(
+            bill,
+            date(2026, 2, 5),
+            Decimal('200.00'),
+            cash,
+            reference='CHK-VOID-001',
+        )
+        post_journal_entry(payment.journal_entry)
+
+        reversal_journal = create_ap_vendor_payment_void_draft(payment, 'Duplicate disbursement')
+        pending_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+        payment.refresh_from_db()
+
+        self.assertEqual(payment.status, 'void_pending')
+        self.assertEqual(reversal_journal.status, 'draft')
+        self.assertEqual(pending_report['total'], Decimal('500.00'))
+        self.assertEqual(pending_report['control_balance'], Decimal('500.00'))
+        lines = {line.account.code: line for line in reversal_journal.lines.select_related('account')}
+        self.assertEqual(lines['1000'].debit, Decimal('200.00'))
+        self.assertEqual(lines['2000'].credit, Decimal('200.00'))
+
+        post_journal_entry(reversal_journal)
+        refresh_ap_vendor_payment_status(payment)
+        bill.refresh_from_db()
+        historical_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+        voided_report = build_ap_aging_report(entity, as_of_date=timezone.localdate())
+
+        self.assertEqual(payment.status, 'voided')
+        self.assertEqual(bill.remaining_balance, Decimal('700.00'))
+        self.assertEqual(historical_report['total'], Decimal('500.00'))
+        self.assertEqual(historical_report['control_balance'], Decimal('500.00'))
+        self.assertEqual(voided_report['total'], Decimal('700.00'))
+        self.assertEqual(voided_report['control_balance'], Decimal('700.00'))
+        self.assertEqual(voided_report['control_difference'], Decimal('0.00'))
+
+    def test_matched_ap_vendor_payment_requires_clear_before_void(self):
+        entity = self._foundation()
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        bill = create_ap_vendor_bill_draft(
+            entity,
+            'Matched Supplier',
+            'BILL-MATCH-001',
+            date(2026, 1, 20),
+            date(2026, 1, 31),
+            expense,
+            ap,
+            Decimal('700.00'),
+        )
+        post_journal_entry(bill.journal_entry)
+        payment = create_ap_vendor_payment_draft(
+            bill,
+            date(2026, 2, 5),
+            Decimal('200.00'),
+            cash,
+            reference='CHK-MATCH-001',
+        )
+        post_journal_entry(payment.journal_entry)
+
+        match_ap_vendor_payment_settlement(
+            payment,
+            date(2026, 2, 7),
+            'BANK-SETTLEMENT-001',
+            settlement_note='Cleared in bank statement',
+        )
+        payment.refresh_from_db()
+
+        self.assertEqual(payment.settlement_status, 'matched')
+        self.assertEqual(payment.settlement_reference, 'BANK-SETTLEMENT-001')
+        with self.assertRaises(ValidationError):
+            create_ap_vendor_payment_void_draft(payment, 'Should require clearing first')
+
     def test_ap_vendor_bill_vat_breakdown_posts_input_vat(self):
         entity = create_accounting_foundation(
             entity_name='VAT AP ISP',
@@ -654,9 +746,12 @@ class AccountingV2FinancialStatementTests(TestCase):
         post_journal_entry(reversal_journal)
         refresh_ap_vendor_bill_status(bill)
         bill.refresh_from_db()
-        voided_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+        historical_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+        voided_report = build_ap_aging_report(entity, as_of_date=timezone.localdate())
 
         self.assertEqual(bill.status, 'voided')
+        self.assertEqual(historical_report['total'], Decimal('700.00'))
+        self.assertEqual(historical_report['control_balance'], Decimal('700.00'))
         self.assertEqual(voided_report['total'], Decimal('0.00'))
         self.assertEqual(voided_report['control_balance'], Decimal('0.00'))
         self.assertEqual(voided_report['control_difference'], Decimal('0.00'))

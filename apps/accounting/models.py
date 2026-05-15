@@ -712,7 +712,12 @@ class APVendorBill(models.Model):
 
     @property
     def posted_payment_total(self):
-        total = self.payments.filter(journal_entry__status='posted').aggregate(total=Sum('amount'))['total']
+        total = (
+            self.payments
+            .filter(journal_entry__status='posted')
+            .exclude(void_journal_entry__status='posted')
+            .aggregate(total=Sum('amount'))['total']
+        )
         return total or MONEY_ZERO
 
     @property
@@ -726,6 +731,17 @@ class APVendorBill(models.Model):
 
 
 class APVendorPayment(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft Journal'),
+        ('posted', 'Posted'),
+        ('void_pending', 'Void Pending'),
+        ('voided', 'Voided'),
+    ]
+    SETTLEMENT_STATUS_CHOICES = [
+        ('unmatched', 'Unmatched'),
+        ('matched', 'Matched'),
+    ]
+
     entity = models.ForeignKey(
         AccountingEntity,
         on_delete=models.CASCADE,
@@ -744,12 +760,45 @@ class APVendorPayment(models.Model):
     )
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     reference = models.CharField(max_length=120, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     journal_entry = models.ForeignKey(
         JournalEntry,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name='ap_vendor_payments',
+    )
+    void_journal_entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='voided_ap_vendor_payments',
+    )
+    void_reason = models.CharField(max_length=255, blank=True)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='voided_ap_vendor_payments',
+    )
+    settlement_status = models.CharField(
+        max_length=20,
+        choices=SETTLEMENT_STATUS_CHOICES,
+        default='unmatched',
+    )
+    settlement_date = models.DateField(null=True, blank=True)
+    settlement_reference = models.CharField(max_length=120, blank=True)
+    settlement_note = models.CharField(max_length=255, blank=True)
+    matched_at = models.DateTimeField(null=True, blank=True)
+    matched_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='matched_ap_vendor_payments',
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -774,6 +823,19 @@ class APVendorPayment(models.Model):
             raise ValidationError('AP vendor payment cash account must be an asset account.')
         if self.journal_entry_id and self.entity_id and self.journal_entry.entity_id != self.entity_id:
             raise ValidationError('AP vendor payment journal must belong to the same accounting entity.')
+        if self.void_journal_entry_id and self.entity_id and self.void_journal_entry.entity_id != self.entity_id:
+            raise ValidationError('AP vendor payment void journal must belong to the same accounting entity.')
+        if self.settlement_status == 'matched':
+            if not self.settlement_date or not self.settlement_reference:
+                raise ValidationError('Matched AP vendor payments require settlement date and reference.')
+            if self.settlement_date and self.payment_date and self.settlement_date < self.payment_date:
+                raise ValidationError('Settlement date cannot be before payment date.')
+        elif any([self.settlement_date, self.settlement_reference, self.settlement_note, self.matched_at, self.matched_by_id]):
+            raise ValidationError('Unmatched AP vendor payments cannot keep settlement details.')
+
+    @property
+    def is_posted(self):
+        return bool(self.journal_entry_id and self.journal_entry.status == 'posted')
 
     def __str__(self):
         return f"{self.bill.vendor_name} payment - PHP {self.amount}"

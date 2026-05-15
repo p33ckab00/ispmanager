@@ -1918,7 +1918,16 @@ def _ap_amount_from_line(line):
 def _ap_vendor_bill_paid_total(bill, as_of_date=None):
     payments = bill.payments.filter(journal_entry__status='posted')
     if as_of_date:
-        payments = payments.filter(payment_date__lte=as_of_date)
+        payments = (
+            payments
+            .filter(payment_date__lte=as_of_date)
+            .exclude(
+                void_journal_entry__status='posted',
+                void_journal_entry__entry_date__lte=as_of_date,
+            )
+        )
+    else:
+        payments = payments.exclude(void_journal_entry__status='posted')
     return payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
 
 
@@ -1933,7 +1942,10 @@ def build_ap_aging_report(entity, as_of_date=None):
             document_date__lte=as_of_date,
             journal_entry__status='posted',
         )
-        .exclude(status='voided')
+        .exclude(
+            void_journal_entry__status='posted',
+            void_journal_entry__entry_date__lte=as_of_date,
+        )
         .select_related('expense_account', 'ap_account', 'journal_entry')
         .order_by('vendor_name', 'due_date', 'bill_number', 'id')
     )
@@ -2511,6 +2523,29 @@ def refresh_ap_vendor_bill_status(bill):
     return bill
 
 
+def refresh_ap_vendor_payment_status(payment):
+    payment.refresh_from_db()
+    if payment.status == 'voided':
+        return payment
+    if payment.void_journal_entry_id:
+        if payment.void_journal_entry.status == 'posted':
+            new_status = 'voided'
+        else:
+            new_status = 'void_pending'
+    elif not payment.journal_entry_id or payment.journal_entry.status != 'posted':
+        new_status = 'draft'
+    else:
+        new_status = 'posted'
+    if payment.status != new_status:
+        payment.status = new_status
+        update_fields = ['status']
+        if new_status == 'voided' and not payment.voided_at:
+            payment.voided_at = timezone.now()
+            update_fields.append('voided_at')
+        payment.save(update_fields=update_fields)
+    return payment
+
+
 def _create_ap_journal(entity, entry_date, description, lines, reference, source_type, source_document_number, created_by=None):
     period = find_period_for_date(entity, entry_date)
     journal_entry = JournalEntry.objects.create(
@@ -2724,7 +2759,13 @@ def create_ap_vendor_payment_draft(
     if not bill.journal_entry_id or bill.journal_entry.status != 'posted':
         raise ValidationError('AP vendor bill journal must be posted before recording payment.')
     amount = _decimal_amount(amount)
-    recorded_total = bill.payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    recorded_total = (
+        bill.payments
+        .exclude(status='voided')
+        .exclude(void_journal_entry__status='posted')
+        .aggregate(total=Sum('amount'))['total']
+        or Decimal('0.00')
+    )
     remaining = bill.amount - recorded_total
     if amount > remaining:
         raise ValidationError('AP vendor payment cannot exceed the remaining bill balance.')
@@ -2765,6 +2806,108 @@ def create_ap_vendor_payment_draft(
     payment.journal_entry = journal_entry
     payment.full_clean()
     payment.save(update_fields=['journal_entry'])
+    return payment
+
+
+@transaction.atomic
+def create_ap_vendor_payment_void_draft(payment, reason, created_by=None):
+    payment = (
+        APVendorPayment.objects
+        .select_related('entity', 'bill', 'journal_entry', 'void_journal_entry')
+        .get(pk=payment.pk)
+    )
+    refresh_ap_vendor_payment_status(payment)
+    if payment.status == 'voided':
+        raise ValidationError('Voided AP vendor payments cannot be voided again.')
+    if payment.settlement_status == 'matched':
+        raise ValidationError('Matched AP vendor payments must be unmatched before voiding.')
+    if payment.void_journal_entry_id:
+        return payment.void_journal_entry
+    if not payment.journal_entry_id or payment.journal_entry.status != 'posted':
+        if payment.journal_entry_id and payment.journal_entry.status != 'draft':
+            raise ValidationError('Only draft or posted AP vendor payments can be voided.')
+        if payment.journal_entry_id and payment.journal_entry.status == 'draft':
+            payment.journal_entry.status = 'voided'
+            payment.journal_entry.save(update_fields=['status', 'updated_at'])
+        payment.status = 'voided'
+        payment.void_reason = reason
+        payment.voided_at = timezone.now()
+        payment.voided_by = created_by if getattr(created_by, 'is_authenticated', False) else None
+        payment.save(update_fields=['status', 'void_reason', 'voided_at', 'voided_by'])
+        return None
+    reversal_journal = _create_ap_journal(
+        payment.entity,
+        timezone.localdate(),
+        f"Void vendor payment {payment.bill.bill_number} - {payment.bill.vendor_name}",
+        _reverse_journal_lines(payment.journal_entry),
+        reference=f"VOID-{payment.reference or payment.bill.bill_number}",
+        source_type='adjustment',
+        source_document_number=payment.reference or payment.bill.bill_number,
+        created_by=created_by,
+    )
+    SourceDocumentLink.objects.create(
+        entity=payment.entity,
+        journal_entry=reversal_journal,
+        source_app='accounting',
+        source_model='APVendorPayment.void',
+        source_id=str(payment.pk),
+        source_number=payment.reference or payment.bill.bill_number,
+        document_date=reversal_journal.entry_date,
+    )
+    payment.status = 'void_pending'
+    payment.void_journal_entry = reversal_journal
+    payment.void_reason = reason
+    payment.voided_by = created_by if getattr(created_by, 'is_authenticated', False) else None
+    payment.save(update_fields=['status', 'void_journal_entry', 'void_reason', 'voided_by'])
+    return reversal_journal
+
+
+@transaction.atomic
+def match_ap_vendor_payment_settlement(payment, settlement_date, settlement_reference, settlement_note='', matched_by=None):
+    payment = APVendorPayment.objects.select_related('journal_entry', 'void_journal_entry').get(pk=payment.pk)
+    refresh_ap_vendor_payment_status(payment)
+    if payment.status != 'posted':
+        raise ValidationError('Only posted AP vendor payments can be matched to settlement.')
+    if payment.void_journal_entry_id:
+        raise ValidationError('Void-pending or voided AP vendor payments cannot be matched to settlement.')
+    if not settlement_reference:
+        raise ValidationError('Settlement reference is required.')
+    payment.settlement_status = 'matched'
+    payment.settlement_date = settlement_date
+    payment.settlement_reference = settlement_reference
+    payment.settlement_note = settlement_note
+    payment.matched_at = timezone.now()
+    payment.matched_by = matched_by if getattr(matched_by, 'is_authenticated', False) else None
+    payment.full_clean()
+    payment.save(update_fields=[
+        'settlement_status',
+        'settlement_date',
+        'settlement_reference',
+        'settlement_note',
+        'matched_at',
+        'matched_by',
+    ])
+    return payment
+
+
+@transaction.atomic
+def clear_ap_vendor_payment_settlement(payment):
+    payment = APVendorPayment.objects.get(pk=payment.pk)
+    payment.settlement_status = 'unmatched'
+    payment.settlement_date = None
+    payment.settlement_reference = ''
+    payment.settlement_note = ''
+    payment.matched_at = None
+    payment.matched_by = None
+    payment.full_clean()
+    payment.save(update_fields=[
+        'settlement_status',
+        'settlement_date',
+        'settlement_reference',
+        'settlement_note',
+        'matched_at',
+        'matched_by',
+    ])
     return payment
 
 

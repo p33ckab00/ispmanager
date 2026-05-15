@@ -338,11 +338,33 @@ class APVendorPaymentForm(forms.ModelForm):
     def clean_amount(self):
         amount = self.cleaned_data.get('amount') or Decimal('0.00')
         if self.bill:
-            existing_total = self.bill.payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            existing_total = (
+                self.bill.payments
+                .exclude(status='voided')
+                .exclude(void_journal_entry__status='posted')
+                .aggregate(total=Sum('amount'))['total']
+                or Decimal('0.00')
+            )
             remaining = self.bill.amount - existing_total
             if amount > remaining:
                 raise forms.ValidationError('Payment cannot exceed the remaining bill balance.')
         return amount
+
+
+class APVendorPaymentVoidForm(forms.Form):
+    reason = forms.CharField(
+        max_length=255,
+        widget=forms.Textarea(attrs={'rows': 3, 'placeholder': 'Reason for voiding this payment'}),
+    )
+
+
+class APVendorPaymentSettlementForm(forms.Form):
+    settlement_date = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}))
+    settlement_reference = forms.CharField(
+        max_length=120,
+        widget=forms.TextInput(attrs={'placeholder': 'Bank statement, check clearing, or wallet settlement reference'}),
+    )
+    settlement_note = forms.CharField(max_length=255, required=False)
 
 
 class IncomeForm(forms.ModelForm):

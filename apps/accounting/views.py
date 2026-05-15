@@ -18,6 +18,7 @@ from apps.accounting.models import (
     APVendor,
     APVendorBill,
     APVendorBillAttachment,
+    APVendorPayment,
     ChartOfAccount,
     CutoverBalanceSchedule,
     CutoverPlan,
@@ -36,6 +37,8 @@ from apps.accounting.forms import (
     APVendorBillVoidForm,
     APVendorForm,
     APVendorPaymentForm,
+    APVendorPaymentSettlementForm,
+    APVendorPaymentVoidForm,
     CutoverBalanceScheduleForm,
     CutoverBalanceScheduleLineForm,
     CutoverPlanForm,
@@ -64,7 +67,9 @@ from apps.accounting.services import (
     create_ap_vendor_bill_draft,
     create_ap_vendor_bill_attachment,
     create_ap_vendor_bill_void_draft,
+    clear_ap_vendor_payment_settlement,
     create_ap_vendor_payment_draft,
+    create_ap_vendor_payment_void_draft,
     create_cutover_balance_schedule,
     create_cutover_plan,
     build_general_ledger_report,
@@ -79,9 +84,11 @@ from apps.accounting.services import (
     get_latest_cutover_reconciliation_snapshot,
     mark_accounting_live,
     mark_cutover_ready,
+    match_ap_vendor_payment_settlement,
     post_journal_entry,
     refresh_opening_balance_totals,
     refresh_ap_vendor_bill_status,
+    refresh_ap_vendor_payment_status,
     reopen_accounting_period,
     retry_source_posting,
     sync_payments_to_income,
@@ -1338,7 +1345,13 @@ def ap_vendor_bill_detail(request, pk):
         pk=pk,
     )
     refresh_ap_vendor_bill_status(bill)
-    payments = bill.payments.select_related('cash_account', 'journal_entry').order_by('-payment_date', '-created_at')
+    payments = (
+        bill.payments
+        .select_related('cash_account', 'journal_entry', 'void_journal_entry', 'matched_by')
+        .order_by('-payment_date', '-created_at')
+    )
+    for payment in payments:
+        refresh_ap_vendor_payment_status(payment)
     attachments = bill.attachments.select_related('uploaded_by').order_by('-uploaded_at')
     return render(request, 'accounting/ap_vendor_bill_detail.html', {
         'entity': entity,
@@ -1491,6 +1504,118 @@ def ap_vendor_payment_add(request, pk):
         'bill': bill,
         'form': form,
     })
+
+
+@login_required
+def ap_vendor_payment_void(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_apvendorbill',
+        'accounting-ap-vendor-bill-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    payment = get_object_or_404(
+        APVendorPayment.objects.select_related('bill', 'journal_entry', 'void_journal_entry'),
+        entity=entity,
+        pk=pk,
+    )
+    refresh_ap_vendor_payment_status(payment)
+    if request.method == 'POST':
+        form = APVendorPaymentVoidForm(request.POST)
+        if form.is_valid():
+            try:
+                reversal_journal = create_ap_vendor_payment_void_draft(
+                    payment,
+                    form.cleaned_data['reason'],
+                    created_by=request.user,
+                )
+                if reversal_journal:
+                    AuditLog.log('create', 'accounting', f"AP vendor payment void draft created: {payment.reference or payment.pk}", user=request.user)
+                    messages.success(request, f"AP payment void draft created as journal {reversal_journal.entry_number}.")
+                else:
+                    AuditLog.log('void', 'accounting', f"Draft AP vendor payment voided: {payment.reference or payment.pk}", user=request.user)
+                    messages.success(request, 'Draft AP payment voided.')
+                return redirect('accounting-ap-vendor-bill-detail', pk=payment.bill.pk)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        form = APVendorPaymentVoidForm()
+    return render(request, 'accounting/ap_vendor_payment_void_form.html', {
+        'entity': entity,
+        'payment': payment,
+        'form': form,
+    })
+
+
+@login_required
+def ap_vendor_payment_settlement(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_apvendorbill',
+        'accounting-ap-vendor-bill-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    payment = get_object_or_404(
+        APVendorPayment.objects.select_related('bill', 'journal_entry', 'void_journal_entry'),
+        entity=entity,
+        pk=pk,
+    )
+    refresh_ap_vendor_payment_status(payment)
+    if request.method == 'POST':
+        form = APVendorPaymentSettlementForm(request.POST)
+        if form.is_valid():
+            try:
+                match_ap_vendor_payment_settlement(
+                    payment,
+                    form.cleaned_data['settlement_date'],
+                    form.cleaned_data['settlement_reference'],
+                    settlement_note=form.cleaned_data['settlement_note'],
+                    matched_by=request.user,
+                )
+                AuditLog.log('update', 'accounting', f"AP vendor payment matched to settlement: {payment.reference or payment.pk}", user=request.user)
+                messages.success(request, 'AP payment settlement matched.')
+                return redirect('accounting-ap-vendor-bill-detail', pk=payment.bill.pk)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        form = APVendorPaymentSettlementForm(initial={
+            'settlement_date': payment.settlement_date or date.today(),
+            'settlement_reference': payment.settlement_reference,
+            'settlement_note': payment.settlement_note,
+        })
+    return render(request, 'accounting/ap_vendor_payment_settlement_form.html', {
+        'entity': entity,
+        'payment': payment,
+        'form': form,
+    })
+
+
+@login_required
+def ap_vendor_payment_settlement_clear(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_apvendorbill',
+        'accounting-ap-vendor-bill-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    payment = get_object_or_404(APVendorPayment.objects.select_related('bill'), entity=entity, pk=pk)
+    if request.method == 'POST':
+        clear_ap_vendor_payment_settlement(payment)
+        AuditLog.log('update', 'accounting', f"AP vendor payment settlement cleared: {payment.reference or payment.pk}", user=request.user)
+        messages.success(request, 'AP payment settlement match cleared.')
+    return redirect('accounting-ap-vendor-bill-detail', pk=payment.bill.pk)
 
 
 @login_required
