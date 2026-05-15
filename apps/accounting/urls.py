@@ -48,6 +48,7 @@ urlpatterns = [
     path('ap-bills/', views.ap_vendor_bill_list, name='accounting-ap-vendor-bill-list'),
     path('ap-bills/add/', views.ap_vendor_bill_add, name='accounting-ap-vendor-bill-add'),
     path('ap-bills/<int:pk>/', views.ap_vendor_bill_detail, name='accounting-ap-vendor-bill-detail'),
+    path('ap-bills/<int:pk>/void/', views.ap_vendor_bill_void, name='accounting-ap-vendor-bill-void'),
     path('ap-bills/<int:pk>/payments/add/', views.ap_vendor_payment_add, name='accounting-ap-vendor-payment-add'),
     path('ap-aging/', views.ap_aging, name='accounting-ap-aging'),
     path('tax-ledger/', views.tax_ledger, name='accounting-tax-ledger'),

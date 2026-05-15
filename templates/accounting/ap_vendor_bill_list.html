@@ -44,7 +44,7 @@
         <td class="px-4 py-3 text-right">PHP {{ bill.amount }}</td>
         <td class="px-4 py-3 text-right">PHP {{ bill.remaining_balance }}</td>
         <td class="px-4 py-3">
-          <span class="px-2 py-0.5 rounded text-xs {% if bill.status == 'paid' %}bg-green-50 text-green-700{% elif bill.status == 'draft' %}bg-amber-50 text-amber-700{% elif bill.status == 'voided' %}bg-red-50 text-red-700{% else %}bg-gray-100 text-gray-700{% endif %}">
+          <span class="px-2 py-0.5 rounded text-xs {% if bill.status == 'paid' %}bg-green-50 text-green-700{% elif bill.status == 'draft' or bill.status == 'void_pending' %}bg-amber-50 text-amber-700{% elif bill.status == 'voided' %}bg-red-50 text-red-700{% else %}bg-gray-100 text-gray-700{% endif %}">
             {{ bill.get_status_display }}
           </span>
         </td>

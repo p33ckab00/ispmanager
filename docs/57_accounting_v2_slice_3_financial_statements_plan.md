@@ -17,6 +17,7 @@ Slice 3E adds formal period close with generated closing entries.
 Slice 3F adds immutable report archive records and a guarded period reopen
 workflow with reversing closing entries.
 Slice 3G-A adds the first post-live AP vendor bill subledger.
+Slice 3G-B adds AP void/reversal handling and purchase tax breakdowns.
 
 ## Slice 3A Implemented
 
@@ -209,6 +210,26 @@ Implemented:
 - Regression coverage was added for posted bill/payment AP Aging behavior and
   GL AP control reconciliation.
 
+## Slice 3G-B Implemented
+
+Implemented:
+
+- AP vendor bills now store purchase tax treatment, base amount, and input VAT
+  amount separately from gross payable amount.
+- VAT AP bill drafts post `Dr expense/direct cost/asset`, `Dr Input VAT`, and
+  `Cr AP`; non-VAT, exempt, and zero-rated bills continue to post without input
+  VAT.
+- Existing AP bills are migrated with base amount equal to prior gross amount so
+  3G-A records remain valid.
+- Draft AP bills can be voided directly; posted AP bills create a reversing
+  draft journal and move to `void_pending` until that reversal is posted.
+- AP Aging keeps void-pending bills visible until the reversal journal posts, so
+  AP support rows and the GL AP control account stay aligned during review.
+- AP bill detail pages show tax breakdown and void journal state, with a
+  permission-gated void flow.
+- Regression coverage was added for VAT purchase posting and AP bill reversal
+  behavior.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -254,8 +275,8 @@ Implemented:
   dimensions.
 - AR Aging is not historical-payment accurate yet because invoice balances are
   current-state operational balances.
-- AP vendor bills do not yet have void/reversal workflow, vendor master records,
-  attachment storage, purchase tax breakdowns, or payment settlement matching.
+- AP vendor bills do not yet have vendor master records, attachment storage, AP
+  payment void/reversal, or payment settlement matching.
 - AP Aging selects the post-live AP bill subledger ahead of cutover/opening
   fallbacks; a merged historical cutover plus post-live AP view is still future
   work.
@@ -265,9 +286,9 @@ Implemented:
 
 ## Next Slice Candidate
 
-Slice 3G-B should continue AP hardening before BIR/NTC books:
+Slice 3G-C should continue AP hardening before BIR/NTC books:
 
-- AP bill void/reversal and purchase tax breakdowns.
-- Vendor master records and attachment storage.
+- Vendor master records and bill attachment storage.
+- AP payment void/reversal and payment settlement matching.
 - Binary archive/package storage for generated export files.
 - Saved report presets per user.

@@ -2483,7 +2483,12 @@ def post_journal_entry(journal_entry, posted_by=None, allow_closed_period=False)
 def refresh_ap_vendor_bill_status(bill):
     if bill.status == 'voided':
         return bill
-    if not bill.journal_entry_id or bill.journal_entry.status != 'posted':
+    if bill.void_journal_entry_id:
+        if bill.void_journal_entry.status == 'posted':
+            new_status = 'voided'
+        else:
+            new_status = 'void_pending'
+    elif not bill.journal_entry_id or bill.journal_entry.status != 'posted':
         new_status = 'draft'
     else:
         remaining = bill.remaining_balance
@@ -2495,7 +2500,11 @@ def refresh_ap_vendor_bill_status(bill):
             new_status = 'open'
     if bill.status != new_status:
         bill.status = new_status
-        bill.save(update_fields=['status', 'updated_at'])
+        update_fields = ['status', 'updated_at']
+        if new_status == 'voided' and not bill.voided_at:
+            bill.voided_at = timezone.now()
+            update_fields.append('voided_at')
+        bill.save(update_fields=update_fields)
     return bill
 
 
@@ -2536,10 +2545,15 @@ def create_ap_vendor_bill_draft(
     expense_account,
     ap_account,
     amount,
+    tax_treatment='non_vat',
+    base_amount=None,
+    input_vat_amount=Decimal('0.00'),
     notes='',
     created_by=None,
 ):
     amount = _decimal_amount(amount)
+    base_amount = amount if base_amount is None else _decimal_amount(base_amount)
+    input_vat_amount = _decimal_amount(input_vat_amount)
     bill = APVendorBill(
         entity=entity,
         vendor_name=vendor_name,
@@ -2548,6 +2562,9 @@ def create_ap_vendor_bill_draft(
         due_date=due_date,
         expense_account=_resolve_account(entity, expense_account),
         ap_account=_resolve_account(entity, ap_account),
+        tax_treatment=tax_treatment,
+        base_amount=base_amount,
+        input_vat_amount=input_vat_amount,
         amount=amount,
         notes=notes,
         created_by=created_by if getattr(created_by, 'is_authenticated', False) else None,
@@ -2558,10 +2575,7 @@ def create_ap_vendor_bill_draft(
         entity,
         document_date,
         f"Vendor bill {bill.bill_number} - {bill.vendor_name}",
-        [
-            {'account': bill.expense_account, 'debit': amount, 'description': bill.vendor_name},
-            {'account': bill.ap_account, 'credit': amount, 'description': bill.vendor_name},
-        ],
+        _ap_vendor_bill_journal_lines(bill),
         reference=bill.bill_number,
         source_type='expense',
         source_document_number=bill.bill_number,
@@ -2582,6 +2596,85 @@ def create_ap_vendor_bill_draft(
     return bill
 
 
+def _ap_vendor_bill_journal_lines(bill):
+    lines = [
+        {'account': bill.expense_account, 'debit': bill.base_amount, 'description': bill.vendor_name},
+    ]
+    if bill.input_vat_amount > Decimal('0.00'):
+        lines.append({
+            'account': _resolve_account(bill.entity, '1200'),
+            'debit': bill.input_vat_amount,
+            'description': bill.vendor_name,
+        })
+    lines.append({'account': bill.ap_account, 'credit': bill.amount, 'description': bill.vendor_name})
+    return lines
+
+
+def _reverse_journal_lines(journal_entry):
+    lines = []
+    for line in journal_entry.lines.select_related('account').order_by('line_number'):
+        lines.append({
+            'account': line.account,
+            'debit': line.credit,
+            'credit': line.debit,
+            'description': line.description,
+        })
+    return lines
+
+
+@transaction.atomic
+def create_ap_vendor_bill_void_draft(bill, reason, created_by=None):
+    bill = (
+        APVendorBill.objects
+        .select_related('entity', 'journal_entry', 'void_journal_entry')
+        .get(pk=bill.pk)
+    )
+    refresh_ap_vendor_bill_status(bill)
+    if bill.status == 'voided':
+        raise ValidationError('Voided AP vendor bills cannot be voided again.')
+    if bill.payments.exists():
+        raise ValidationError('AP vendor bills with recorded payments cannot be voided until payments are reversed or voided.')
+    if bill.void_journal_entry_id:
+        return bill.void_journal_entry
+    if not bill.journal_entry_id or bill.journal_entry.status != 'posted':
+        if bill.journal_entry_id and bill.journal_entry.status != 'draft':
+            raise ValidationError('Only draft or posted AP vendor bills can be voided.')
+        if bill.journal_entry_id and bill.journal_entry.status == 'draft':
+            bill.journal_entry.status = 'voided'
+            bill.journal_entry.save(update_fields=['status', 'updated_at'])
+        bill.status = 'voided'
+        bill.void_reason = reason
+        bill.voided_at = timezone.now()
+        bill.voided_by = created_by if getattr(created_by, 'is_authenticated', False) else None
+        bill.save(update_fields=['status', 'void_reason', 'voided_at', 'voided_by', 'updated_at'])
+        return None
+    reversal_journal = _create_ap_journal(
+        bill.entity,
+        timezone.localdate(),
+        f"Void vendor bill {bill.bill_number} - {bill.vendor_name}",
+        _reverse_journal_lines(bill.journal_entry),
+        reference=f"VOID-{bill.bill_number}",
+        source_type='adjustment',
+        source_document_number=bill.bill_number,
+        created_by=created_by,
+    )
+    SourceDocumentLink.objects.create(
+        entity=bill.entity,
+        journal_entry=reversal_journal,
+        source_app='accounting',
+        source_model='APVendorBill.void',
+        source_id=str(bill.pk),
+        source_number=bill.bill_number,
+        document_date=reversal_journal.entry_date,
+    )
+    bill.status = 'void_pending'
+    bill.void_journal_entry = reversal_journal
+    bill.void_reason = reason
+    bill.voided_by = created_by if getattr(created_by, 'is_authenticated', False) else None
+    bill.save(update_fields=['status', 'void_journal_entry', 'void_reason', 'voided_by', 'updated_at'])
+    return reversal_journal
+
+
 @transaction.atomic
 def create_ap_vendor_payment_draft(
     bill,
@@ -2593,8 +2686,8 @@ def create_ap_vendor_payment_draft(
 ):
     bill = APVendorBill.objects.select_related('entity', 'ap_account', 'journal_entry').get(pk=bill.pk)
     refresh_ap_vendor_bill_status(bill)
-    if bill.status == 'voided':
-        raise ValidationError('Voided AP vendor bills cannot be paid.')
+    if bill.status in ('void_pending', 'voided'):
+        raise ValidationError('Voided or void-pending AP vendor bills cannot be paid.')
     if not bill.journal_entry_id or bill.journal_entry.status != 'posted':
         raise ValidationError('AP vendor bill journal must be posted before recording payment.')
     amount = _decimal_amount(amount)

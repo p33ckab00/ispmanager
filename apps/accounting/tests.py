@@ -43,6 +43,7 @@ from apps.accounting.services import (
     build_trial_balance_report,
     close_accounting_period,
     create_ap_vendor_bill_draft,
+    create_ap_vendor_bill_void_draft,
     create_ap_vendor_payment_draft,
     create_accounting_foundation,
     create_cutover_balance_schedule,
@@ -58,6 +59,7 @@ from apps.accounting.services import (
     mark_accounting_live,
     mark_cutover_ready,
     post_journal_entry,
+    refresh_ap_vendor_bill_status,
     refresh_opening_balance_totals,
     reopen_accounting_period,
     validate_cutover_balance_schedule,
@@ -576,6 +578,106 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(APVendorBill.objects.count(), 1)
         self.assertEqual(APVendorPayment.objects.count(), 1)
         self.assertEqual(bill.remaining_balance, Decimal('500.00'))
+
+    def test_ap_vendor_bill_vat_breakdown_posts_input_vat(self):
+        entity = create_accounting_foundation(
+            entity_name='VAT AP ISP',
+            template_key='isp_vat_corporation',
+            fiscal_year=2026,
+        )['entity']
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        bill = create_ap_vendor_bill_draft(
+            entity,
+            'VAT Supplier',
+            'BILL-VAT-001',
+            date(2026, 1, 20),
+            date(2026, 1, 31),
+            expense,
+            ap,
+            Decimal('1120.00'),
+            tax_treatment='vat',
+            base_amount=Decimal('1000.00'),
+            input_vat_amount=Decimal('120.00'),
+        )
+
+        lines = {line.account.code: line for line in bill.journal_entry.lines.select_related('account')}
+
+        self.assertTrue(bill.journal_entry.is_balanced())
+        self.assertEqual(lines['6020'].debit, Decimal('1000.00'))
+        self.assertEqual(lines['1200'].debit, Decimal('120.00'))
+        self.assertEqual(lines['2000'].credit, Decimal('1120.00'))
+
+    def test_ap_vendor_bill_void_uses_reversal_draft_until_posted(self):
+        entity = self._foundation()
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        bill = create_ap_vendor_bill_draft(
+            entity,
+            'Upstream Provider',
+            'BILL-VOID-001',
+            date(2026, 1, 20),
+            date(2026, 1, 31),
+            expense,
+            ap,
+            Decimal('700.00'),
+        )
+        post_journal_entry(bill.journal_entry)
+
+        reversal_journal = create_ap_vendor_bill_void_draft(bill, 'Duplicate supplier bill')
+        pending_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+        bill.refresh_from_db()
+
+        self.assertEqual(bill.status, 'void_pending')
+        self.assertEqual(reversal_journal.status, 'draft')
+        self.assertEqual(pending_report['total'], Decimal('700.00'))
+        self.assertEqual(pending_report['control_balance'], Decimal('700.00'))
+        lines = {line.account.code: line for line in reversal_journal.lines.select_related('account')}
+        self.assertEqual(lines['2000'].debit, Decimal('700.00'))
+        self.assertEqual(lines['6020'].credit, Decimal('700.00'))
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        with self.assertRaises(ValidationError):
+            create_ap_vendor_payment_draft(
+                bill,
+                date(2026, 2, 5),
+                Decimal('100.00'),
+                cash,
+                reference='CHK-BLOCKED',
+            )
+
+        post_journal_entry(reversal_journal)
+        refresh_ap_vendor_bill_status(bill)
+        bill.refresh_from_db()
+        voided_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+
+        self.assertEqual(bill.status, 'voided')
+        self.assertEqual(voided_report['total'], Decimal('0.00'))
+        self.assertEqual(voided_report['control_balance'], Decimal('0.00'))
+        self.assertEqual(voided_report['control_difference'], Decimal('0.00'))
+
+    def test_draft_ap_vendor_bill_voids_without_reversal(self):
+        entity = self._foundation()
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        bill = create_ap_vendor_bill_draft(
+            entity,
+            'Draft Supplier',
+            'BILL-DRAFT-VOID-001',
+            date(2026, 1, 20),
+            date(2026, 1, 31),
+            expense,
+            ap,
+            Decimal('700.00'),
+        )
+
+        reversal_journal = create_ap_vendor_bill_void_draft(bill, 'Entered in error')
+        bill.refresh_from_db()
+        bill.journal_entry.refresh_from_db()
+
+        self.assertIsNone(reversal_journal)
+        self.assertEqual(bill.status, 'voided')
+        self.assertEqual(bill.journal_entry.status, 'voided')
+        self.assertEqual(build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))['total'], Decimal('0.00'))
 
     def test_tax_ledger_reports_vat_and_optional_2307_claims(self):
         entity = create_accounting_foundation(

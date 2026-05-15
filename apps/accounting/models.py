@@ -502,11 +502,18 @@ class AccountingReportArchive(models.Model):
 
 
 class APVendorBill(models.Model):
+    TAX_TREATMENT_CHOICES = [
+        ('non_vat', 'Non-VAT'),
+        ('vat', 'VAT'),
+        ('vat_exempt', 'VAT Exempt'),
+        ('zero_rated', 'Zero-Rated'),
+    ]
     STATUS_CHOICES = [
         ('draft', 'Draft Journal'),
         ('open', 'Open'),
         ('partial', 'Partially Paid'),
         ('paid', 'Paid'),
+        ('void_pending', 'Void Pending'),
         ('voided', 'Voided'),
     ]
 
@@ -529,6 +536,9 @@ class APVendorBill(models.Model):
         on_delete=models.PROTECT,
         related_name='ap_vendor_bills_as_payable',
     )
+    tax_treatment = models.CharField(max_length=20, choices=TAX_TREATMENT_CHOICES, default='non_vat')
+    base_amount = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
+    input_vat_amount = models.DecimalField(max_digits=14, decimal_places=2, default=MONEY_ZERO)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     journal_entry = models.ForeignKey(
@@ -537,6 +547,22 @@ class APVendorBill(models.Model):
         null=True,
         blank=True,
         related_name='ap_vendor_bills',
+    )
+    void_journal_entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='voided_ap_vendor_bills',
+    )
+    void_reason = models.CharField(max_length=255, blank=True)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='voided_ap_vendor_bills',
     )
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(
@@ -564,6 +590,19 @@ class APVendorBill(models.Model):
     def clean(self):
         if self.amount is not None and self.amount <= MONEY_ZERO:
             raise ValidationError('AP vendor bill amount must be greater than zero.')
+        if self.base_amount is not None and self.base_amount <= MONEY_ZERO:
+            raise ValidationError('AP vendor bill base amount must be greater than zero.')
+        if self.input_vat_amount is not None and self.input_vat_amount < MONEY_ZERO:
+            raise ValidationError('AP vendor bill input VAT cannot be negative.')
+        if self.amount is not None and self.base_amount is not None and self.input_vat_amount is not None:
+            if self.amount != self.base_amount + self.input_vat_amount:
+                raise ValidationError('AP vendor bill gross amount must equal base amount plus input VAT.')
+        if self.tax_treatment != 'vat' and self.input_vat_amount != MONEY_ZERO:
+            raise ValidationError('Only VAT AP vendor bills may carry input VAT.')
+        if self.tax_treatment == 'vat' and self.input_vat_amount <= MONEY_ZERO:
+            raise ValidationError('VAT AP vendor bills must carry input VAT.')
+        if self.input_vat_amount > MONEY_ZERO and self.entity_id and self.entity.tax_classification != 'vat':
+            raise ValidationError('Input VAT is available only for VAT accounting entities.')
         if self.due_date and self.document_date and self.due_date < self.document_date:
             raise ValidationError('AP vendor bill due date cannot be before document date.')
         for field_name in ('expense_account', 'ap_account'):
@@ -576,6 +615,8 @@ class APVendorBill(models.Model):
             raise ValidationError('AP account must be a liability account.')
         if self.journal_entry_id and self.entity_id and self.journal_entry.entity_id != self.entity_id:
             raise ValidationError('AP vendor bill journal must belong to the same accounting entity.')
+        if self.void_journal_entry_id and self.entity_id and self.void_journal_entry.entity_id != self.entity_id:
+            raise ValidationError('AP vendor bill void journal must belong to the same accounting entity.')
 
     @property
     def is_posted(self):

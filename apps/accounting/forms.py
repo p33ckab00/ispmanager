@@ -194,8 +194,11 @@ class APVendorBillForm(forms.ModelForm):
             'bill_number',
             'document_date',
             'due_date',
+            'tax_treatment',
             'expense_account',
             'ap_account',
+            'base_amount',
+            'input_vat_amount',
             'amount',
             'notes',
         ]
@@ -209,9 +212,15 @@ class APVendorBillForm(forms.ModelForm):
 
     def __init__(self, *args, entity=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.entity = entity
         self.fields['expense_account'].queryset = ChartOfAccount.objects.none()
         self.fields['ap_account'].queryset = ChartOfAccount.objects.none()
         if entity:
+            if entity.tax_classification != 'vat':
+                self.fields['tax_treatment'].choices = [
+                    choice for choice in self.fields['tax_treatment'].choices
+                    if choice[0] != 'vat'
+                ]
             self.fields['expense_account'].queryset = ChartOfAccount.objects.filter(
                 entity=entity,
                 is_active=True,
@@ -222,6 +231,13 @@ class APVendorBillForm(forms.ModelForm):
                 is_active=True,
                 account_type='liability',
             ).order_by('code')
+
+
+class APVendorBillVoidForm(forms.Form):
+    reason = forms.CharField(
+        max_length=255,
+        widget=forms.Textarea(attrs={'rows': 3, 'placeholder': 'Reason for voiding this bill'}),
+    )
 
 
 class APVendorPaymentForm(forms.ModelForm):

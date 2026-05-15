@@ -136,6 +136,9 @@ Slice 3G-A is now implemented for post-live AP: AP vendor bills and payments
 create draft journals, AP Aging reads posted AP bill/payment subledger rows,
 the schedule reconciles against the GL AP control account, and cashier role
 presets receive read-only AP bill/payment access.
+Slice 3G-B is now implemented for AP hardening: AP bills can carry purchase tax
+breakdowns, VAT bills split base amount and input VAT in the draft journal, and
+posted bills use a draft reversal workflow before becoming voided.
 
 ## 2. Locked Decisions
 
@@ -442,9 +445,9 @@ Slice 3G-A is implemented as post-live AP vendor bill foundation:
   draft-then-approve behavior.
 - Existing cutover/opening AP fallback remains available when no posted AP
   vendor bills exist.
-- Remaining Slice 3 work starts with AP bill void/reversal, purchase tax
-  breakdowns, vendor master records, binary archive/package storage, and saved
-  report presets.
+- Remaining Slice 3 work starts with vendor master records, bill attachments,
+  AP payment void/reversal and settlement matching, binary archive/package
+  storage, and saved report presets.
 
 ### Slice 4 - BIR Books and Guides
 

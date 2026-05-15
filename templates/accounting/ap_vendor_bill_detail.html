@@ -10,8 +10,16 @@
     {% if bill.journal_entry %}
     <a href="{% url 'accounting-journal-detail' bill.journal_entry.pk %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Bill Journal</a>
     {% endif %}
+    {% if bill.void_journal_entry %}
+    <a href="{% url 'accounting-journal-detail' bill.void_journal_entry.pk %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Void Journal</a>
+    {% endif %}
     {% if perms.accounting.manage_apvendorbill %}
+    {% if bill.status != 'voided' and bill.status != 'void_pending' %}
+    <a href="{% url 'accounting-ap-vendor-bill-void' bill.pk %}" class="bg-red-50 hover:bg-red-100 text-red-700 text-sm font-semibold px-4 py-2 rounded-lg">Void Bill</a>
+    {% endif %}
+    {% if bill.status != 'voided' and bill.status != 'void_pending' %}
     <a href="{% url 'accounting-ap-vendor-payment-add' bill.pk %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Add Payment</a>
+    {% endif %}
     {% endif %}
     <a href="{% url 'accounting-ap-vendor-bill-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">AP Bills</a>
   </div>
@@ -40,8 +48,14 @@
 
 <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
   <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+    <div><dt class="text-gray-500">Tax Treatment</dt><dd class="font-medium">{{ bill.get_tax_treatment_display }}</dd></div>
+    <div><dt class="text-gray-500">Base Amount</dt><dd class="font-medium">PHP {{ bill.base_amount }}</dd></div>
+    <div><dt class="text-gray-500">Input VAT</dt><dd class="font-medium">PHP {{ bill.input_vat_amount }}</dd></div>
     <div><dt class="text-gray-500">Expense Account</dt><dd class="font-medium">{{ bill.expense_account }}</dd></div>
     <div><dt class="text-gray-500">AP Account</dt><dd class="font-medium">{{ bill.ap_account }}</dd></div>
+    {% if bill.void_reason %}
+    <div class="md:col-span-2"><dt class="text-gray-500">Void Reason</dt><dd>{{ bill.void_reason }}</dd></div>
+    {% endif %}
     <div class="md:col-span-2"><dt class="text-gray-500">Notes</dt><dd>{{ bill.notes|default:"-" }}</dd></div>
   </dl>
 </div>
