@@ -128,6 +128,10 @@ Slice 3E is now implemented for formal period close: open periods can preview
 and post generated closing journals, close metadata is stored on the period,
 Income Statement excludes mechanical closing entries, and Balance Sheet avoids
 double-counting closed earnings.
+Slice 3F is now implemented for report archive hardening and period reopen:
+generated CSV/XLSX/PDF/manifest exports now create immutable archive metadata
+records with canonical data and file hashes, and closed periods can be reopened
+through a posted reversing closing journal.
 
 ## 2. Locked Decisions
 
@@ -408,9 +412,21 @@ Slice 3E is implemented as formal period close:
   stays visible after close.
 - Balance Sheet adds unclosed current earnings only after the latest closed
   period, avoiding double-counting after closing entries are posted.
-- Remaining Slice 3 work starts with immutable archive records for generated
-  packages, reopen/reverse-close controls, and a full post-live AP vendor
-  invoice subledger.
+
+Slice 3F is implemented as report archive and reopen hardening:
+
+- Generated CSV, XLSX, PDF, and manifest exports create immutable
+  `AccountingReportArchive` metadata records.
+- Archive records store report name, format, filename, content type, filters,
+  columns, manifest JSON, canonical data hash, generated file hash, row count,
+  generator, and timestamp.
+- Export responses expose archive ID and generated-file SHA-256 headers.
+- Accounting dashboard links to the report archive list.
+- Closed periods can be reopened through a preview/confirm workflow that posts
+  a reversing `closing` journal and clears period close metadata.
+- Reopen is blocked when later periods are already closed or locked.
+- Remaining Slice 3 work starts with binary archive/package storage, saved
+  report presets, and a full post-live AP vendor invoice subledger.
 
 ### Slice 4 - BIR Books and Guides
 

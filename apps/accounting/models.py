@@ -447,6 +447,60 @@ class SourceDocumentLink(models.Model):
         return f"{self.source_app}.{self.source_model}:{self.source_id}"
 
 
+class AccountingReportArchive(models.Model):
+    FORMAT_CHOICES = [
+        ('csv', 'CSV'),
+        ('xlsx', 'XLSX'),
+        ('pdf', 'PDF'),
+        ('manifest', 'Manifest'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='report_archives',
+    )
+    report_name = models.CharField(max_length=120)
+    export_format = models.CharField(max_length=20, choices=FORMAT_CHOICES)
+    filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=120)
+    canonical_filename = models.CharField(max_length=255)
+    canonical_sha256 = models.CharField(max_length=64)
+    canonical_size = models.PositiveIntegerField(default=0)
+    file_sha256 = models.CharField(max_length=64)
+    file_size = models.PositiveIntegerField(default=0)
+    row_count = models.PositiveIntegerField(default=0)
+    filters = models.JSONField(default=dict, blank=True)
+    columns = models.JSONField(default=list, blank=True)
+    manifest = models.JSONField(default=dict, blank=True)
+    generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='accounting_report_archives',
+    )
+    generated_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-generated_at', '-created_at']
+        permissions = [
+            ('view_accounting_report_archive', 'Can view accounting report archives'),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk and AccountingReportArchive.objects.filter(pk=self.pk).exists():
+            raise ValidationError('Accounting report archive records are immutable.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError('Accounting report archive records cannot be deleted.')
+
+    def __str__(self):
+        return f"{self.report_name} {self.export_format} {self.generated_at:%Y-%m-%d %H:%M}"
+
+
 class AccountingSourcePosting(models.Model):
     STATUS_CHOICES = [
         ('draft', 'Draft Journal Created'),

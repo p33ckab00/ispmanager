@@ -14,6 +14,8 @@ Slice 3D-A adds accountant-facing report ergonomics for repeat review runs.
 Slice 3D-B adds export packages for the full report set using canonical CSV
 data, XLSX workbooks, PDF workpapers, and JSON manifests with SHA-256 hashes.
 Slice 3E adds formal period close with generated closing entries.
+Slice 3F adds immutable report archive records and a guarded period reopen
+workflow with reversing closing entries.
 
 ## Slice 3A Implemented
 
@@ -156,6 +158,30 @@ Implemented:
 - Regression coverage was added for close posting, statement behavior after
   close, and draft-journal close blocking.
 
+## Slice 3F Implemented
+
+Implemented:
+
+- `AccountingReportArchive` now stores an immutable metadata record for every
+  generated CSV, XLSX, PDF, or manifest export.
+- Archive records include report name, export format, filename, content type,
+  canonical CSV filename, canonical data SHA-256, generated file SHA-256, file
+  size, row count, filters, columns, manifest JSON, generator, and timestamp.
+- Export responses now include `X-Accounting-Report-Archive-ID` and
+  `X-Accounting-Report-File-SHA256` headers.
+- Report Archive page at `/accounting/report-archives/` lists archived export
+  metadata with report and format filters.
+- Period reopen preview page at `/accounting/periods/<id>/reopen/`.
+- Reopen is blocked unless the period is closed, has no later closed/locked
+  period, and has not already had its closing journal reversed.
+- Confirming reopen posts one reversing `closing` journal dated on the period
+  end, clears the period close metadata, and returns the period to `open`.
+- Reverse-close journals use `source_type='closing'` so Income Statement still
+  ignores mechanical close/reopen lines while Trial Balance and Balance Sheet
+  see the close and reversal net together.
+- Regression coverage was added for archive creation/immutability and
+  close-reopen statement behavior.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -182,15 +208,17 @@ Implemented:
 - Trial Balance is period-based for now.
 - General Ledger is date-range based and can show all active accounts or one
   selected account.
+- Report exports create immutable archive metadata records with canonical data
+  and generated-file hashes.
 
 ## Remaining Slice 3 Gaps
 
-- Report exports are generated downloads with manifests; they are not yet
-  persisted as immutable compliance archives or tracked in Data Exchange
-  history.
-- Period close has no reopen/reverse workflow yet.
-- Period close does not yet create a persisted close checklist or reviewer
-  sign-off record beyond the audit log and close metadata.
+- Report archive records store metadata and hashes only; binary file storage
+  and bundled package downloads are still future work.
+- Period reopen/reverse-close is available, but does not yet have a separate
+  reviewer approval workflow.
+- Period close does not yet create a persisted close checklist beyond the audit
+  log and close metadata.
 - Department, area, service-type, and subscriber dimensions are not yet present
   in journal lines.
 - Cash Flow classification is GL-account based. It will become more exact once
@@ -206,8 +234,8 @@ Implemented:
 
 ## Next Slice Candidate
 
-Slice 3F should harden finalized workpapers before BIR/NTC books:
+Slice 3G should prepare the remaining subledger base before BIR/NTC books:
 
-- Immutable report archive records for generated manifest/export packages.
-- Period reopen/reverse-close workflow with approval controls.
 - Full post-live AP vendor invoice subledger design.
+- Binary archive/package storage for generated export files.
+- Saved report presets per user.

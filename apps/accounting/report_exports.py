@@ -54,7 +54,7 @@ def build_report_manifest(report_name, filename_base, headers, rows, filters, en
         },
         'notes': [
             'Hash is computed from canonical CSV data for this report run.',
-            'Manifest is a generated workpaper record; immutable archive storage is a future slice.',
+            'A report archive record is stored when this export is generated.',
         ],
     }
 
@@ -138,6 +138,36 @@ def manifest_response(filename, manifest):
     return response
 
 
+def _record_report_archive(request, entity, export_format, response, filename, manifest):
+    if not getattr(entity, 'pk', None):
+        return None
+
+    from apps.accounting.models import AccountingReportArchive
+
+    safe_manifest = json.loads(json.dumps(manifest, default=str, sort_keys=True))
+    payload = response.content
+    archive = AccountingReportArchive.objects.create(
+        entity=entity,
+        report_name=manifest['report_name'],
+        export_format=export_format,
+        filename=filename,
+        content_type=response.get('Content-Type', ''),
+        canonical_filename=manifest['canonical_data']['filename'],
+        canonical_sha256=manifest['canonical_data']['sha256'],
+        canonical_size=manifest['canonical_data']['bytes'],
+        file_sha256=hashlib.sha256(payload).hexdigest(),
+        file_size=len(payload),
+        row_count=manifest['row_count'],
+        filters=safe_manifest.get('filters', {}),
+        columns=safe_manifest.get('columns', []),
+        manifest=safe_manifest,
+        generated_by=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
+    )
+    response['X-Accounting-Report-Archive-ID'] = str(archive.pk)
+    response['X-Accounting-Report-File-SHA256'] = archive.file_sha256
+    return archive
+
+
 def report_export_response(request, filename_base, report_name, headers, rows, filters, entity=''):
     export_format = (request.GET.get('format') or '').lower()
     if export_format not in ('csv', 'xlsx', 'pdf', 'manifest'):
@@ -155,13 +185,16 @@ def report_export_response(request, filename_base, report_name, headers, rows, f
         generated_by=generated_by,
     )
     if export_format == 'csv':
-        return csv_report_response(f'{filename_base}.csv', headers, rows, manifest)
-    if export_format == 'xlsx':
-        return xlsx_report_response(f'{filename_base}.xlsx', report_name, headers, rows, manifest)
-    if export_format == 'pdf':
-        return pdf_report_response(
+        filename = f'{filename_base}.csv'
+        response = csv_report_response(filename, headers, rows, manifest)
+    elif export_format == 'xlsx':
+        filename = f'{filename_base}.xlsx'
+        response = xlsx_report_response(filename, report_name, headers, rows, manifest)
+    elif export_format == 'pdf':
+        filename = f'{filename_base}.pdf'
+        response = pdf_report_response(
             request,
-            f'{filename_base}.pdf',
+            filename,
             report_name,
             headers,
             rows,
@@ -169,4 +202,10 @@ def report_export_response(request, filename_base, report_name, headers, rows, f
             manifest,
             entity=entity,
         )
-    return manifest_response(f'{filename_base}-manifest.json', manifest)
+        if response['Content-Disposition'].endswith('.html"'):
+            filename = filename.replace('.pdf', '.html')
+    else:
+        filename = f'{filename_base}-manifest.json'
+        response = manifest_response(filename, manifest)
+    _record_report_archive(request, entity, export_format, response, filename, manifest)
+    return response

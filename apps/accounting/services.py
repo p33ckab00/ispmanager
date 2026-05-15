@@ -2394,7 +2394,7 @@ def create_manual_journal_entry(
 
 
 @transaction.atomic
-def post_journal_entry(journal_entry, posted_by=None):
+def post_journal_entry(journal_entry, posted_by=None, allow_closed_period=False):
     journal_entry = (
         JournalEntry.objects
         .select_for_update()
@@ -2403,7 +2403,9 @@ def post_journal_entry(journal_entry, posted_by=None):
     )
     if journal_entry.status != 'draft':
         raise ValidationError('Only draft journal entries can be posted.')
-    if journal_entry.period.status != 'open':
+    if journal_entry.period.status != 'open' and not (
+        allow_closed_period and journal_entry.period.status == 'closed'
+    ):
         raise ValidationError('Journal entries can only be posted to open accounting periods.')
 
     lines = list(journal_entry.lines.select_related('account'))
@@ -2432,21 +2434,46 @@ def _period_closing_reference(period):
     return f"CLOSE-{period.fiscal_year}-{period.period_number:02d}"
 
 
+def _closing_reversal_reference(closing_journal):
+    return f"REVERSE-{closing_journal.entry_number}"
+
+
+def _closing_reversal_journal(closing_journal):
+    if not closing_journal:
+        return None
+    return (
+        JournalEntry.objects
+        .filter(
+            entity=closing_journal.entity,
+            source_type='closing',
+            reference=_closing_reversal_reference(closing_journal),
+            status='posted',
+        )
+        .order_by('-entry_date', '-created_at')
+        .first()
+    )
+
+
 def _period_closing_journal(period):
     if period.closing_journal_entry_id:
-        return period.closing_journal_entry
-    return (
+        if not _closing_reversal_journal(period.closing_journal_entry):
+            return period.closing_journal_entry
+        return None
+    candidates = (
         JournalEntry.objects
         .filter(
             entity=period.entity,
             period=period,
             source_type='closing',
             reference=_period_closing_reference(period),
+            status='posted',
         )
-        .exclude(status='voided')
         .order_by('-entry_date', '-created_at')
-        .first()
     )
+    for candidate in candidates:
+        if not _closing_reversal_journal(candidate):
+            return candidate
+    return None
 
 
 def _closing_equity_account(entity):
@@ -2634,6 +2661,116 @@ def close_accounting_period(period, closed_by=None):
     return {
         'period': period,
         'closing_journal': closing_journal,
+        'preview': preview,
+    }
+
+
+def build_period_reopen_preview(period):
+    period = AccountingPeriod.objects.select_related(
+        'entity',
+        'closed_by',
+        'closing_journal_entry',
+    ).get(pk=period.pk)
+    closing_journal = period.closing_journal_entry
+    reversal_journal = _closing_reversal_journal(closing_journal)
+    later_closed_count = AccountingPeriod.objects.filter(
+        entity=period.entity,
+        start_date__gt=period.start_date,
+        status__in=['closed', 'locked'],
+    ).count()
+    blockers = []
+    if period.status != 'closed':
+        blockers.append('Only closed periods can be reopened.')
+    if period.status == 'locked':
+        blockers.append('Locked periods cannot be reopened in this slice.')
+    if later_closed_count:
+        blockers.append(f"{later_closed_count} later closed or locked period(s) must be handled first.")
+    if closing_journal and reversal_journal:
+        blockers.append('The closing journal already has a posted reversal.')
+
+    reversal_lines = []
+    debit_total = Decimal('0.00')
+    credit_total = Decimal('0.00')
+    if closing_journal and not reversal_journal:
+        for line in closing_journal.lines.select_related('account').order_by('line_number', 'id'):
+            reversal_line = {
+                'account': line.account,
+                'description': f"Reverse {line.description or line.account.name}",
+                'debit': line.credit,
+                'credit': line.debit,
+            }
+            reversal_lines.append(reversal_line)
+            debit_total += reversal_line['debit']
+            credit_total += reversal_line['credit']
+
+    return {
+        'period': period,
+        'closing_journal': closing_journal,
+        'reversal_journal': reversal_journal,
+        'reversal_reference': _closing_reversal_reference(closing_journal) if closing_journal else '',
+        'reversal_lines': reversal_lines,
+        'debit_total': debit_total,
+        'credit_total': credit_total,
+        'is_balanced': debit_total == credit_total,
+        'later_closed_count': later_closed_count,
+        'blockers': blockers,
+        'can_reopen': not blockers and debit_total == credit_total,
+    }
+
+
+@transaction.atomic
+def reopen_accounting_period(period, reopened_by=None):
+    period = (
+        AccountingPeriod.objects
+        .select_for_update()
+        .select_related('entity')
+        .get(pk=period.pk)
+    )
+    preview = build_period_reopen_preview(period)
+    if not preview['can_reopen']:
+        raise ValidationError('Period cannot be reopened: ' + ' '.join(preview['blockers']))
+
+    reversal_journal = None
+    closing_journal = preview['closing_journal']
+    if closing_journal and preview['reversal_lines']:
+        reversal_journal = JournalEntry.objects.create(
+            entity=period.entity,
+            period=period,
+            entry_number=next_journal_entry_number(period.entity, period.end_date, prefix='RC'),
+            entry_date=period.end_date,
+            description=f"Reverse close {period.name}",
+            reference=preview['reversal_reference'],
+            source_type='closing',
+            source_document_number=closing_journal.entry_number,
+            created_by=reopened_by if getattr(reopened_by, 'is_authenticated', False) else None,
+        )
+        for index, line in enumerate(preview['reversal_lines'], start=1):
+            journal_line = JournalLine(
+                journal_entry=reversal_journal,
+                account=line['account'],
+                line_number=index,
+                description=line['description'],
+                debit=line['debit'],
+                credit=line['credit'],
+            )
+            journal_line.full_clean()
+            journal_line.save()
+        post_journal_entry(reversal_journal, posted_by=reopened_by, allow_closed_period=True)
+        reversal_journal.refresh_from_db()
+
+    period.status = 'open'
+    period.closed_at = None
+    period.closed_by = None
+    period.closing_journal_entry = None
+    period.save(update_fields=[
+        'status',
+        'closed_at',
+        'closed_by',
+        'closing_journal_entry',
+    ])
+    return {
+        'period': period,
+        'reversal_journal': reversal_journal,
         'preview': preview,
     }
 

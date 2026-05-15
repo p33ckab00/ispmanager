@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from apps.accounting.models import (
     AccountingEntity,
     AccountingPeriod,
+    AccountingReportArchive,
     AccountingSettings,
     AccountingSourcePosting,
     AlphanumericTaxCode,
@@ -48,6 +49,7 @@ from apps.accounting.services import (
     build_cash_flow_report,
     build_changes_in_equity_report,
     build_period_close_preview,
+    build_period_reopen_preview,
     create_accounting_foundation,
     close_accounting_period,
     create_cutover_balance_schedule,
@@ -66,6 +68,7 @@ from apps.accounting.services import (
     mark_cutover_ready,
     post_journal_entry,
     refresh_opening_balance_totals,
+    reopen_accounting_period,
     retry_source_posting,
     sync_payments_to_income,
     get_monthly_summary,
@@ -629,6 +632,85 @@ def period_close(request, pk):
         'entity': entity,
         'period': period,
         'preview': preview,
+    })
+
+
+@login_required
+def period_reopen(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_accounting_periods',
+        'accounting-period-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    period = get_object_or_404(
+        AccountingPeriod.objects.select_related('closing_journal_entry', 'closed_by'),
+        entity=entity,
+        pk=pk,
+    )
+    preview = build_period_reopen_preview(period)
+
+    if request.method == 'POST':
+        try:
+            result = reopen_accounting_period(period, reopened_by=request.user)
+            reopened_period = result['period']
+            reversal_journal = result['reversal_journal']
+            AuditLog.log('update', 'accounting', f"Period reopened: {reopened_period.name}", user=request.user)
+            if reversal_journal:
+                messages.success(
+                    request,
+                    f"Period reopened and reversal journal {reversal_journal.entry_number} posted.",
+                )
+                return redirect('accounting-journal-detail', pk=reversal_journal.pk)
+            messages.success(request, 'Period reopened.')
+            return redirect('accounting-period-list')
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+            preview = build_period_reopen_preview(period)
+
+    return render(request, 'accounting/period_reopen.html', {
+        'entity': entity,
+        'period': period,
+        'preview': preview,
+    })
+
+
+@login_required
+def report_archive_list(request):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    qs = (
+        AccountingReportArchive.objects
+        .filter(entity=entity)
+        .select_related('generated_by')
+        .order_by('-generated_at', '-created_at')
+    )
+    report_name = request.GET.get('report_name', '').strip()
+    export_format = request.GET.get('format', '').strip()
+    if report_name:
+        qs = qs.filter(report_name=report_name)
+    if export_format:
+        qs = qs.filter(export_format=export_format)
+    paginator = Paginator(qs, 30)
+    page = paginator.get_page(request.GET.get('page', 1))
+    return render(request, 'accounting/report_archive_list.html', {
+        'entity': entity,
+        'page_obj': page,
+        'selected_report_name': report_name,
+        'selected_format': export_format,
+        'report_names': (
+            AccountingReportArchive.objects
+            .filter(entity=entity)
+            .order_by('report_name')
+            .values_list('report_name', flat=True)
+            .distinct()
+        ),
+        'format_choices': AccountingReportArchive.FORMAT_CHOICES,
     })
 
 

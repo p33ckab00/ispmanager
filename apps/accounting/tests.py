@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.accounting.models import (
     AccountingPeriod,
+    AccountingReportArchive,
     AccountingSourcePosting,
     AlphanumericTaxCode,
     ChartOfAccount,
@@ -35,6 +36,7 @@ from apps.accounting.services import (
     build_general_ledger_report,
     build_income_statement_report,
     build_period_close_preview,
+    build_period_reopen_preview,
     build_tax_ledger_report,
     build_trial_balance_report,
     close_accounting_period,
@@ -53,6 +55,7 @@ from apps.accounting.services import (
     mark_cutover_ready,
     post_journal_entry,
     refresh_opening_balance_totals,
+    reopen_accounting_period,
     validate_cutover_balance_schedule,
     retry_source_posting,
     seed_bir_atc_codes,
@@ -333,6 +336,48 @@ class AccountingV2FinancialStatementTests(TestCase):
         with self.assertRaisesMessage(ValidationError, 'draft journal'):
             close_accounting_period(period)
 
+    def test_period_reopen_posts_reversal_and_restores_unclosed_earnings(self):
+        entity, _cash = self._post_sample_activity()
+        period = AccountingPeriod.objects.get(entity=entity, period_number=1)
+        close_result = close_accounting_period(period)
+        closing_journal = close_result['closing_journal']
+
+        preview = build_period_reopen_preview(period)
+        result = reopen_accounting_period(period)
+        period.refresh_from_db()
+        reversal_journal = result['reversal_journal']
+
+        self.assertTrue(preview['can_reopen'])
+        self.assertEqual(period.status, 'open')
+        self.assertIsNone(period.closed_at)
+        self.assertIsNone(period.closed_by)
+        self.assertIsNone(period.closing_journal_entry)
+        self.assertEqual(reversal_journal.status, 'posted')
+        self.assertEqual(reversal_journal.source_type, 'closing')
+        self.assertEqual(reversal_journal.reference, f'REVERSE-{closing_journal.entry_number}')
+
+        income = build_income_statement_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+        )
+        balance_sheet = build_balance_sheet_report(entity, as_of_date=date(2026, 1, 31))
+        trial_balance = build_trial_balance_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+        )
+        revenue_balance = next(row['balance'] for row in trial_balance['rows'] if row['account'].code == '4000')
+        expense_balance = next(row['balance'] for row in trial_balance['rows'] if row['account'].code == '6010')
+
+        self.assertEqual(income['net_income'], Decimal('380.00'))
+        self.assertTrue(balance_sheet['uses_unclosed_current_earnings'])
+        self.assertEqual(balance_sheet['current_earnings'], Decimal('380.00'))
+        self.assertEqual(balance_sheet['totals']['equity'], Decimal('1380.00'))
+        self.assertTrue(balance_sheet['is_balanced'])
+        self.assertEqual(revenue_balance, Decimal('500.00'))
+        self.assertEqual(expense_balance, Decimal('120.00'))
+
     def test_general_ledger_carries_opening_balance_into_date_range(self):
         entity, cash = self._post_sample_activity()
 
@@ -579,6 +624,7 @@ class AccountingV2FinancialStatementTests(TestCase):
         )
         self.client.force_login(user)
         period = AccountingPeriod.objects.get(entity=entity, period_number=1)
+        archive_start_count = AccountingReportArchive.objects.filter(entity=entity).count()
 
         binary_endpoints = [
             (
@@ -600,6 +646,8 @@ class AccountingV2FinancialStatementTests(TestCase):
             self.assertEqual(response['Content-Type'], content_type)
             self.assertIn('attachment;', response['Content-Disposition'])
             self.assertEqual(len(response['X-Report-Data-SHA256']), 64)
+            self.assertTrue(response['X-Accounting-Report-Archive-ID'].isdigit())
+            self.assertEqual(len(response['X-Accounting-Report-File-SHA256']), 64)
             self.assertTrue(response.content.startswith(prefix))
 
         manifest_response = self.client.get(
@@ -609,6 +657,8 @@ class AccountingV2FinancialStatementTests(TestCase):
 
         self.assertEqual(manifest_response.status_code, 200)
         self.assertEqual(manifest_response['Content-Type'], 'application/json')
+        self.assertTrue(manifest_response['X-Accounting-Report-Archive-ID'].isdigit())
+        self.assertEqual(len(manifest_response['X-Accounting-Report-File-SHA256']), 64)
         self.assertEqual(manifest['report_name'], 'Trial Balance')
         self.assertEqual(len(manifest['canonical_data']['sha256']), 64)
         self.assertIn('account_code', manifest['columns'])
@@ -621,10 +671,25 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertIn(pdf_response['Content-Type'], ('application/pdf', 'text/html'))
         self.assertIn('attachment;', pdf_response['Content-Disposition'])
         self.assertEqual(len(pdf_response['X-Report-Data-SHA256']), 64)
+        self.assertTrue(pdf_response['X-Accounting-Report-Archive-ID'].isdigit())
+        self.assertEqual(len(pdf_response['X-Accounting-Report-File-SHA256']), 64)
         self.assertTrue(
             pdf_response.content.startswith(b'%PDF')
             or b'General Ledger' in pdf_response.content
         )
+        self.assertEqual(
+            AccountingReportArchive.objects.filter(entity=entity).count(),
+            archive_start_count + 4,
+        )
+
+        archive = AccountingReportArchive.objects.get(pk=manifest_response['X-Accounting-Report-Archive-ID'])
+        self.assertEqual(archive.report_name, 'Trial Balance')
+        self.assertEqual(archive.export_format, 'manifest')
+        self.assertEqual(archive.generated_by, user)
+        self.assertEqual(archive.canonical_sha256, manifest['canonical_data']['sha256'])
+        archive.filename = 'changed.csv'
+        with self.assertRaisesMessage(ValidationError, 'immutable'):
+            archive.save()
 
 
 class AccountingV2CutoverTests(TestCase):
