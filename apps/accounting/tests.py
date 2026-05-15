@@ -1,6 +1,8 @@
 import json
 import hashlib
+import io
 import tempfile
+import zipfile
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -13,6 +15,7 @@ from django.utils import timezone
 from apps.accounting.models import (
     AccountingPeriod,
     AccountingReportArchive,
+    AccountingReportPreset,
     AccountingSourcePosting,
     AlphanumericTaxCode,
     APVendor,
@@ -950,70 +953,112 @@ class AccountingV2FinancialStatementTests(TestCase):
         period = AccountingPeriod.objects.get(entity=entity, period_number=1)
         archive_start_count = AccountingReportArchive.objects.filter(entity=entity).count()
 
-        binary_endpoints = [
-            (
-                f'/accounting/trial-balance/?period={period.pk}&format=xlsx',
-                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                b'PK',
-            ),
-            (
-                '/accounting/tax-ledger/?preset=current_year&format=xlsx',
-                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                b'PK',
-            ),
-        ]
+        with tempfile.TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            binary_endpoints = [
+                (
+                    f'/accounting/trial-balance/?period={period.pk}&format=xlsx',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    b'PK',
+                ),
+                (
+                    '/accounting/tax-ledger/?preset=current_year&format=xlsx',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    b'PK',
+                ),
+            ]
 
-        for endpoint, content_type, prefix in binary_endpoints:
-            response = self.client.get(endpoint)
+            for endpoint, content_type, prefix in binary_endpoints:
+                response = self.client.get(endpoint)
 
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response['Content-Type'], content_type)
-            self.assertIn('attachment;', response['Content-Disposition'])
-            self.assertEqual(len(response['X-Report-Data-SHA256']), 64)
-            self.assertTrue(response['X-Accounting-Report-Archive-ID'].isdigit())
-            self.assertEqual(len(response['X-Accounting-Report-File-SHA256']), 64)
-            self.assertTrue(response.content.startswith(prefix))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response['Content-Type'], content_type)
+                self.assertIn('attachment;', response['Content-Disposition'])
+                self.assertEqual(len(response['X-Report-Data-SHA256']), 64)
+                self.assertTrue(response['X-Accounting-Report-Archive-ID'].isdigit())
+                self.assertEqual(len(response['X-Accounting-Report-File-SHA256']), 64)
+                self.assertTrue(response.content.startswith(prefix))
 
-        manifest_response = self.client.get(
-            f'/accounting/trial-balance/?period={period.pk}&format=manifest',
+            manifest_response = self.client.get(
+                f'/accounting/trial-balance/?period={period.pk}&format=manifest',
+            )
+            manifest = json.loads(manifest_response.content.decode('utf-8'))
+
+            self.assertEqual(manifest_response.status_code, 200)
+            self.assertEqual(manifest_response['Content-Type'], 'application/json')
+            self.assertTrue(manifest_response['X-Accounting-Report-Archive-ID'].isdigit())
+            self.assertEqual(len(manifest_response['X-Accounting-Report-File-SHA256']), 64)
+            self.assertEqual(manifest['report_name'], 'Trial Balance')
+            self.assertEqual(len(manifest['canonical_data']['sha256']), 64)
+            self.assertIn('account_code', manifest['columns'])
+
+            pdf_response = self.client.get(
+                '/accounting/general-ledger/?preset=current_year&include_zero=1&format=pdf',
+            )
+
+            self.assertEqual(pdf_response.status_code, 200)
+            self.assertIn(pdf_response['Content-Type'], ('application/pdf', 'text/html'))
+            self.assertIn('attachment;', pdf_response['Content-Disposition'])
+            self.assertEqual(len(pdf_response['X-Report-Data-SHA256']), 64)
+            self.assertTrue(pdf_response['X-Accounting-Report-Archive-ID'].isdigit())
+            self.assertEqual(len(pdf_response['X-Accounting-Report-File-SHA256']), 64)
+            self.assertTrue(
+                pdf_response.content.startswith(b'%PDF')
+                or b'General Ledger' in pdf_response.content
+            )
+            self.assertEqual(
+                AccountingReportArchive.objects.filter(entity=entity).count(),
+                archive_start_count + 4,
+            )
+
+            archive = AccountingReportArchive.objects.get(pk=manifest_response['X-Accounting-Report-Archive-ID'])
+            self.assertEqual(archive.report_name, 'Trial Balance')
+            self.assertEqual(archive.export_format, 'manifest')
+            self.assertEqual(archive.generated_by, user)
+            self.assertEqual(archive.canonical_sha256, manifest['canonical_data']['sha256'])
+            self.assertTrue(archive.archive_file.storage.exists(archive.archive_file.name))
+            self.assertTrue(archive.package_file.storage.exists(archive.package_file.name))
+            self.assertEqual(len(archive.package_sha256), 64)
+
+            package_response = self.client.get(f'/accounting/report-archives/{archive.pk}/package/')
+            package_payload = b''.join(package_response.streaming_content)
+            with zipfile.ZipFile(io.BytesIO(package_payload)) as package:
+                self.assertIn(archive.filename, package.namelist())
+                self.assertIn('manifest.json', package.namelist())
+                self.assertIn(archive.canonical_filename, package.namelist())
+
+            archive.filename = 'changed.csv'
+            with self.assertRaisesMessage(ValidationError, 'immutable'):
+                archive.save()
+
+    def test_saved_report_presets_capture_and_apply_user_filters(self):
+        entity, _cash = self._post_sample_activity()
+        user = get_user_model().objects.create_user(
+            username='statement-preset-admin',
+            password='test-password',
+            is_staff=True,
+            is_superuser=True,
         )
-        manifest = json.loads(manifest_response.content.decode('utf-8'))
+        self.client.force_login(user)
 
-        self.assertEqual(manifest_response.status_code, 200)
-        self.assertEqual(manifest_response['Content-Type'], 'application/json')
-        self.assertTrue(manifest_response['X-Accounting-Report-Archive-ID'].isdigit())
-        self.assertEqual(len(manifest_response['X-Accounting-Report-File-SHA256']), 64)
-        self.assertEqual(manifest['report_name'], 'Trial Balance')
-        self.assertEqual(len(manifest['canonical_data']['sha256']), 64)
-        self.assertIn('account_code', manifest['columns'])
-
-        pdf_response = self.client.get(
-            '/accounting/general-ledger/?preset=current_year&include_zero=1&format=pdf',
+        save_response = self.client.post(
+            '/accounting/report-presets/general_ledger/save/',
+            {
+                'name': 'Year review',
+                'query_string': 'preset=current_year&include_zero=1&format=csv',
+            },
         )
+        preset = AccountingReportPreset.objects.get(entity=entity, user=user)
 
-        self.assertEqual(pdf_response.status_code, 200)
-        self.assertIn(pdf_response['Content-Type'], ('application/pdf', 'text/html'))
-        self.assertIn('attachment;', pdf_response['Content-Disposition'])
-        self.assertEqual(len(pdf_response['X-Report-Data-SHA256']), 64)
-        self.assertTrue(pdf_response['X-Accounting-Report-Archive-ID'].isdigit())
-        self.assertEqual(len(pdf_response['X-Accounting-Report-File-SHA256']), 64)
-        self.assertTrue(
-            pdf_response.content.startswith(b'%PDF')
-            or b'General Ledger' in pdf_response.content
-        )
-        self.assertEqual(
-            AccountingReportArchive.objects.filter(entity=entity).count(),
-            archive_start_count + 4,
-        )
+        self.assertEqual(save_response.status_code, 302)
+        self.assertEqual(preset.report_key, 'general_ledger')
+        self.assertEqual(preset.parameters, {'preset': 'current_year', 'include_zero': '1'})
 
-        archive = AccountingReportArchive.objects.get(pk=manifest_response['X-Accounting-Report-Archive-ID'])
-        self.assertEqual(archive.report_name, 'Trial Balance')
-        self.assertEqual(archive.export_format, 'manifest')
-        self.assertEqual(archive.generated_by, user)
-        self.assertEqual(archive.canonical_sha256, manifest['canonical_data']['sha256'])
-        archive.filename = 'changed.csv'
-        with self.assertRaisesMessage(ValidationError, 'immutable'):
-            archive.save()
+        apply_response = self.client.get(f'/accounting/report-presets/{preset.pk}/apply/')
+        self.assertRedirects(
+            apply_response,
+            '/accounting/general-ledger/?preset=current_year&include_zero=1',
+            fetch_redirect_response=False,
+        )
 
 
 class AccountingV2CutoverTests(TestCase):

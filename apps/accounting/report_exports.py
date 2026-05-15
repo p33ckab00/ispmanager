@@ -2,9 +2,11 @@ import csv
 import hashlib
 import io
 import json
+import zipfile
 from datetime import date, datetime
 from decimal import Decimal
 
+from django.core.files.base import ContentFile
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -138,7 +140,7 @@ def manifest_response(filename, manifest):
     return response
 
 
-def _record_report_archive(request, entity, export_format, response, filename, manifest):
+def _record_report_archive(request, entity, export_format, response, filename, manifest, headers, rows):
     if not getattr(entity, 'pk', None):
         return None
 
@@ -146,7 +148,27 @@ def _record_report_archive(request, entity, export_format, response, filename, m
 
     safe_manifest = json.loads(json.dumps(manifest, default=str, sort_keys=True))
     payload = response.content
-    archive = AccountingReportArchive.objects.create(
+    file_sha256 = hashlib.sha256(payload).hexdigest()
+    safe_manifest['generated_file'] = {
+        'filename': filename,
+        'content_type': response.get('Content-Type', ''),
+        'sha256': file_sha256,
+        'bytes': len(payload),
+    }
+    package_buffer = io.BytesIO()
+    with zipfile.ZipFile(package_buffer, 'w', compression=zipfile.ZIP_DEFLATED) as package:
+        package.writestr(filename, payload)
+        if safe_manifest['canonical_data']['filename'] != filename:
+            package.writestr(
+                safe_manifest['canonical_data']['filename'],
+                canonical_csv_bytes(headers, rows),
+            )
+        package.writestr(
+            'manifest.json',
+            json.dumps(safe_manifest, indent=2, default=str, sort_keys=True).encode('utf-8'),
+        )
+    package_payload = package_buffer.getvalue()
+    archive = AccountingReportArchive(
         entity=entity,
         report_name=manifest['report_name'],
         export_format=export_format,
@@ -155,7 +177,7 @@ def _record_report_archive(request, entity, export_format, response, filename, m
         canonical_filename=manifest['canonical_data']['filename'],
         canonical_sha256=manifest['canonical_data']['sha256'],
         canonical_size=manifest['canonical_data']['bytes'],
-        file_sha256=hashlib.sha256(payload).hexdigest(),
+        file_sha256=file_sha256,
         file_size=len(payload),
         row_count=manifest['row_count'],
         filters=safe_manifest.get('filters', {}),
@@ -163,6 +185,11 @@ def _record_report_archive(request, entity, export_format, response, filename, m
         manifest=safe_manifest,
         generated_by=request.user if getattr(request, 'user', None) and request.user.is_authenticated else None,
     )
+    archive.archive_file.save(filename, ContentFile(payload), save=False)
+    archive.package_file.save(f'{filename}.zip', ContentFile(package_payload), save=False)
+    archive.package_sha256 = hashlib.sha256(package_payload).hexdigest()
+    archive.package_size = len(package_payload)
+    archive.save()
     response['X-Accounting-Report-Archive-ID'] = str(archive.pk)
     response['X-Accounting-Report-File-SHA256'] = archive.file_sha256
     return archive
@@ -207,5 +234,5 @@ def report_export_response(request, filename_base, report_name, headers, rows, f
     else:
         filename = f'{filename_base}-manifest.json'
         response = manifest_response(filename, manifest)
-    _record_report_archive(request, entity, export_format, response, filename, manifest)
+    _record_report_archive(request, entity, export_format, response, filename, manifest, headers, rows)
     return response

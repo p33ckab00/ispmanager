@@ -5,13 +5,16 @@ from django.contrib import messages
 from django.core.paginator import Paginator
 from django.core.exceptions import ValidationError
 from django.db.models import Q, Sum
+from django.urls import reverse
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from urllib.parse import parse_qsl, urlencode
 
 from apps.accounting.models import (
     AccountingEntity,
     AccountingPeriod,
     AccountingReportArchive,
+    AccountingReportPreset,
     AccountingSettings,
     AccountingSourcePosting,
     AlphanumericTaxCode,
@@ -31,6 +34,7 @@ from apps.accounting.models import (
     WithholdingTaxClass,
 )
 from apps.accounting.forms import (
+    AccountingReportPresetForm,
     AccountingSetupForm,
     APVendorBillAttachmentForm,
     APVendorBillForm,
@@ -198,6 +202,30 @@ AS_OF_PRESET_CHOICES = [
     ('previous_year_end', 'Previous year end'),
 ]
 
+REPORT_PRESET_ROUTES = {
+    'trial_balance': 'accounting-trial-balance',
+    'general_ledger': 'accounting-general-ledger',
+    'income_statement': 'accounting-income-statement',
+    'balance_sheet': 'accounting-balance-sheet',
+    'cash_flow': 'accounting-cash-flow',
+    'changes_in_equity': 'accounting-changes-in-equity',
+    'ar_aging': 'accounting-ar-aging',
+    'ap_aging': 'accounting-ap-aging',
+    'tax_ledger': 'accounting-tax-ledger',
+}
+
+REPORT_PRESET_ALLOWED_PARAMS = {
+    'trial_balance': {'period', 'include_zero'},
+    'general_ledger': {'preset', 'start', 'end', 'account', 'include_zero'},
+    'income_statement': {'preset', 'start', 'end'},
+    'balance_sheet': {'as_of_preset', 'as_of'},
+    'cash_flow': {'preset', 'start', 'end'},
+    'changes_in_equity': {'preset', 'start', 'end'},
+    'ar_aging': {'as_of_preset', 'as_of'},
+    'ap_aging': {'as_of_preset', 'as_of'},
+    'tax_ledger': {'preset', 'start', 'end'},
+}
+
 
 def _add_months(value, months):
     month_index = value.month - 1 + months
@@ -273,6 +301,33 @@ def _report_export_queries(request):
         'xlsx_query': _report_query(request, format='xlsx'),
         'pdf_query': _report_query(request, format='pdf'),
         'manifest_query': _report_query(request, format='manifest'),
+    }
+
+
+def _saved_report_preset_parameters(report_key, raw_parameters):
+    allowed = REPORT_PRESET_ALLOWED_PARAMS.get(report_key, set())
+    parameters = {}
+    for key, value in raw_parameters.items():
+        if key not in allowed or value in (None, ''):
+            continue
+        if key == 'include_zero':
+            if value in ('1', 'true', 'yes', 'on'):
+                parameters[key] = '1'
+            continue
+        parameters[key] = str(value)
+    return parameters
+
+
+def _saved_report_preset_context(request, entity, report_key):
+    current_parameters = _saved_report_preset_parameters(report_key, request.GET)
+    return {
+        'saved_report_presets': AccountingReportPreset.objects.filter(
+            entity=entity,
+            user=request.user,
+            report_key=report_key,
+        ),
+        'saved_report_preset_report_key': report_key,
+        'saved_report_preset_query_string': urlencode(current_parameters),
     }
 
 
@@ -737,6 +792,112 @@ def report_archive_list(request):
 
 
 @login_required
+def report_archive_download(request, pk):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    archive = get_object_or_404(AccountingReportArchive, entity=entity, pk=pk)
+    if not archive.archive_file:
+        messages.error(request, 'This archived export predates binary file storage.')
+        return redirect('accounting-report-archive-list')
+    return FileResponse(
+        archive.archive_file.open('rb'),
+        as_attachment=True,
+        filename=archive.filename,
+        content_type=archive.content_type,
+    )
+
+
+@login_required
+def report_archive_package_download(request, pk):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    archive = get_object_or_404(AccountingReportArchive, entity=entity, pk=pk)
+    if not archive.package_file:
+        messages.error(request, 'This archived export predates package storage.')
+        return redirect('accounting-report-archive-list')
+    return FileResponse(
+        archive.package_file.open('rb'),
+        as_attachment=True,
+        filename=f'{archive.filename}.zip',
+        content_type='application/zip',
+    )
+
+
+@login_required
+def report_preset_save(request, report_key):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    route_name = REPORT_PRESET_ROUTES.get(report_key)
+    if not route_name:
+        return redirect('accounting-dashboard')
+    if request.method != 'POST':
+        return redirect(route_name)
+    form = AccountingReportPresetForm(request.POST)
+    raw_parameters = dict(parse_qsl(request.POST.get('query_string', ''), keep_blank_values=True))
+    parameters = _saved_report_preset_parameters(report_key, raw_parameters)
+    if form.is_valid():
+        preset, created = AccountingReportPreset.objects.update_or_create(
+            entity=entity,
+            user=request.user,
+            report_key=report_key,
+            name=form.cleaned_data['name'],
+            defaults={'parameters': parameters},
+        )
+        AuditLog.log(
+            'create' if created else 'update',
+            'accounting',
+            f"Report preset saved: {report_key} / {preset.name}",
+            user=request.user,
+        )
+        messages.success(request, 'Report preset saved.')
+    else:
+        messages.error(request, form.errors.get('name', ['Preset name is required.'])[0])
+    url = reverse(route_name)
+    return redirect(f'{url}?{urlencode(parameters)}' if parameters else url)
+
+
+@login_required
+def report_preset_apply(request, pk):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    preset = get_object_or_404(
+        AccountingReportPreset,
+        entity=entity,
+        user=request.user,
+        pk=pk,
+    )
+    route_name = REPORT_PRESET_ROUTES.get(preset.report_key)
+    if not route_name:
+        return redirect('accounting-dashboard')
+    parameters = _saved_report_preset_parameters(preset.report_key, preset.parameters)
+    url = reverse(route_name)
+    return redirect(f'{url}?{urlencode(parameters)}' if parameters else url)
+
+
+@login_required
+def report_preset_delete(request, pk):
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    preset = get_object_or_404(
+        AccountingReportPreset,
+        entity=entity,
+        user=request.user,
+        pk=pk,
+    )
+    route_name = REPORT_PRESET_ROUTES.get(preset.report_key, 'accounting-dashboard')
+    if request.method == 'POST':
+        AuditLog.log('delete', 'accounting', f"Report preset deleted: {preset.report_key} / {preset.name}", user=request.user)
+        preset.delete()
+        messages.success(request, 'Report preset deleted.')
+    return redirect(route_name)
+
+
+@login_required
 def journal_list(request):
     entity = _require_entity(request)
     if not isinstance(entity, AccountingEntity):
@@ -893,6 +1054,7 @@ def trial_balance(request):
         'total_credit': report['total_credit'],
         'is_balanced': report['is_balanced'],
         'include_zero': include_zero,
+        **_saved_report_preset_context(request, entity, 'trial_balance'),
         **_report_export_queries(request),
     })
 
@@ -948,6 +1110,7 @@ def general_ledger(request):
         'include_zero': include_zero,
         'preset_choices': RANGE_PRESET_CHOICES,
         'selected_preset': selected_preset,
+        **_saved_report_preset_context(request, entity, 'general_ledger'),
         **_report_export_queries(request),
     })
 
@@ -987,6 +1150,7 @@ def income_statement(request):
         'report': report,
         'preset_choices': RANGE_PRESET_CHOICES,
         'selected_preset': selected_preset,
+        **_saved_report_preset_context(request, entity, 'income_statement'),
         **_report_export_queries(request),
     })
 
@@ -1019,6 +1183,7 @@ def balance_sheet(request):
         'report': report,
         'as_of_preset_choices': AS_OF_PRESET_CHOICES,
         'selected_as_of_preset': selected_as_of_preset,
+        **_saved_report_preset_context(request, entity, 'balance_sheet'),
         **_report_export_queries(request),
     })
 
@@ -1078,6 +1243,7 @@ def cash_flow(request):
                 'total': report['totals']['financing'],
             },
         ],
+        **_saved_report_preset_context(request, entity, 'cash_flow'),
         **_report_export_queries(request),
     })
 
@@ -1117,6 +1283,7 @@ def changes_in_equity(request):
         'report': report,
         'preset_choices': RANGE_PRESET_CHOICES,
         'selected_preset': selected_preset,
+        **_saved_report_preset_context(request, entity, 'changes_in_equity'),
         **_report_export_queries(request),
     })
 
@@ -1149,6 +1316,7 @@ def ar_aging(request):
         'report': report,
         'as_of_preset_choices': AS_OF_PRESET_CHOICES,
         'selected_as_of_preset': selected_as_of_preset,
+        **_saved_report_preset_context(request, entity, 'ar_aging'),
         **_report_export_queries(request),
     })
 
@@ -1646,6 +1814,7 @@ def ap_aging(request):
         'report': report,
         'as_of_preset_choices': AS_OF_PRESET_CHOICES,
         'selected_as_of_preset': selected_as_of_preset,
+        **_saved_report_preset_context(request, entity, 'ap_aging'),
         **_report_export_queries(request),
     })
 
@@ -1685,6 +1854,7 @@ def tax_ledger(request):
         'report': report,
         'preset_choices': RANGE_PRESET_CHOICES,
         'selected_preset': selected_preset,
+        **_saved_report_preset_context(request, entity, 'tax_ledger'),
         **_report_export_queries(request),
     })
 

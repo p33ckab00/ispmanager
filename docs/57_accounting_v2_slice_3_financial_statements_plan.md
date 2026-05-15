@@ -20,6 +20,7 @@ Slice 3G-A adds the first post-live AP vendor bill subledger.
 Slice 3G-B adds AP void/reversal handling and purchase tax breakdowns.
 Slice 3G-C adds AP vendor masters and bill attachment storage.
 Slice 3G-D adds AP payment reversals and manual settlement matching.
+Slice 3H adds stored export binaries/packages and saved report presets.
 
 ## Slice 3A Implemented
 
@@ -273,6 +274,23 @@ Implemented:
 - Regression coverage was added for reversal-driven payable reopening and
   settlement-match void blocking.
 
+## Slice 3H Implemented
+
+Implemented:
+
+- `AccountingReportArchive` now stores the generated export binary plus a ZIP
+  package alongside the existing immutable metadata and hashes.
+- Export packages contain the generated file, canonical CSV data, and manifest
+  JSON so a downloaded archive remains self-contained for review.
+- Report Archive pages expose direct file and package downloads while preserving
+  older metadata-only archive rows.
+- `AccountingReportPreset` stores reusable per-user parameters for the current
+  financial statement, aging, and tax-ledger report pages.
+- Report pages can save, apply, and delete presets without persisting one-off
+  export format parameters.
+- Regression coverage was added for archive storage/package contents and saved
+  preset round trips.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -305,8 +323,6 @@ Implemented:
 
 ## Remaining Slice 3 Gaps
 
-- Report archive records store metadata and hashes only; binary file storage
-  and bundled package downloads are still future work.
 - Period reopen/reverse-close is available, but does not yet have a separate
   reviewer approval workflow.
 - Period close does not yet create a persisted close checklist beyond the audit
@@ -325,13 +341,12 @@ Implemented:
   work.
 - Tax Ledger is a GL workpaper and optional 2307 support schedule, not a
   finalized BIR return package or SLSP/QAP/MAP file.
-- Presets and zero-balance toggles are not yet saved per user.
 
 ## Next Slice Candidate
 
-Slice 3H should continue report/export hardening before BIR/NTC books:
+Slice 3I should continue close-workflow hardening before BIR/NTC books:
 
-- Binary archive/package storage for generated export files.
-- Saved report presets per user.
+- Persisted period-close checklist items.
+- Optional reviewer approval path before closing or reopening a period.
 - Full bank/wallet/gateway import reconciliation remains a later reconciliation
   slice.

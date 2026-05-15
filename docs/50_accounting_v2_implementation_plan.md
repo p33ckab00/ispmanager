@@ -146,6 +146,9 @@ Slice 3G-D is now implemented for AP payment hardening: draft payments can be
 voided directly, posted payments use reversal drafts, and posted payments can be
 manually matched to external settlement references. AP as-of reports preserve
 pre-reversal history until the reversal journal date is reached.
+Slice 3H is now implemented for report/export hardening: report archives keep
+stored export binaries plus downloadable ZIP packages, and users can save
+reusable report presets from the financial statement pages.
 
 ## 2. Locked Decisions
 
@@ -452,8 +455,21 @@ Slice 3G-A is implemented as post-live AP vendor bill foundation:
   draft-then-approve behavior.
 - Existing cutover/opening AP fallback remains available when no posted AP
   vendor bills exist.
-- Remaining Slice 3 work starts with binary archive/package storage, saved
-  report presets, and fuller bank/wallet/gateway reconciliation.
+
+Slice 3H is implemented as export archive and preset hardening:
+
+- Every generated CSV, XLSX, PDF, and manifest export now stores the generated
+  file binary in the archive record.
+- Every archive record also stores a downloadable ZIP package containing the
+  generated file, canonical CSV, and manifest JSON.
+- Archive list pages expose file and package downloads while older metadata-only
+  archives remain readable.
+- `AccountingReportPreset` stores reusable per-user report parameters for Trial
+  Balance, GL, financial statements, AR/AP Aging, and Tax Ledger pages.
+- Saved presets intentionally exclude one-off export `format` parameters so a
+  reusable report view does not reopen as an accidental download.
+- Remaining Slice 3 work starts with close-review/checklist hardening and fuller
+  bank/wallet/gateway reconciliation.
 
 ### Slice 4 - BIR Books and Guides
 

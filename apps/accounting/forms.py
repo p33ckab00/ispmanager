@@ -4,6 +4,7 @@ from django import forms
 from django.db.models import Sum
 
 from apps.accounting.models import (
+    AccountingReportPreset,
     AlphanumericTaxCode,
     APVendor,
     APVendorBill,
@@ -51,6 +52,15 @@ class JournalEntryHeaderForm(forms.ModelForm):
             'entry_date': forms.DateInput(attrs={'type': 'date'}),
             'description': forms.TextInput(attrs={'placeholder': 'Manual journal description'}),
             'reference': forms.TextInput(attrs={'placeholder': 'Optional reference'}),
+        }
+
+
+class AccountingReportPresetForm(forms.ModelForm):
+    class Meta:
+        model = AccountingReportPreset
+        fields = ['name']
+        widgets = {
+            'name': forms.TextInput(attrs={'placeholder': 'Preset name'}),
         }
 
 

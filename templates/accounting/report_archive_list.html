@@ -43,6 +43,7 @@
         <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Rows</th>
         <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Hashes</th>
         <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">By</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Download</th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-50">
@@ -56,6 +57,9 @@
         <td class="px-4 py-3">
           <div class="font-mono text-xs text-gray-700">{{ archive.filename }}</div>
           <div class="text-xs text-gray-400">{{ archive.file_size }} bytes</div>
+          <div class="text-xs {% if archive.archive_file %}text-green-700{% else %}text-gray-400{% endif %}">
+            {% if archive.archive_file %}Stored{% else %}Metadata only{% endif %}
+          </div>
         </td>
         <td class="px-4 py-3 text-right">{{ archive.row_count }}</td>
         <td class="px-4 py-3">
@@ -63,9 +67,19 @@
           <div class="text-xs text-gray-500">File <span class="font-mono">{{ archive.file_sha256|slice:":12" }}</span></div>
         </td>
         <td class="px-4 py-3 text-xs text-gray-500">{% if archive.generated_by %}{{ archive.generated_by.get_username }}{% else %}-{% endif %}</td>
+        <td class="px-4 py-3">
+          <div class="flex flex-wrap gap-2">
+            {% if archive.archive_file %}
+            <a href="{% url 'accounting-report-archive-download' archive.pk %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg">File</a>
+            {% endif %}
+            {% if archive.package_file %}
+            <a href="{% url 'accounting-report-archive-package-download' archive.pk %}" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold px-3 py-1.5 rounded-lg">Package</a>
+            {% endif %}
+          </div>
+        </td>
       </tr>
       {% empty %}
-      <tr><td colspan="6" class="px-4 py-12 text-center text-gray-400">No archived report exports yet.</td></tr>
+      <tr><td colspan="7" class="px-4 py-12 text-center text-gray-400">No archived report exports yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

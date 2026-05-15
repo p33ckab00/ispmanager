@@ -470,6 +470,10 @@ class AccountingReportArchive(models.Model):
     canonical_size = models.PositiveIntegerField(default=0)
     file_sha256 = models.CharField(max_length=64)
     file_size = models.PositiveIntegerField(default=0)
+    archive_file = models.FileField(upload_to='accounting/report_archives/files/', blank=True)
+    package_file = models.FileField(upload_to='accounting/report_archives/packages/', blank=True)
+    package_sha256 = models.CharField(max_length=64, blank=True)
+    package_size = models.PositiveIntegerField(default=0)
     row_count = models.PositiveIntegerField(default=0)
     filters = models.JSONField(default=dict, blank=True)
     columns = models.JSONField(default=list, blank=True)
@@ -500,6 +504,36 @@ class AccountingReportArchive(models.Model):
 
     def __str__(self):
         return f"{self.report_name} {self.export_format} {self.generated_at:%Y-%m-%d %H:%M}"
+
+
+class AccountingReportPreset(models.Model):
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='report_presets',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='accounting_report_presets',
+    )
+    report_key = models.CharField(max_length=80)
+    name = models.CharField(max_length=120)
+    parameters = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['report_key', 'name', 'created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['entity', 'user', 'report_key', 'name'],
+                name='accounting_unique_report_preset_name',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.report_key}: {self.name}"
 
 
 class APVendor(models.Model):
