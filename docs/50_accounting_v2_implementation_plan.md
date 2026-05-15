@@ -132,6 +132,10 @@ Slice 3F is now implemented for report archive hardening and period reopen:
 generated CSV/XLSX/PDF/manifest exports now create immutable archive metadata
 records with canonical data and file hashes, and closed periods can be reopened
 through a posted reversing closing journal.
+Slice 3G-A is now implemented for post-live AP: AP vendor bills and payments
+create draft journals, AP Aging reads posted AP bill/payment subledger rows,
+the schedule reconciles against the GL AP control account, and cashier role
+presets receive read-only AP bill/payment access.
 
 ## 2. Locked Decisions
 
@@ -425,8 +429,22 @@ Slice 3F is implemented as report archive and reopen hardening:
 - Closed periods can be reopened through a preview/confirm workflow that posts
   a reversing `closing` journal and clears period close metadata.
 - Reopen is blocked when later periods are already closed or locked.
-- Remaining Slice 3 work starts with binary archive/package storage, saved
-  report presets, and a full post-live AP vendor invoice subledger.
+
+Slice 3G-A is implemented as post-live AP vendor bill foundation:
+
+- AP vendor bills store supplier bill details, expense/AP accounts, amount,
+  status, and linked draft journal.
+- AP vendor payments store payment date, cash/bank account, amount, reference,
+  and linked draft journal.
+- Bill drafts use `Dr expense/direct cost/asset / Cr AP`.
+- Payment drafts use `Dr AP / Cr cash/bank`.
+- AP Aging includes only posted AP bill/payment journals, preserving
+  draft-then-approve behavior.
+- Existing cutover/opening AP fallback remains available when no posted AP
+  vendor bills exist.
+- Remaining Slice 3 work starts with AP bill void/reversal, purchase tax
+  breakdowns, vendor master records, binary archive/package storage, and saved
+  report presets.
 
 ### Slice 4 - BIR Books and Guides
 

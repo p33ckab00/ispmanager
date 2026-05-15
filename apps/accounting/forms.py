@@ -1,9 +1,12 @@
 from decimal import Decimal
 
 from django import forms
+from django.db.models import Sum
 
 from apps.accounting.models import (
     AlphanumericTaxCode,
+    APVendorBill,
+    APVendorPayment,
     ChartOfAccount,
     CutoverBalanceSchedule,
     CutoverBalanceScheduleLine,
@@ -181,6 +184,75 @@ class CutoverBalanceScheduleLineForm(forms.ModelForm):
 
     def clean_quantity(self):
         return self.cleaned_data.get('quantity') or Decimal('0.0000')
+
+
+class APVendorBillForm(forms.ModelForm):
+    class Meta:
+        model = APVendorBill
+        fields = [
+            'vendor_name',
+            'bill_number',
+            'document_date',
+            'due_date',
+            'expense_account',
+            'ap_account',
+            'amount',
+            'notes',
+        ]
+        widgets = {
+            'document_date': forms.DateInput(attrs={'type': 'date'}),
+            'due_date': forms.DateInput(attrs={'type': 'date'}),
+            'vendor_name': forms.TextInput(attrs={'placeholder': 'Vendor or supplier name'}),
+            'bill_number': forms.TextInput(attrs={'placeholder': 'Supplier invoice or bill number'}),
+            'notes': forms.Textarea(attrs={'rows': 3}),
+        }
+
+    def __init__(self, *args, entity=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['expense_account'].queryset = ChartOfAccount.objects.none()
+        self.fields['ap_account'].queryset = ChartOfAccount.objects.none()
+        if entity:
+            self.fields['expense_account'].queryset = ChartOfAccount.objects.filter(
+                entity=entity,
+                is_active=True,
+                account_type__in=['direct_cost', 'expense', 'other_expense', 'asset'],
+            ).order_by('code')
+            self.fields['ap_account'].queryset = ChartOfAccount.objects.filter(
+                entity=entity,
+                is_active=True,
+                account_type='liability',
+            ).order_by('code')
+
+
+class APVendorPaymentForm(forms.ModelForm):
+    class Meta:
+        model = APVendorPayment
+        fields = ['payment_date', 'cash_account', 'amount', 'reference']
+        widgets = {
+            'payment_date': forms.DateInput(attrs={'type': 'date'}),
+            'reference': forms.TextInput(attrs={'placeholder': 'Check, bank transfer, or wallet reference'}),
+        }
+
+    def __init__(self, *args, entity=None, bill=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bill = bill
+        self.fields['cash_account'].queryset = ChartOfAccount.objects.none()
+        if entity:
+            self.fields['cash_account'].queryset = ChartOfAccount.objects.filter(
+                entity=entity,
+                is_active=True,
+                account_type='asset',
+                code__in=['1000', '1010', '1020'],
+            ).order_by('code')
+
+    def clean_amount(self):
+        amount = self.cleaned_data.get('amount') or Decimal('0.00')
+        if self.bill:
+            existing_total = self.bill.payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+            remaining = self.bill.amount - existing_total
+            if amount > remaining:
+                raise forms.ValidationError('Payment cannot exceed the remaining bill balance.')
+        return amount
 
 
 class IncomeForm(forms.ModelForm):

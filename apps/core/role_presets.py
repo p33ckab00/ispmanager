@@ -27,6 +27,8 @@ ROLE_GROUP_PRESETS = {
             ('accounting', 'view_accountingentity'),
             ('accounting', 'view_accountingsettings'),
             ('accounting', 'view_accountingperiod'),
+            ('accounting', 'view_apvendorbill'),
+            ('accounting', 'view_apvendorpayment'),
             ('accounting', 'view_chartofaccount'),
             ('accounting', 'view_journalentry'),
             ('accounting', 'view_journalline'),

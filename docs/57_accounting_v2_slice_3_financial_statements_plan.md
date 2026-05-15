@@ -16,6 +16,7 @@ data, XLSX workbooks, PDF workpapers, and JSON manifests with SHA-256 hashes.
 Slice 3E adds formal period close with generated closing entries.
 Slice 3F adds immutable report archive records and a guarded period reopen
 workflow with reversing closing entries.
+Slice 3G-A adds the first post-live AP vendor bill subledger.
 
 ## Slice 3A Implemented
 
@@ -182,6 +183,32 @@ Implemented:
 - Regression coverage was added for archive creation/immutability and
   close-reopen statement behavior.
 
+## Slice 3G-A Implemented
+
+Implemented:
+
+- `APVendorBill` stores post-live supplier bills with vendor, bill number,
+  document date, due date, expense/AP accounts, amount, status, linked draft
+  journal, and notes.
+- `APVendorPayment` stores payments against AP vendor bills with payment date,
+  cash/bank account, amount, reference, and linked draft journal.
+- AP bill creation creates a draft journal using `Dr expense/direct cost/asset
+  / Cr AP`.
+- AP payment creation creates a draft journal using `Dr AP / Cr cash/bank`.
+- Draft-then-approve remains intact: AP Aging includes AP vendor bills and
+  payments only after their journals are posted.
+- AP Aging now reads posted AP vendor bills first, subtracts posted AP vendor
+  payments, and compares the result to the GL AP control account.
+- Existing cutover AP schedule and opening AP vendor fallback remain in place
+  when no posted AP vendor bills exist for the entity/date.
+- AP vendor bill pages were added at `/accounting/ap-bills/`, including add,
+  detail, and payment draft creation.
+- Accounting dashboard and AP Aging now link to AP Bills.
+- Cashier role presets receive read-only AP bill/payment access while AP bill
+  creation and payment draft creation stay behind the AP management permission.
+- Regression coverage was added for posted bill/payment AP Aging behavior and
+  GL AP control reconciliation.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -198,8 +225,9 @@ Implemented:
   period closing entries are not posted yet.
 - AR Aging is an operational schedule based on current invoice balances as of
   the selected date, with a GL AR control comparison.
-- AP Aging is a cutover/vendor schedule based on AP support lines, with a GL AP
-  control comparison.
+- AP Aging uses the posted AP vendor bill subledger when present, then cutover
+  AP support lines, then opening AP vendor lines, with a GL AP control
+  comparison.
 - Tax Ledger is a date-range GL tax account report with optional 2307/EWT claim
   support rows.
 - Date presets are UI/report conveniences only; generated reports still show
@@ -226,16 +254,20 @@ Implemented:
   dimensions.
 - AR Aging is not historical-payment accurate yet because invoice balances are
   current-state operational balances.
-- AP Aging is not a full post-live vendor invoice subledger yet; it depends on
-  cutover/opening AP support until expense/AP posting is upgraded.
+- AP vendor bills do not yet have void/reversal workflow, vendor master records,
+  attachment storage, purchase tax breakdowns, or payment settlement matching.
+- AP Aging selects the post-live AP bill subledger ahead of cutover/opening
+  fallbacks; a merged historical cutover plus post-live AP view is still future
+  work.
 - Tax Ledger is a GL workpaper and optional 2307 support schedule, not a
   finalized BIR return package or SLSP/QAP/MAP file.
 - Presets and zero-balance toggles are not yet saved per user.
 
 ## Next Slice Candidate
 
-Slice 3G should prepare the remaining subledger base before BIR/NTC books:
+Slice 3G-B should continue AP hardening before BIR/NTC books:
 
-- Full post-live AP vendor invoice subledger design.
+- AP bill void/reversal and purchase tax breakdowns.
+- Vendor master records and attachment storage.
 - Binary archive/package storage for generated export files.
 - Saved report presets per user.

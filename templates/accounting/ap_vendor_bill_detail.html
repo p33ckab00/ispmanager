@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}AP Bill {{ bill.bill_number }} - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">{{ bill.vendor_name }}</h2>
+    <p class="text-gray-500 text-sm mt-1">{{ bill.bill_number }} - {{ bill.document_date }} - due {{ bill.due_date }}</p>
+  </div>
+  <div class="flex flex-wrap gap-2">
+    {% if bill.journal_entry %}
+    <a href="{% url 'accounting-journal-detail' bill.journal_entry.pk %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Bill Journal</a>
+    {% endif %}
+    {% if perms.accounting.manage_apvendorbill %}
+    <a href="{% url 'accounting-ap-vendor-payment-add' bill.pk %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Add Payment</a>
+    {% endif %}
+    <a href="{% url 'accounting-ap-vendor-bill-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">AP Bills</a>
+  </div>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase">Amount</p>
+    <p class="text-2xl font-bold text-gray-800">PHP {{ bill.amount }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase">Posted Payments</p>
+    <p class="text-2xl font-bold text-gray-800">PHP {{ bill.posted_payment_total }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase">Open Balance</p>
+    <p class="text-2xl font-bold text-gray-800">PHP {{ bill.remaining_balance }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs text-gray-400 uppercase">Status</p>
+    <p class="text-lg font-bold text-gray-800">{{ bill.get_status_display }}</p>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <dl class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+    <div><dt class="text-gray-500">Expense Account</dt><dd class="font-medium">{{ bill.expense_account }}</dd></div>
+    <div><dt class="text-gray-500">AP Account</dt><dd class="font-medium">{{ bill.ap_account }}</dd></div>
+    <div class="md:col-span-2"><dt class="text-gray-500">Notes</dt><dd>{{ bill.notes|default:"-" }}</dd></div>
+  </dl>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Date</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Reference</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Cash Account</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Journal</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Amount</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for payment in payments %}
+      <tr>
+        <td class="px-4 py-3">{{ payment.payment_date }}</td>
+        <td class="px-4 py-3">{{ payment.reference|default:"-" }}</td>
+        <td class="px-4 py-3">{{ payment.cash_account }}</td>
+        <td class="px-4 py-3">
+          {% if payment.journal_entry %}
+          <a href="{% url 'accounting-journal-detail' payment.journal_entry.pk %}" class="text-blue-600 hover:underline">{{ payment.journal_entry.entry_number }}</a>
+	          <span class="text-xs text-gray-500">- {{ payment.journal_entry.get_status_display }}</span>
+          {% else %}
+          -
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-right">PHP {{ payment.amount }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="px-4 py-8 text-center text-gray-500">No vendor payments yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

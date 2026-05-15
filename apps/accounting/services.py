@@ -15,6 +15,8 @@ from apps.accounting.models import (
     AccountingSettings,
     AccountingSourcePosting,
     AlphanumericTaxCode,
+    APVendorBill,
+    APVendorPayment,
     ChartOfAccount,
     CUTOVER_LOCKED_STATUSES,
     CutoverBalanceSchedule,
@@ -1910,10 +1912,55 @@ def _ap_amount_from_line(line):
     return max((line.credit or Decimal('0.00')) - (line.debit or Decimal('0.00')), Decimal('0.00'))
 
 
+def _ap_vendor_bill_paid_total(bill, as_of_date=None):
+    payments = bill.payments.filter(journal_entry__status='posted')
+    if as_of_date:
+        payments = payments.filter(payment_date__lte=as_of_date)
+    return payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+
 def build_ap_aging_report(entity, as_of_date=None):
     as_of_date = as_of_date or timezone.localdate()
     totals = _empty_aging_totals()
     rows = []
+    vendor_bills = (
+        APVendorBill.objects
+        .filter(
+            entity=entity,
+            document_date__lte=as_of_date,
+            journal_entry__status='posted',
+        )
+        .exclude(status='voided')
+        .select_related('expense_account', 'ap_account', 'journal_entry')
+        .order_by('vendor_name', 'due_date', 'bill_number', 'id')
+    )
+    vendor_bill_source_available = vendor_bills.exists()
+    if vendor_bill_source_available:
+        for bill in vendor_bills:
+            paid_total = _ap_vendor_bill_paid_total(bill, as_of_date)
+            amount = max((bill.amount or Decimal('0.00')) - paid_total, Decimal('0.00'))
+            if amount <= Decimal('0.00'):
+                continue
+            reference_date = bill.due_date or bill.document_date or as_of_date
+            if reference_date > as_of_date:
+                bucket = 'current'
+                days_overdue = 0
+            else:
+                days_overdue = max((as_of_date - reference_date).days, 0)
+                bucket = _aging_bucket(days_overdue)
+            totals[bucket] += amount
+            rows.append({
+                'vendor_name': bill.vendor_name,
+                'reference': bill.bill_number,
+                'document_date': bill.document_date,
+                'due_date': reference_date,
+                'account': bill.ap_account,
+                'amount': amount,
+                'days_overdue': days_overdue,
+                'bucket': bucket,
+                'bucket_label': _bucket_labels()[bucket],
+                'source': 'AP vendor bill subledger',
+            })
     schedule_lines = (
         CutoverBalanceScheduleLine.objects
         .filter(
@@ -1924,7 +1971,7 @@ def build_ap_aging_report(entity, as_of_date=None):
         .select_related('account', 'schedule')
         .order_by('counterparty_name', 'statement_date', 'source_document_number', 'id')
     )
-    if schedule_lines.exists():
+    if not vendor_bill_source_available and schedule_lines.exists():
         for line in schedule_lines:
             reference_date = line.maturity_date or line.statement_date or as_of_date
             if reference_date and reference_date > as_of_date:
@@ -1949,7 +1996,7 @@ def build_ap_aging_report(entity, as_of_date=None):
                 'bucket_label': _bucket_labels()[bucket],
                 'source': 'Cutover AP schedule',
             })
-    else:
+    elif not vendor_bill_source_available:
         opening_lines = (
             OpeningBalanceLine.objects
             .filter(
@@ -1990,7 +2037,10 @@ def build_ap_aging_report(entity, as_of_date=None):
         'control_balance': control_balance,
         'control_difference': control_balance - total,
         'as_of_date': as_of_date,
-        'source_note': 'AP aging uses cutover AP schedule lines when present, otherwise validated opening AP vendor lines.',
+        'source_note': (
+            'AP aging uses posted AP vendor bills when present, then cutover AP schedule lines, '
+            'otherwise validated opening AP vendor lines.'
+        ),
     }
 
 
@@ -2428,6 +2478,168 @@ def post_journal_entry(journal_entry, posted_by=None, allow_closed_period=False)
         updated_at=timezone.now(),
     )
     return journal_entry
+
+
+def refresh_ap_vendor_bill_status(bill):
+    if bill.status == 'voided':
+        return bill
+    if not bill.journal_entry_id or bill.journal_entry.status != 'posted':
+        new_status = 'draft'
+    else:
+        remaining = bill.remaining_balance
+        if remaining <= Decimal('0.00'):
+            new_status = 'paid'
+        elif remaining < bill.amount:
+            new_status = 'partial'
+        else:
+            new_status = 'open'
+    if bill.status != new_status:
+        bill.status = new_status
+        bill.save(update_fields=['status', 'updated_at'])
+    return bill
+
+
+def _create_ap_journal(entity, entry_date, description, lines, reference, source_type, source_document_number, created_by=None):
+    period = find_period_for_date(entity, entry_date)
+    journal_entry = JournalEntry.objects.create(
+        entity=entity,
+        period=period,
+        entry_number=next_journal_entry_number(entity, entry_date),
+        entry_date=entry_date,
+        description=description,
+        reference=reference,
+        source_type=source_type,
+        source_document_number=source_document_number,
+        created_by=created_by,
+    )
+    for index, line in enumerate(lines, start=1):
+        journal_line = JournalLine(
+            journal_entry=journal_entry,
+            account=_resolve_account(entity, line['account']),
+            line_number=index,
+            description=line.get('description', ''),
+            debit=_decimal_amount(line.get('debit')),
+            credit=_decimal_amount(line.get('credit')),
+        )
+        journal_line.full_clean()
+        journal_line.save()
+    return journal_entry
+
+
+@transaction.atomic
+def create_ap_vendor_bill_draft(
+    entity,
+    vendor_name,
+    bill_number,
+    document_date,
+    due_date,
+    expense_account,
+    ap_account,
+    amount,
+    notes='',
+    created_by=None,
+):
+    amount = _decimal_amount(amount)
+    bill = APVendorBill(
+        entity=entity,
+        vendor_name=vendor_name,
+        bill_number=bill_number,
+        document_date=document_date,
+        due_date=due_date,
+        expense_account=_resolve_account(entity, expense_account),
+        ap_account=_resolve_account(entity, ap_account),
+        amount=amount,
+        notes=notes,
+        created_by=created_by if getattr(created_by, 'is_authenticated', False) else None,
+    )
+    bill.full_clean()
+    bill.save()
+    journal_entry = _create_ap_journal(
+        entity,
+        document_date,
+        f"Vendor bill {bill.bill_number} - {bill.vendor_name}",
+        [
+            {'account': bill.expense_account, 'debit': amount, 'description': bill.vendor_name},
+            {'account': bill.ap_account, 'credit': amount, 'description': bill.vendor_name},
+        ],
+        reference=bill.bill_number,
+        source_type='expense',
+        source_document_number=bill.bill_number,
+        created_by=created_by,
+    )
+    SourceDocumentLink.objects.create(
+        entity=entity,
+        journal_entry=journal_entry,
+        source_app='accounting',
+        source_model='APVendorBill',
+        source_id=str(bill.pk),
+        source_number=bill.bill_number,
+        document_date=document_date,
+    )
+    bill.journal_entry = journal_entry
+    bill.full_clean()
+    bill.save(update_fields=['journal_entry', 'updated_at'])
+    return bill
+
+
+@transaction.atomic
+def create_ap_vendor_payment_draft(
+    bill,
+    payment_date,
+    amount,
+    cash_account,
+    reference='',
+    created_by=None,
+):
+    bill = APVendorBill.objects.select_related('entity', 'ap_account', 'journal_entry').get(pk=bill.pk)
+    refresh_ap_vendor_bill_status(bill)
+    if bill.status == 'voided':
+        raise ValidationError('Voided AP vendor bills cannot be paid.')
+    if not bill.journal_entry_id or bill.journal_entry.status != 'posted':
+        raise ValidationError('AP vendor bill journal must be posted before recording payment.')
+    amount = _decimal_amount(amount)
+    recorded_total = bill.payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+    remaining = bill.amount - recorded_total
+    if amount > remaining:
+        raise ValidationError('AP vendor payment cannot exceed the remaining bill balance.')
+    cash_account = _resolve_account(bill.entity, cash_account)
+    payment = APVendorPayment(
+        entity=bill.entity,
+        bill=bill,
+        payment_date=payment_date,
+        cash_account=cash_account,
+        amount=amount,
+        reference=reference,
+        created_by=created_by if getattr(created_by, 'is_authenticated', False) else None,
+    )
+    payment.full_clean()
+    payment.save()
+    journal_entry = _create_ap_journal(
+        bill.entity,
+        payment_date,
+        f"Vendor payment {bill.bill_number} - {bill.vendor_name}",
+        [
+            {'account': bill.ap_account, 'debit': amount, 'description': bill.vendor_name},
+            {'account': cash_account, 'credit': amount, 'description': bill.vendor_name},
+        ],
+        reference=reference or bill.bill_number,
+        source_type='payment',
+        source_document_number=reference or bill.bill_number,
+        created_by=created_by,
+    )
+    SourceDocumentLink.objects.create(
+        entity=bill.entity,
+        journal_entry=journal_entry,
+        source_app='accounting',
+        source_model='APVendorPayment',
+        source_id=str(payment.pk),
+        source_number=reference or bill.bill_number,
+        document_date=payment_date,
+    )
+    payment.journal_entry = journal_entry
+    payment.full_clean()
+    payment.save(update_fields=['journal_entry'])
+    return payment
 
 
 def _period_closing_reference(period):

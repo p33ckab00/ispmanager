@@ -14,6 +14,7 @@ from apps.accounting.models import (
     AccountingSettings,
     AccountingSourcePosting,
     AlphanumericTaxCode,
+    APVendorBill,
     ChartOfAccount,
     CutoverBalanceSchedule,
     CutoverPlan,
@@ -27,6 +28,8 @@ from apps.accounting.models import (
 )
 from apps.accounting.forms import (
     AccountingSetupForm,
+    APVendorBillForm,
+    APVendorPaymentForm,
     CutoverBalanceScheduleForm,
     CutoverBalanceScheduleLineForm,
     CutoverPlanForm,
@@ -52,6 +55,8 @@ from apps.accounting.services import (
     build_period_reopen_preview,
     create_accounting_foundation,
     close_accounting_period,
+    create_ap_vendor_bill_draft,
+    create_ap_vendor_payment_draft,
     create_cutover_balance_schedule,
     create_cutover_plan,
     build_general_ledger_report,
@@ -68,6 +73,7 @@ from apps.accounting.services import (
     mark_cutover_ready,
     post_journal_entry,
     refresh_opening_balance_totals,
+    refresh_ap_vendor_bill_status,
     reopen_accounting_period,
     retry_source_posting,
     sync_payments_to_income,
@@ -111,6 +117,7 @@ def _accounting_context():
         'draft_journal_count': JournalEntry.objects.filter(entity=entity, status='draft').count() if entity else 0,
         'source_draft_count': AccountingSourcePosting.objects.filter(entity=entity, status='draft').count() if entity else 0,
         'source_blocked_count': AccountingSourcePosting.objects.filter(Q(entity=entity) | Q(entity__isnull=True), status='blocked').count() if entity else 0,
+        'ap_vendor_bill_count': APVendorBill.objects.filter(entity=entity).exclude(status='voided').count() if entity else 0,
         'withholding_class_count': WithholdingTaxClass.objects.filter(entity=entity, is_active=True).count() if entity else 0,
         'withholding_pending_count': CustomerWithholdingTaxClaim.objects.filter(
             Q(entity=entity) | Q(entity__isnull=True),
@@ -1128,6 +1135,141 @@ def ar_aging(request):
         'as_of_preset_choices': AS_OF_PRESET_CHOICES,
         'selected_as_of_preset': selected_as_of_preset,
         **_report_export_queries(request),
+    })
+
+
+@login_required
+def ap_vendor_bill_list(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_apvendorbill')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    bills = (
+        APVendorBill.objects
+        .filter(entity=entity)
+        .select_related('expense_account', 'ap_account', 'journal_entry')
+        .order_by('-document_date', '-created_at')
+    )
+    paginator = Paginator(bills, 25)
+    page = paginator.get_page(request.GET.get('page', 1))
+    for bill in page.object_list:
+        refresh_ap_vendor_bill_status(bill)
+    return render(request, 'accounting/ap_vendor_bill_list.html', {
+        'entity': entity,
+        'page_obj': page,
+    })
+
+
+@login_required
+def ap_vendor_bill_add(request):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_apvendorbill',
+        'accounting-ap-vendor-bill-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    if request.method == 'POST':
+        form = APVendorBillForm(request.POST, entity=entity)
+        if form.is_valid():
+            try:
+                bill = create_ap_vendor_bill_draft(
+                    entity,
+                    form.cleaned_data['vendor_name'],
+                    form.cleaned_data['bill_number'],
+                    form.cleaned_data['document_date'],
+                    form.cleaned_data['due_date'],
+                    form.cleaned_data['expense_account'],
+                    form.cleaned_data['ap_account'],
+                    form.cleaned_data['amount'],
+                    notes=form.cleaned_data['notes'],
+                    created_by=request.user,
+                )
+                AuditLog.log('create', 'accounting', f"AP vendor bill draft created: {bill.bill_number}", user=request.user)
+                messages.success(request, f"AP vendor bill created with draft journal {bill.journal_entry.entry_number}.")
+                return redirect('accounting-ap-vendor-bill-detail', pk=bill.pk)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        initial = {'document_date': date.today(), 'due_date': date.today()}
+        default_ap = ChartOfAccount.objects.filter(entity=entity, code='2000').first()
+        if default_ap:
+            initial['ap_account'] = default_ap
+        form = APVendorBillForm(entity=entity, initial=initial)
+    return render(request, 'accounting/ap_vendor_bill_form.html', {
+        'entity': entity,
+        'form': form,
+    })
+
+
+@login_required
+def ap_vendor_bill_detail(request, pk):
+    permission_check = _require_accounting_perm(request, 'accounting.view_apvendorbill')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    bill = get_object_or_404(
+        APVendorBill.objects.select_related('expense_account', 'ap_account', 'journal_entry'),
+        entity=entity,
+        pk=pk,
+    )
+    refresh_ap_vendor_bill_status(bill)
+    payments = bill.payments.select_related('cash_account', 'journal_entry').order_by('-payment_date', '-created_at')
+    return render(request, 'accounting/ap_vendor_bill_detail.html', {
+        'entity': entity,
+        'bill': bill,
+        'payments': payments,
+    })
+
+
+@login_required
+def ap_vendor_payment_add(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_apvendorbill',
+        'accounting-ap-vendor-bill-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    bill = get_object_or_404(
+        APVendorBill.objects.select_related('ap_account', 'journal_entry'),
+        entity=entity,
+        pk=pk,
+    )
+    refresh_ap_vendor_bill_status(bill)
+    if request.method == 'POST':
+        form = APVendorPaymentForm(request.POST, entity=entity, bill=bill)
+        if form.is_valid():
+            try:
+                payment = create_ap_vendor_payment_draft(
+                    bill,
+                    form.cleaned_data['payment_date'],
+                    form.cleaned_data['amount'],
+                    form.cleaned_data['cash_account'],
+                    reference=form.cleaned_data['reference'],
+                    created_by=request.user,
+                )
+                AuditLog.log('create', 'accounting', f"AP vendor payment draft created: {bill.bill_number}", user=request.user)
+                messages.success(request, f"AP payment created with draft journal {payment.journal_entry.entry_number}.")
+                return redirect('accounting-ap-vendor-bill-detail', pk=bill.pk)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        form = APVendorPaymentForm(entity=entity, bill=bill, initial={'payment_date': date.today()})
+    return render(request, 'accounting/ap_vendor_payment_form.html', {
+        'entity': entity,
+        'bill': bill,
+        'form': form,
     })
 
 

@@ -501,6 +501,155 @@ class AccountingReportArchive(models.Model):
         return f"{self.report_name} {self.export_format} {self.generated_at:%Y-%m-%d %H:%M}"
 
 
+class APVendorBill(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft Journal'),
+        ('open', 'Open'),
+        ('partial', 'Partially Paid'),
+        ('paid', 'Paid'),
+        ('voided', 'Voided'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='ap_vendor_bills',
+    )
+    vendor_name = models.CharField(max_length=255)
+    bill_number = models.CharField(max_length=120)
+    document_date = models.DateField()
+    due_date = models.DateField()
+    expense_account = models.ForeignKey(
+        ChartOfAccount,
+        on_delete=models.PROTECT,
+        related_name='ap_vendor_bills_as_expense',
+    )
+    ap_account = models.ForeignKey(
+        ChartOfAccount,
+        on_delete=models.PROTECT,
+        related_name='ap_vendor_bills_as_payable',
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    journal_entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ap_vendor_bills',
+    )
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_ap_vendor_bills',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-document_date', '-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['entity', 'vendor_name', 'bill_number'],
+                name='accounting_unique_ap_vendor_bill',
+            ),
+        ]
+        permissions = [
+            ('manage_apvendorbill', 'Can manage AP vendor bills'),
+        ]
+
+    def clean(self):
+        if self.amount is not None and self.amount <= MONEY_ZERO:
+            raise ValidationError('AP vendor bill amount must be greater than zero.')
+        if self.due_date and self.document_date and self.due_date < self.document_date:
+            raise ValidationError('AP vendor bill due date cannot be before document date.')
+        for field_name in ('expense_account', 'ap_account'):
+            account = getattr(self, field_name, None)
+            if account and self.entity_id and account.entity_id != self.entity_id:
+                raise ValidationError('AP vendor bill accounts must belong to the same accounting entity.')
+        if self.expense_account_id and self.expense_account.account_type not in ('direct_cost', 'expense', 'other_expense', 'asset'):
+            raise ValidationError('Expense account must be an expense, direct cost, other expense, or asset account.')
+        if self.ap_account_id and self.ap_account.account_type != 'liability':
+            raise ValidationError('AP account must be a liability account.')
+        if self.journal_entry_id and self.entity_id and self.journal_entry.entity_id != self.entity_id:
+            raise ValidationError('AP vendor bill journal must belong to the same accounting entity.')
+
+    @property
+    def is_posted(self):
+        return bool(self.journal_entry_id and self.journal_entry.status == 'posted')
+
+    @property
+    def posted_payment_total(self):
+        total = self.payments.filter(journal_entry__status='posted').aggregate(total=Sum('amount'))['total']
+        return total or MONEY_ZERO
+
+    @property
+    def remaining_balance(self):
+        if not self.is_posted or self.status == 'voided':
+            return MONEY_ZERO
+        return max((self.amount or MONEY_ZERO) - self.posted_payment_total, MONEY_ZERO)
+
+    def __str__(self):
+        return f"{self.vendor_name} {self.bill_number} - PHP {self.amount}"
+
+
+class APVendorPayment(models.Model):
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='ap_vendor_payments',
+    )
+    bill = models.ForeignKey(
+        APVendorBill,
+        on_delete=models.PROTECT,
+        related_name='payments',
+    )
+    payment_date = models.DateField()
+    cash_account = models.ForeignKey(
+        ChartOfAccount,
+        on_delete=models.PROTECT,
+        related_name='ap_vendor_payments_as_cash',
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    reference = models.CharField(max_length=120, blank=True)
+    journal_entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ap_vendor_payments',
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_ap_vendor_payments',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-payment_date', '-created_at']
+
+    def clean(self):
+        if self.amount is not None and self.amount <= MONEY_ZERO:
+            raise ValidationError('AP vendor payment amount must be greater than zero.')
+        if self.entity_id and self.bill_id and self.bill.entity_id != self.entity_id:
+            raise ValidationError('AP vendor payment bill must belong to the same accounting entity.')
+        if self.cash_account_id and self.entity_id and self.cash_account.entity_id != self.entity_id:
+            raise ValidationError('AP vendor payment cash account must belong to the same accounting entity.')
+        if self.cash_account_id and self.cash_account.account_type != 'asset':
+            raise ValidationError('AP vendor payment cash account must be an asset account.')
+        if self.journal_entry_id and self.entity_id and self.journal_entry.entity_id != self.entity_id:
+            raise ValidationError('AP vendor payment journal must belong to the same accounting entity.')
+
+    def __str__(self):
+        return f"{self.bill.vendor_name} payment - PHP {self.amount}"
+
+
 class AccountingSourcePosting(models.Model):
     STATUS_CHOICES = [
         ('draft', 'Draft Journal Created'),

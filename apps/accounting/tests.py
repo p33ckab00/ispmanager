@@ -12,6 +12,8 @@ from apps.accounting.models import (
     AccountingReportArchive,
     AccountingSourcePosting,
     AlphanumericTaxCode,
+    APVendorBill,
+    APVendorPayment,
     ChartOfAccount,
     CutoverBalanceSchedule,
     CutoverBalanceScheduleLine,
@@ -40,6 +42,8 @@ from apps.accounting.services import (
     build_tax_ledger_report,
     build_trial_balance_report,
     close_accounting_period,
+    create_ap_vendor_bill_draft,
+    create_ap_vendor_payment_draft,
     create_accounting_foundation,
     create_cutover_balance_schedule,
     create_cutover_plan,
@@ -516,6 +520,62 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(report['total'], Decimal('700.00'))
         self.assertEqual(report['control_balance'], Decimal('700.00'))
         self.assertEqual(report['control_difference'], Decimal('0.00'))
+
+    def test_ap_vendor_bill_subledger_reconciles_to_ap_control(self):
+        entity = self._foundation()
+        ap = ChartOfAccount.objects.get(entity=entity, code='2000')
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        expense = ChartOfAccount.objects.get(entity=entity, code='6020')
+        bill = create_ap_vendor_bill_draft(
+            entity,
+            'Upstream Provider',
+            'BILL-200',
+            date(2026, 1, 20),
+            date(2026, 1, 31),
+            expense,
+            ap,
+            Decimal('700.00'),
+        )
+
+        draft_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+
+        self.assertEqual(bill.status, 'draft')
+        self.assertEqual(bill.journal_entry.status, 'draft')
+        self.assertEqual(draft_report['total'], Decimal('0.00'))
+
+        post_journal_entry(bill.journal_entry)
+        bill.refresh_from_db()
+        open_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+
+        self.assertEqual(open_report['totals']['31_60'], Decimal('700.00'))
+        self.assertEqual(open_report['total'], Decimal('700.00'))
+        self.assertEqual(open_report['control_balance'], Decimal('700.00'))
+        self.assertEqual(open_report['control_difference'], Decimal('0.00'))
+        self.assertEqual(open_report['rows'][0]['source'], 'AP vendor bill subledger')
+
+        payment = create_ap_vendor_payment_draft(
+            bill,
+            date(2026, 2, 5),
+            Decimal('200.00'),
+            cash,
+            reference='CHK-200',
+        )
+        draft_payment_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+
+        self.assertEqual(payment.journal_entry.status, 'draft')
+        self.assertEqual(draft_payment_report['total'], Decimal('700.00'))
+        self.assertEqual(draft_payment_report['control_balance'], Decimal('700.00'))
+
+        post_journal_entry(payment.journal_entry)
+        paid_report = build_ap_aging_report(entity, as_of_date=date(2026, 3, 5))
+        bill.refresh_from_db()
+
+        self.assertEqual(paid_report['total'], Decimal('500.00'))
+        self.assertEqual(paid_report['control_balance'], Decimal('500.00'))
+        self.assertEqual(paid_report['control_difference'], Decimal('0.00'))
+        self.assertEqual(APVendorBill.objects.count(), 1)
+        self.assertEqual(APVendorPayment.objects.count(), 1)
+        self.assertEqual(bill.remaining_balance, Decimal('500.00'))
 
     def test_tax_ledger_reports_vat_and_optional_2307_claims(self):
         entity = create_accounting_foundation(
