@@ -6,6 +6,7 @@ urlpatterns = [
     path('setup/', views.accounting_setup, name='accounting-setup'),
     path('chart/', views.chart_list, name='accounting-chart-list'),
     path('periods/', views.period_list, name='accounting-period-list'),
+    path('periods/<int:pk>/close/', views.period_close, name='accounting-period-close'),
     path('journals/', views.journal_list, name='accounting-journal-list'),
     path('journals/add/', views.journal_add, name='accounting-journal-add'),
     path('journals/<int:pk>/', views.journal_detail, name='accounting-journal-detail'),

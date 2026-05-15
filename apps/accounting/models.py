@@ -129,6 +129,21 @@ class AccountingPeriod(models.Model):
     start_date = models.DateField()
     end_date = models.DateField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='closed_accounting_periods',
+    )
+    closing_journal_entry = models.ForeignKey(
+        'JournalEntry',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='closed_periods',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -233,6 +248,7 @@ class JournalEntry(models.Model):
         ('payment', 'Payment'),
         ('expense', 'Expense'),
         ('opening_balance', 'Opening Balance'),
+        ('closing', 'Closing Entry'),
         ('adjustment', 'Adjustment'),
     ]
     IMMUTABLE_STATUSES = ('posted', 'reviewed', 'locked', 'reversed', 'voided')

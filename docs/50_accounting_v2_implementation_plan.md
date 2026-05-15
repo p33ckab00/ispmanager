@@ -124,6 +124,10 @@ Slice 3D-B is now implemented for export packaging: Trial Balance, General
 Ledger, Income Statement, Balance Sheet, Cash Flow, Changes in Equity, AR
 Aging, AP Aging, and Tax Ledger now share CSV/XLSX/PDF/manifest export support
 with canonical CSV SHA-256 hashes.
+Slice 3E is now implemented for formal period close: open periods can preview
+and post generated closing journals, close metadata is stored on the period,
+Income Statement excludes mechanical closing entries, and Balance Sheet avoids
+double-counting closed earnings.
 
 ## 2. Locked Decisions
 
@@ -389,9 +393,24 @@ Slice 3D-B is implemented as report export packaging:
 - XLSX exports include both manifest and report sheets.
 - PDF exports use the existing `xhtml2pdf`/ReportLab path with an HTML
   workpaper fallback if rendering fails.
+
+Slice 3E is implemented as formal period close:
+
+- Accounting periods store closed timestamp, closing user, and linked closing
+  journal.
+- Period close preview is available from the Accounting Periods page.
+- Closing is blocked by open draft journals, draft/blocked source postings
+  inside the period, non-open period status, or an existing closing journal.
+- Confirming close posts one generated `closing` journal dated on the period
+  end and marks the period closed.
+- Temporary account balances are closed to the seeded equity account `3100`.
+- Income Statement excludes mechanical closing entries so period performance
+  stays visible after close.
+- Balance Sheet adds unclosed current earnings only after the latest closed
+  period, avoiding double-counting after closing entries are posted.
 - Remaining Slice 3 work starts with immutable archive records for generated
-  packages, formal closing entries, and a full post-live AP vendor invoice
-  subledger.
+  packages, reopen/reverse-close controls, and a full post-live AP vendor
+  invoice subledger.
 
 ### Slice 4 - BIR Books and Guides
 

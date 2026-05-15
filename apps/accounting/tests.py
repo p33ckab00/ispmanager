@@ -34,8 +34,10 @@ from apps.accounting.services import (
     build_cutover_readiness,
     build_general_ledger_report,
     build_income_statement_report,
+    build_period_close_preview,
     build_tax_ledger_report,
     build_trial_balance_report,
+    close_accounting_period,
     create_accounting_foundation,
     create_cutover_balance_schedule,
     create_cutover_plan,
@@ -255,6 +257,81 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(balance_sheet['totals']['asset'], Decimal('1380.00'))
         self.assertEqual(balance_sheet['totals']['equity'], Decimal('1380.00'))
         self.assertTrue(balance_sheet['is_balanced'])
+
+    def test_period_close_posts_closing_entry_and_removes_unclosed_current_earnings(self):
+        entity, cash = self._post_sample_activity()
+        period = AccountingPeriod.objects.get(entity=entity, period_number=1)
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+
+        preview = build_period_close_preview(period)
+        result = close_accounting_period(period)
+        period.refresh_from_db()
+        closing_journal = result['closing_journal']
+
+        self.assertTrue(preview['can_close'])
+        self.assertEqual(preview['net_income'], Decimal('380.00'))
+        self.assertEqual(period.status, 'closed')
+        self.assertIsNotNone(period.closed_at)
+        self.assertEqual(period.closing_journal_entry, closing_journal)
+        self.assertEqual(closing_journal.status, 'posted')
+        self.assertEqual(closing_journal.source_type, 'closing')
+        self.assertEqual(closing_journal.reference, 'CLOSE-2026-01')
+
+        income = build_income_statement_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+        )
+        balance_sheet = build_balance_sheet_report(entity, as_of_date=date(2026, 1, 31))
+        trial_balance = build_trial_balance_report(
+            entity,
+            start_date=date(2026, 1, 1),
+            end_date=date(2026, 1, 31),
+        )
+        revenue_balance = next(row['balance'] for row in trial_balance['rows'] if row['account'].code == '4000')
+        expense_balance = next(row['balance'] for row in trial_balance['rows'] if row['account'].code == '6010')
+
+        self.assertEqual(income['net_income'], Decimal('380.00'))
+        self.assertFalse(balance_sheet['uses_unclosed_current_earnings'])
+        self.assertEqual(balance_sheet['current_earnings'], Decimal('0.00'))
+        self.assertEqual(balance_sheet['totals']['equity'], Decimal('1380.00'))
+        self.assertTrue(balance_sheet['is_balanced'])
+        self.assertEqual(revenue_balance, Decimal('0.00'))
+        self.assertEqual(expense_balance, Decimal('0.00'))
+
+        blocked_journal = create_manual_journal_entry(
+            entity,
+            date(2026, 1, 20),
+            'Post-close adjustment',
+            [
+                {'account': cash, 'debit': Decimal('25.00')},
+                {'account': capital, 'credit': Decimal('25.00')},
+            ],
+        )
+        with self.assertRaisesMessage(ValidationError, 'open accounting periods'):
+            post_journal_entry(blocked_journal)
+
+    def test_period_close_requires_no_draft_journals(self):
+        entity = self._foundation()
+        period = AccountingPeriod.objects.get(entity=entity, period_number=1)
+        cash = ChartOfAccount.objects.get(entity=entity, code='1000')
+        capital = ChartOfAccount.objects.get(entity=entity, code='3000')
+        create_manual_journal_entry(
+            entity,
+            date(2026, 1, 5),
+            'Unposted funding',
+            [
+                {'account': cash, 'debit': Decimal('100.00')},
+                {'account': capital, 'credit': Decimal('100.00')},
+            ],
+        )
+
+        preview = build_period_close_preview(period)
+
+        self.assertFalse(preview['can_close'])
+        self.assertEqual(preview['draft_journal_count'], 1)
+        with self.assertRaisesMessage(ValidationError, 'draft journal'):
+            close_accounting_period(period)
 
     def test_general_ledger_carries_opening_balance_into_date_range(self):
         entity, cash = self._post_sample_activity()

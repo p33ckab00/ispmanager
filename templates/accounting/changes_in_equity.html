@@ -77,6 +77,14 @@
         <td class="px-4 py-3 text-right {% if report.period_net_income >= 0 %}text-green-700{% else %}text-red-600{% endif %}">PHP {{ report.period_net_income }}</td>
         <td class="px-4 py-3 text-right">-</td>
       </tr>
+      {% if report.closing_entry_movement %}
+      <tr>
+        <td class="px-4 py-3">Closing Entry Transfer</td>
+        <td class="px-4 py-3 text-right">-</td>
+        <td class="px-4 py-3 text-right">PHP {{ report.closing_entry_adjustment }}</td>
+        <td class="px-4 py-3 text-right">-</td>
+      </tr>
+      {% endif %}
       <tr class="bg-gray-50 font-bold">
         <td class="px-4 py-3 text-right">Ending Equity</td>
         <td class="px-4 py-3 text-right">PHP {{ report.opening_equity }}</td>

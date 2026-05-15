@@ -13,6 +13,7 @@ accounts where the current data model allows it.
 Slice 3D-A adds accountant-facing report ergonomics for repeat review runs.
 Slice 3D-B adds export packages for the full report set using canonical CSV
 data, XLSX workbooks, PDF workpapers, and JSON manifests with SHA-256 hashes.
+Slice 3E adds formal period close with generated closing entries.
 
 ## Slice 3A Implemented
 
@@ -126,13 +127,45 @@ Implemented:
 - `openpyxl` is now a project dependency for `.xlsx` workbooks.
 - Regression coverage now includes XLSX, manifest, and PDF export smoke checks.
 
+## Slice 3E Implemented
+
+Implemented:
+
+- Accounting periods now store close metadata: closed timestamp, closing user,
+  and linked closing journal.
+- Journal entries now have a `closing` source type for mechanical period close
+  entries.
+- Period close preview page at `/accounting/periods/<id>/close/`.
+- Closing preview lists generated temporary-account close lines, net income,
+  retained/current earnings account, draft journal blockers, and source review
+  blockers.
+- Closing is blocked when the period is not open, already has a closing
+  journal, has draft journals, or has draft/blocked source postings dated
+  inside the period.
+- Confirming close posts one balanced closing journal dated on the period end
+  and then marks the period `closed`.
+- Closing lines zero revenue, direct cost, expense, other income, and other
+  expense balances for the period, then transfer net income or loss to the
+  seeded equity account `3100`.
+- Income Statement excludes mechanical closing entries so the closed-period
+  operating result remains visible.
+- Balance Sheet now adds unclosed current earnings only after the latest closed
+  period, preventing double-counting after a formal close.
+- Changes in Equity now shows closing-entry transfer adjustment so net income
+  and mechanical closing movements do not double-count.
+- Regression coverage was added for close posting, statement behavior after
+  close, and draft-journal close blocking.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
 - Draft, blocked, and reviewed-but-unposted source entries are excluded.
 - Balance Sheet is an as-of report using posted lines through the selected
   date.
-- Income Statement is a date-range report.
+- Income Statement is a date-range report and excludes `closing` source
+  journals.
+- Balance Sheet includes unclosed current earnings only after the latest
+  closed or locked period through the selected as-of date.
 - Cash Flow is a date-range report based on posted movements in configured
   cash-equivalent accounts.
 - Changes in Equity is a date-range report that includes unclosed income when
@@ -155,7 +188,9 @@ Implemented:
 - Report exports are generated downloads with manifests; they are not yet
   persisted as immutable compliance archives or tracked in Data Exchange
   history.
-- Formal period close and closing entries are not implemented yet.
+- Period close has no reopen/reverse workflow yet.
+- Period close does not yet create a persisted close checklist or reviewer
+  sign-off record beyond the audit log and close metadata.
 - Department, area, service-type, and subscriber dimensions are not yet present
   in journal lines.
 - Cash Flow classification is GL-account based. It will become more exact once
@@ -171,9 +206,8 @@ Implemented:
 
 ## Next Slice Candidate
 
-Slice 3E should close the remaining accounting-reporting foundation before
-BIR/NTC books:
+Slice 3F should harden finalized workpapers before BIR/NTC books:
 
-- Formal period close and generated closing entries.
 - Immutable report archive records for generated manifest/export packages.
+- Period reopen/reverse-close workflow with approval controls.
 - Full post-live AP vendor invoice subledger design.

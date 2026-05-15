@@ -47,7 +47,9 @@ from apps.accounting.services import (
     build_balance_sheet_report,
     build_cash_flow_report,
     build_changes_in_equity_report,
+    build_period_close_preview,
     create_accounting_foundation,
+    close_accounting_period,
     create_cutover_balance_schedule,
     create_cutover_plan,
     build_general_ledger_report,
@@ -402,6 +404,7 @@ def _changes_in_equity_csv_rows(report):
     rows.extend([
         ['Summary', '', 'Prior Unclosed Earnings', report['prior_unclosed_earnings'], '', ''],
         ['Summary', '', 'Period Net Income', '', report['period_net_income'], ''],
+        ['Summary', '', 'Closing Entry Transfer', '', report['closing_entry_adjustment'], ''],
         ['Summary', '', 'Opening Equity', report['opening_equity'], '', ''],
         ['Summary', '', 'Ending Equity', '', '', report['ending_equity']],
         ['Summary', '', 'Balance Sheet Equity', '', '', report['balance_sheet_equity']],
@@ -576,7 +579,56 @@ def period_list(request):
         return entity
     return render(request, 'accounting/period_list.html', {
         'entity': entity,
-        'periods': AccountingPeriod.objects.filter(entity=entity).order_by('start_date'),
+        'periods': (
+            AccountingPeriod.objects
+            .filter(entity=entity)
+            .select_related('closing_journal_entry', 'closed_by')
+            .order_by('start_date')
+        ),
+    })
+
+
+@login_required
+def period_close(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_accounting_periods',
+        'accounting-period-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    period = get_object_or_404(
+        AccountingPeriod.objects.select_related('closing_journal_entry', 'closed_by'),
+        entity=entity,
+        pk=pk,
+    )
+    preview = build_period_close_preview(period)
+
+    if request.method == 'POST':
+        try:
+            result = close_accounting_period(period, closed_by=request.user)
+            closed_period = result['period']
+            closing_journal = result['closing_journal']
+            AuditLog.log('update', 'accounting', f"Period closed: {closed_period.name}", user=request.user)
+            if closing_journal:
+                messages.success(
+                    request,
+                    f"Period closed and closing journal {closing_journal.entry_number} posted.",
+                )
+                return redirect('accounting-journal-detail', pk=closing_journal.pk)
+            messages.success(request, 'Period closed. No closing journal was needed because there was no temporary account activity.')
+            return redirect('accounting-period-list')
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+            preview = build_period_close_preview(period)
+
+    return render(request, 'accounting/period_close.html', {
+        'entity': entity,
+        'period': period,
+        'preview': preview,
     })
 
 

@@ -82,6 +82,8 @@ CASH_EQUIVALENT_ACCOUNT_CODES = ('1000', '1010', '1020')
 AR_CONTROL_ACCOUNT_CODE = '1100'
 AP_CONTROL_ACCOUNT_CODE = '2000'
 TAX_LEDGER_ACCOUNT_CODES = ('1200', '1210', '2300', '2310', '2320', '2330', '6060')
+TEMPORARY_ACCOUNT_TYPES = ('revenue', 'direct_cost', 'expense', 'other_income', 'other_expense')
+CLOSING_EQUITY_ACCOUNT_CODE = '3100'
 
 VAT_ACCOUNTS = [
     _account('1200', 'Input VAT', 'asset', 'debit'),
@@ -1397,11 +1399,13 @@ def mark_accounting_live(plan, live_by=None):
     return plan
 
 
-def _posted_line_criteria(entity, start_date=None, end_date=None):
+def _posted_line_criteria(entity, start_date=None, end_date=None, include_closing_entries=True):
     criteria = Q(
         journal_lines__journal_entry__entity=entity,
         journal_lines__journal_entry__status='posted',
     )
+    if not include_closing_entries:
+        criteria &= ~Q(journal_lines__journal_entry__source_type='closing')
     if start_date:
         criteria &= Q(journal_lines__journal_entry__entry_date__gte=start_date)
     if end_date:
@@ -1409,7 +1413,7 @@ def _posted_line_criteria(entity, start_date=None, end_date=None):
     return criteria
 
 
-def _line_queryset(entity, start_date=None, end_date=None):
+def _line_queryset(entity, start_date=None, end_date=None, include_closing_entries=True):
     qs = (
         JournalLine.objects
         .filter(
@@ -1418,6 +1422,8 @@ def _line_queryset(entity, start_date=None, end_date=None):
         )
         .select_related('journal_entry', 'account')
     )
+    if not include_closing_entries:
+        qs = qs.exclude(journal_entry__source_type='closing')
     if start_date:
         qs = qs.filter(journal_entry__entry_date__gte=start_date)
     if end_date:
@@ -1433,8 +1439,20 @@ def _statement_balance(account, debit, credit):
     return credit - debit
 
 
-def _account_activity_rows(entity, start_date=None, end_date=None, account_types=None, include_zero=False):
-    line_filter = _posted_line_criteria(entity, start_date=start_date, end_date=end_date)
+def _account_activity_rows(
+    entity,
+    start_date=None,
+    end_date=None,
+    account_types=None,
+    include_zero=False,
+    include_closing_entries=True,
+):
+    line_filter = _posted_line_criteria(
+        entity,
+        start_date=start_date,
+        end_date=end_date,
+        include_closing_entries=include_closing_entries,
+    )
     accounts = ChartOfAccount.objects.filter(entity=entity, is_active=True)
     if account_types:
         accounts = accounts.filter(account_type__in=account_types)
@@ -1474,12 +1492,14 @@ def _account_balance_as_of(account, as_of_date=None):
     )
 
 
-def _account_activity_balance(account, start_date=None, end_date=None):
+def _account_activity_balance(account, start_date=None, end_date=None, include_closing_entries=True):
     qs = JournalLine.objects.filter(
         account=account,
         journal_entry__entity=account.entity,
         journal_entry__status='posted',
     )
+    if not include_closing_entries:
+        qs = qs.exclude(journal_entry__source_type='closing')
     if start_date:
         qs = qs.filter(journal_entry__entry_date__gte=start_date)
     if end_date:
@@ -1560,12 +1580,31 @@ def build_trial_balance_report(entity, start_date=None, end_date=None, include_z
     }
 
 
+def _unclosed_income_start_date(entity, as_of_date=None):
+    closed_periods = AccountingPeriod.objects.filter(
+        entity=entity,
+        status__in=['closed', 'locked'],
+    )
+    if as_of_date:
+        closed_periods = closed_periods.filter(end_date__lte=as_of_date)
+    last_closed_end = (
+        closed_periods
+        .order_by('-end_date')
+        .values_list('end_date', flat=True)
+        .first()
+    )
+    if not last_closed_end:
+        return None
+    return last_closed_end + timedelta(days=1)
+
+
 def build_income_statement_report(entity, start_date=None, end_date=None):
     rows = _account_activity_rows(
         entity,
         start_date=start_date,
         end_date=end_date,
-        account_types=['revenue', 'direct_cost', 'expense', 'other_income', 'other_expense'],
+        account_types=TEMPORARY_ACCOUNT_TYPES,
+        include_closing_entries=False,
     )
     sections = {
         'revenue': [],
@@ -1609,8 +1648,16 @@ def build_balance_sheet_report(entity, as_of_date=None):
     for row in balance_rows:
         sections[row['account'].account_type].append(row)
 
-    income_report = build_income_statement_report(entity, end_date=as_of_date)
-    current_earnings = income_report['net_income']
+    income_start_date = _unclosed_income_start_date(entity, as_of_date)
+    if as_of_date and income_start_date and income_start_date > as_of_date:
+        current_earnings = Decimal('0.00')
+    else:
+        income_report = build_income_statement_report(
+            entity,
+            start_date=income_start_date,
+            end_date=as_of_date,
+        )
+        current_earnings = income_report['net_income']
     if current_earnings != Decimal('0.00'):
         sections['equity'].append({
             'account': None,
@@ -1771,25 +1818,38 @@ def build_changes_in_equity_report(entity, start_date=None, end_date=None):
             'ending_balance': ending_balance,
         })
 
-    prior_income = (
-        build_income_statement_report(entity, end_date=day_before_start)['net_income']
-        if day_before_start else Decimal('0.00')
-    )
+    prior_income = Decimal('0.00')
+    if day_before_start:
+        prior_income_start = _unclosed_income_start_date(entity, day_before_start)
+        if not prior_income_start or prior_income_start <= day_before_start:
+            prior_income = build_income_statement_report(
+                entity,
+                start_date=prior_income_start,
+                end_date=day_before_start,
+            )['net_income']
     period_income = build_income_statement_report(
         entity,
         start_date=start_date,
         end_date=end_date,
     )['net_income']
+    closing_entry_movement = sum((
+        _statement_balance(line.account, line.debit, line.credit)
+        for line in _line_queryset(entity, start_date=start_date, end_date=end_date)
+        .filter(account__account_type='equity', journal_entry__source_type='closing')
+    ), Decimal('0.00'))
+    closing_entry_adjustment = -closing_entry_movement
     opening_equity = sum((row['opening_balance'] for row in rows), Decimal('0.00')) + prior_income
     equity_account_movement = sum((row['movement'] for row in rows), Decimal('0.00'))
-    total_period_change = equity_account_movement + period_income
-    ending_equity = opening_equity + equity_account_movement + period_income
+    total_period_change = equity_account_movement + period_income + closing_entry_adjustment
+    ending_equity = opening_equity + total_period_change
     balance_sheet = build_balance_sheet_report(entity, as_of_date=end_date)
 
     return {
         'rows': rows,
         'prior_unclosed_earnings': prior_income,
         'period_net_income': period_income,
+        'closing_entry_movement': closing_entry_movement,
+        'closing_entry_adjustment': closing_entry_adjustment,
         'opening_equity': opening_equity,
         'equity_account_movement': equity_account_movement,
         'total_period_change': total_period_change,
@@ -2366,6 +2426,216 @@ def post_journal_entry(journal_entry, posted_by=None):
         updated_at=timezone.now(),
     )
     return journal_entry
+
+
+def _period_closing_reference(period):
+    return f"CLOSE-{period.fiscal_year}-{period.period_number:02d}"
+
+
+def _period_closing_journal(period):
+    if period.closing_journal_entry_id:
+        return period.closing_journal_entry
+    return (
+        JournalEntry.objects
+        .filter(
+            entity=period.entity,
+            period=period,
+            source_type='closing',
+            reference=_period_closing_reference(period),
+        )
+        .exclude(status='voided')
+        .order_by('-entry_date', '-created_at')
+        .first()
+    )
+
+
+def _closing_equity_account(entity):
+    account = ChartOfAccount.objects.filter(
+        entity=entity,
+        code=CLOSING_EQUITY_ACCOUNT_CODE,
+        account_type='equity',
+        is_active=True,
+    ).first()
+    if account:
+        return account
+    account = ChartOfAccount.objects.filter(
+        entity=entity,
+        account_type='equity',
+        normal_balance='credit',
+        is_active=True,
+    ).order_by('code').first()
+    if not account:
+        raise ValidationError('No active equity account is available for period closing.')
+    return account
+
+
+def _closing_line_for_row(row):
+    account = row['account']
+    balance = row['balance']
+    if balance == Decimal('0.00'):
+        return None
+    amount = abs(balance)
+    line = {
+        'account': account,
+        'description': f"Close {account.code} {account.name}",
+        'debit': Decimal('0.00'),
+        'credit': Decimal('0.00'),
+    }
+    if balance > Decimal('0.00'):
+        if account.normal_balance == 'debit':
+            line['credit'] = amount
+        else:
+            line['debit'] = amount
+    elif account.normal_balance == 'debit':
+        line['debit'] = amount
+    else:
+        line['credit'] = amount
+    return line
+
+
+def _period_source_review_blockers(period):
+    return AccountingSourcePosting.objects.filter(
+        Q(entity=period.entity) | Q(entity__isnull=True),
+        status__in=['draft', 'blocked'],
+        document_date__gte=period.start_date,
+        document_date__lte=period.end_date,
+    ).count()
+
+
+def build_period_close_preview(period):
+    period = AccountingPeriod.objects.select_related(
+        'entity',
+        'closed_by',
+        'closing_journal_entry',
+    ).get(pk=period.pk)
+    income_report = build_income_statement_report(
+        period.entity,
+        start_date=period.start_date,
+        end_date=period.end_date,
+    )
+    temporary_rows = _account_activity_rows(
+        period.entity,
+        start_date=period.start_date,
+        end_date=period.end_date,
+        account_types=TEMPORARY_ACCOUNT_TYPES,
+        include_closing_entries=False,
+    )
+    closing_lines = [
+        line
+        for line in (_closing_line_for_row(row) for row in temporary_rows)
+        if line
+    ]
+    debit_total = sum((line['debit'] for line in closing_lines), Decimal('0.00'))
+    credit_total = sum((line['credit'] for line in closing_lines), Decimal('0.00'))
+    net_close_amount = debit_total - credit_total
+    equity_account = _closing_equity_account(period.entity)
+    if net_close_amount > Decimal('0.00'):
+        closing_lines.append({
+            'account': equity_account,
+            'description': 'Close net income to equity',
+            'debit': Decimal('0.00'),
+            'credit': net_close_amount,
+        })
+        credit_total += net_close_amount
+    elif net_close_amount < Decimal('0.00'):
+        closing_lines.append({
+            'account': equity_account,
+            'description': 'Close net loss to equity',
+            'debit': abs(net_close_amount),
+            'credit': Decimal('0.00'),
+        })
+        debit_total += abs(net_close_amount)
+
+    draft_journal_count = JournalEntry.objects.filter(
+        entity=period.entity,
+        period=period,
+        status='draft',
+    ).count()
+    source_review_count = _period_source_review_blockers(period)
+    existing_closing_journal = _period_closing_journal(period)
+    blockers = []
+    if period.status != 'open':
+        blockers.append('Period is not open.')
+    if existing_closing_journal:
+        blockers.append('Period already has a closing journal.')
+    if draft_journal_count:
+        blockers.append(f"{draft_journal_count} draft journal(s) still need posting or deletion.")
+    if source_review_count:
+        blockers.append(f"{source_review_count} source posting(s) are still draft or blocked for this period.")
+
+    return {
+        'period': period,
+        'income_report': income_report,
+        'temporary_rows': temporary_rows,
+        'closing_lines': closing_lines,
+        'debit_total': debit_total,
+        'credit_total': credit_total,
+        'is_balanced': debit_total == credit_total,
+        'net_income': income_report['net_income'],
+        'equity_account': equity_account,
+        'closing_reference': _period_closing_reference(period),
+        'draft_journal_count': draft_journal_count,
+        'source_review_count': source_review_count,
+        'existing_closing_journal': existing_closing_journal,
+        'blockers': blockers,
+        'can_close': not blockers and debit_total == credit_total,
+    }
+
+
+@transaction.atomic
+def close_accounting_period(period, closed_by=None):
+    period = (
+        AccountingPeriod.objects
+        .select_for_update()
+        .select_related('entity')
+        .get(pk=period.pk)
+    )
+    preview = build_period_close_preview(period)
+    if not preview['can_close']:
+        raise ValidationError('Period cannot be closed: ' + ' '.join(preview['blockers']))
+
+    closing_journal = None
+    if preview['closing_lines']:
+        closing_journal = JournalEntry.objects.create(
+            entity=period.entity,
+            period=period,
+            entry_number=next_journal_entry_number(period.entity, period.end_date, prefix='CL'),
+            entry_date=period.end_date,
+            description=f"Close {period.name}",
+            reference=preview['closing_reference'],
+            source_type='closing',
+            source_document_number=preview['closing_reference'],
+            created_by=closed_by if getattr(closed_by, 'is_authenticated', False) else None,
+        )
+        for index, line in enumerate(preview['closing_lines'], start=1):
+            journal_line = JournalLine(
+                journal_entry=closing_journal,
+                account=line['account'],
+                line_number=index,
+                description=line['description'],
+                debit=line['debit'],
+                credit=line['credit'],
+            )
+            journal_line.full_clean()
+            journal_line.save()
+        post_journal_entry(closing_journal, posted_by=closed_by)
+        closing_journal.refresh_from_db()
+
+    period.status = 'closed'
+    period.closed_at = timezone.now()
+    period.closed_by = closed_by if getattr(closed_by, 'is_authenticated', False) else None
+    period.closing_journal_entry = closing_journal
+    period.save(update_fields=[
+        'status',
+        'closed_at',
+        'closed_by',
+        'closing_journal_entry',
+    ])
+    return {
+        'period': period,
+        'closing_journal': closing_journal,
+        'preview': preview,
+    }
 
 
 def create_invoice_source_draft(invoice):
