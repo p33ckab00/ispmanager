@@ -22,6 +22,10 @@ from apps.accounting.models import (
     APVendorPayment,
     AccountingPeriodCloseChecklistItem,
     AccountingPeriodWorkflowReview,
+    CashReconciliationException,
+    CashReconciliationMatch,
+    CashStatementImport,
+    CashStatementLine,
     ChartOfAccount,
     CUTOVER_LOCKED_STATUSES,
     CutoverBalanceSchedule,
@@ -1810,6 +1814,234 @@ def build_cash_flow_report(entity, start_date=None, end_date=None):
         'start_date': start_date,
         'end_date': end_date,
     }
+
+
+def _cash_line_direction(journal_line):
+    return 'inflow' if journal_line.debit > Decimal('0.00') else 'outflow'
+
+
+def _cash_line_amount(journal_line):
+    return journal_line.debit or journal_line.credit
+
+
+def refresh_cash_statement_import_status(import_batch):
+    if not import_batch.lines.exists():
+        new_status = 'draft'
+    elif import_batch.lines.filter(status='unmatched').exists():
+        new_status = 'reconciling'
+    else:
+        new_status = 'reconciled'
+    if import_batch.status != new_status:
+        import_batch.status = new_status
+        import_batch.save(update_fields=['status', 'updated_at'])
+    return import_batch
+
+
+@transaction.atomic
+def create_cash_statement_line(
+    import_batch,
+    transaction_date,
+    direction,
+    amount,
+    external_reference='',
+    description='',
+):
+    import_batch = CashStatementImport.objects.select_for_update().select_related('entity').get(pk=import_batch.pk)
+    latest_line_number = (
+        import_batch.lines
+        .order_by('-line_number')
+        .values_list('line_number', flat=True)
+        .first()
+        or 0
+    )
+    line = CashStatementLine(
+        entity=import_batch.entity,
+        import_batch=import_batch,
+        line_number=latest_line_number + 1,
+        transaction_date=transaction_date,
+        external_reference=external_reference,
+        description=description,
+        direction=direction,
+        amount=_decimal_amount(amount),
+    )
+    line.full_clean()
+    line.save()
+    refresh_cash_statement_import_status(import_batch)
+    return line
+
+
+def cash_reconciliation_candidate_lines(import_batch):
+    qs = (
+        JournalLine.objects
+        .filter(
+            journal_entry__entity=import_batch.entity,
+            journal_entry__status='posted',
+            journal_entry__entry_date__gte=import_batch.statement_start_date,
+            journal_entry__entry_date__lte=import_batch.statement_end_date,
+            account=import_batch.cash_account,
+            cash_reconciliation_match__isnull=True,
+        )
+        .exclude(
+            cash_reconciliation_exceptions__import_batch=import_batch,
+            cash_reconciliation_exceptions__status='open',
+        )
+        .select_related('journal_entry', 'account')
+        .order_by('journal_entry__entry_date', 'journal_entry__entry_number', 'line_number', 'id')
+    )
+    return list(qs)
+
+
+def build_cash_reconciliation_workspace(import_batch):
+    import_batch = CashStatementImport.objects.select_related('entity', 'cash_account').get(pk=import_batch.pk)
+    refresh_cash_statement_import_status(import_batch)
+    candidate_lines = cash_reconciliation_candidate_lines(import_batch)
+    lines = list(
+        import_batch.lines
+        .select_related('match__journal_line__journal_entry')
+        .prefetch_related('exceptions')
+        .order_by('line_number', 'id')
+    )
+    candidate_rows = [
+        {
+            'journal_line': journal_line,
+            'direction': _cash_line_direction(journal_line),
+            'amount': _cash_line_amount(journal_line),
+        }
+        for journal_line in candidate_lines
+    ]
+    line_rows = []
+    for line in lines:
+        line_rows.append({
+            'line': line,
+            'candidates': [
+                row
+                for row in candidate_rows
+                if row['direction'] == line.direction and row['amount'] == line.amount
+            ],
+            'open_exceptions': [
+                item for item in line.exceptions.all()
+                if item.status == 'open'
+            ],
+        })
+    return {
+        'import_batch': import_batch,
+        'line_rows': line_rows,
+        'candidate_rows': candidate_rows,
+        'total_lines': len(lines),
+        'matched_line_count': sum(1 for line in lines if line.status == 'matched'),
+        'exception_line_count': sum(1 for line in lines if line.status == 'exception'),
+        'unmatched_line_count': sum(1 for line in lines if line.status == 'unmatched'),
+        'open_exception_count': import_batch.exceptions.filter(status='open').count(),
+    }
+
+
+@transaction.atomic
+def match_cash_statement_line(statement_line, journal_line, matched_by=None, note=''):
+    statement_line = (
+        CashStatementLine.objects
+        .select_for_update()
+        .select_related('entity', 'import_batch')
+        .get(pk=statement_line.pk)
+    )
+    journal_line = JournalLine.objects.select_related('journal_entry', 'account').get(pk=journal_line.pk)
+    if statement_line.status != 'unmatched':
+        raise ValidationError('Only unmatched statement lines can be matched.')
+    if statement_line.exceptions.filter(status='open').exists():
+        raise ValidationError('Statement lines with open exceptions cannot be matched.')
+    match = CashReconciliationMatch(
+        entity=statement_line.entity,
+        import_batch=statement_line.import_batch,
+        statement_line=statement_line,
+        journal_line=journal_line,
+        matched_by=matched_by if getattr(matched_by, 'is_authenticated', False) else None,
+        note=note,
+    )
+    match.full_clean()
+    match.save()
+    statement_line.status = 'matched'
+    statement_line.save(update_fields=['status'])
+    refresh_cash_statement_import_status(statement_line.import_batch)
+    return match
+
+
+@transaction.atomic
+def clear_cash_reconciliation_match(match):
+    match = (
+        CashReconciliationMatch.objects
+        .select_for_update()
+        .select_related('statement_line', 'import_batch')
+        .get(pk=match.pk)
+    )
+    statement_line = match.statement_line
+    import_batch = match.import_batch
+    match.delete()
+    statement_line.status = 'unmatched'
+    statement_line.save(update_fields=['status'])
+    refresh_cash_statement_import_status(import_batch)
+    return statement_line
+
+
+@transaction.atomic
+def create_cash_reconciliation_exception(
+    import_batch,
+    exception_type,
+    statement_line=None,
+    journal_line=None,
+    note='',
+    created_by=None,
+):
+    import_batch = CashStatementImport.objects.select_related('entity').get(pk=import_batch.pk)
+    if statement_line:
+        statement_line = (
+            CashStatementLine.objects
+            .select_for_update()
+            .select_related('entity', 'import_batch')
+            .get(pk=statement_line.pk)
+        )
+        if statement_line.status == 'matched':
+            raise ValidationError('Matched statement lines cannot be marked as exceptions.')
+        if statement_line.exceptions.filter(status='open').exists():
+            raise ValidationError('Statement line already has an open exception.')
+    if journal_line:
+        journal_line = JournalLine.objects.select_related('journal_entry', 'account').get(pk=journal_line.pk)
+    exception = CashReconciliationException(
+        entity=import_batch.entity,
+        import_batch=import_batch,
+        statement_line=statement_line,
+        journal_line=journal_line,
+        exception_type=exception_type,
+        note=note,
+        created_by=created_by if getattr(created_by, 'is_authenticated', False) else None,
+    )
+    exception.full_clean()
+    exception.save()
+    if statement_line:
+        statement_line.status = 'exception'
+        statement_line.save(update_fields=['status'])
+    refresh_cash_statement_import_status(import_batch)
+    return exception
+
+
+@transaction.atomic
+def resolve_cash_reconciliation_exception(exception, resolved_by=None):
+    exception = (
+        CashReconciliationException.objects
+        .select_for_update()
+        .select_related('import_batch')
+        .get(pk=exception.pk)
+    )
+    if exception.status != 'open':
+        raise ValidationError('Only open cash reconciliation exceptions can be resolved.')
+    exception.status = 'resolved'
+    exception.resolved_by = resolved_by if getattr(resolved_by, 'is_authenticated', False) else None
+    exception.resolved_at = timezone.now()
+    exception.full_clean()
+    exception.save(update_fields=['status', 'resolved_by', 'resolved_at'])
+    if exception.statement_line_id and not hasattr(exception.statement_line, 'match'):
+        exception.statement_line.status = 'unmatched'
+        exception.statement_line.save(update_fields=['status'])
+    refresh_cash_statement_import_status(exception.import_batch)
+    return exception
 
 
 def build_changes_in_equity_report(entity, start_date=None, end_date=None):

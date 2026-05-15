@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Cash Statement {{ import_batch.statement_reference }} - {{ isp_name }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h2 class="text-2xl font-bold text-gray-800">{{ import_batch.statement_reference }}</h2>
+    <p class="text-gray-500 text-sm mt-1">
+      <span class="font-mono">{{ import_batch.cash_account.code }}</span> {{ import_batch.cash_account.name }}
+      · {{ import_batch.statement_start_date }} to {{ import_batch.statement_end_date }}
+    </p>
+  </div>
+  <div class="flex gap-2">
+    {% if perms.accounting.manage_cashstatementimport %}
+    <a href="{% url 'accounting-cash-statement-line-add' import_batch.pk %}" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Add Line</a>
+    {% endif %}
+    <a href="{% url 'accounting-cash-statement-import-list' %}" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Cash Reconciliation</a>
+  </div>
+</div>
+
+{% include "partials/messages.html" %}
+
+<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Status</p>
+    <p class="text-lg font-bold text-gray-800">{{ workspace.import_batch.get_status_display }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Lines</p>
+    <p class="text-lg font-bold text-gray-800">{{ workspace.total_lines }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Matched</p>
+    <p class="text-lg font-bold text-green-700">{{ workspace.matched_line_count }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Exceptions</p>
+    <p class="text-lg font-bold text-amber-700">{{ workspace.exception_line_count }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+    <p class="text-xs text-gray-400 uppercase">Unmatched</p>
+    <p class="text-lg font-bold {% if workspace.unmatched_line_count %}text-red-600{% else %}text-green-700{% endif %}">{{ workspace.unmatched_line_count }}</p>
+  </div>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-6">
+  <div class="px-4 py-3 border-b border-gray-100">
+    <h3 class="font-semibold text-gray-800">Statement Lines</h3>
+  </div>
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Line</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Date</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Reference</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Direction</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Amount</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Action</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for row in workspace.line_rows %}
+      <tr>
+        <td class="px-4 py-3">{{ row.line.line_number }}</td>
+        <td class="px-4 py-3">{{ row.line.transaction_date }}</td>
+        <td class="px-4 py-3">
+          <div>{{ row.line.external_reference|default:"-" }}</div>
+          {% if row.line.description %}<div class="text-xs text-gray-400">{{ row.line.description }}</div>{% endif %}
+        </td>
+        <td class="px-4 py-3">{{ row.line.get_direction_display }}</td>
+        <td class="px-4 py-3 text-right">PHP {{ row.line.amount }}</td>
+        <td class="px-4 py-3">
+          <span class="px-2 py-0.5 rounded text-xs {% if row.line.status == 'matched' %}bg-green-50 text-green-700{% elif row.line.status == 'exception' %}bg-amber-50 text-amber-700{% else %}bg-red-50 text-red-600{% endif %}">
+            {{ row.line.get_status_display }}
+          </span>
+        </td>
+        <td class="px-4 py-3 min-w-80">
+          {% if row.line.status == 'matched' %}
+          <div class="text-xs text-gray-600">
+            <a href="{% url 'accounting-journal-detail' row.line.match.journal_line.journal_entry.pk %}" class="text-blue-600 hover:underline">{{ row.line.match.journal_line.journal_entry.entry_number }}</a>
+          </div>
+          {% if perms.accounting.manage_cashstatementimport %}
+          <form method="post" action="{% url 'accounting-cash-statement-line-unmatch' row.line.pk %}" class="mt-2">
+            {% csrf_token %}
+            <button type="submit" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg">Clear Match</button>
+          </form>
+          {% endif %}
+          {% elif row.line.status == 'exception' %}
+          {% for exception in row.open_exceptions %}
+          <div class="text-xs text-gray-600">{{ exception.get_exception_type_display }}{% if exception.note %} · {{ exception.note }}{% endif %}</div>
+          {% if perms.accounting.manage_cashstatementimport %}
+          <form method="post" action="{% url 'accounting-cash-reconciliation-exception-resolve' exception.pk %}" class="mt-2">
+            {% csrf_token %}
+            <button type="submit" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-lg">Resolve</button>
+          </form>
+          {% endif %}
+          {% endfor %}
+          {% elif perms.accounting.manage_cashstatementimport %}
+          {% if row.candidates %}
+          <form method="post" action="{% url 'accounting-cash-statement-line-match' row.line.pk %}" class="flex flex-wrap items-center gap-2 mb-2">
+            {% csrf_token %}
+            <select name="journal_line" class="border border-gray-300 rounded-lg px-2 py-1.5 text-xs">
+              {% for candidate in row.candidates %}
+              <option value="{{ candidate.journal_line.pk }}">{{ candidate.journal_line.journal_entry.entry_date }} · {{ candidate.journal_line.journal_entry.entry_number }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">Match</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{% url 'accounting-cash-statement-line-exception' row.line.pk %}" class="flex flex-wrap items-center gap-2">
+            {% csrf_token %}
+            <select name="exception_type" class="border border-gray-300 rounded-lg px-2 py-1.5 text-xs">
+              {% if row.line.direction == 'inflow' %}
+              <option value="unmatched_receipt">Unmatched Receipt</option>
+              {% else %}
+              <option value="unmatched_disbursement">Unmatched Disbursement</option>
+              {% endif %}
+              <option value="timing_item">Timing Item</option>
+            </select>
+            <input type="text" name="note" maxlength="255" placeholder="Optional note" class="border border-gray-300 rounded-lg px-2 py-1.5 text-xs">
+            <button type="submit" class="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg">Exception</button>
+          </form>
+          {% else %}
+          <span class="text-xs text-gray-400">No action</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7" class="px-4 py-12 text-center text-gray-400">No statement lines yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <div class="px-4 py-3 border-b border-gray-100">
+    <h3 class="font-semibold text-gray-800">Open GL Candidates</h3>
+  </div>
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Date</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Entry</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Direction</th>
+        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500">Amount</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Description</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for row in workspace.candidate_rows %}
+      <tr>
+        <td class="px-4 py-3">{{ row.journal_line.journal_entry.entry_date }}</td>
+        <td class="px-4 py-3"><a href="{% url 'accounting-journal-detail' row.journal_line.journal_entry.pk %}" class="text-blue-600 hover:underline">{{ row.journal_line.journal_entry.entry_number }}</a></td>
+        <td class="px-4 py-3">{{ row.direction|title }}</td>
+        <td class="px-4 py-3 text-right">PHP {{ row.amount }}</td>
+        <td class="px-4 py-3">{{ row.journal_line.description|default:row.journal_line.journal_entry.description }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">No unmatched posted cash lines in this statement window.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

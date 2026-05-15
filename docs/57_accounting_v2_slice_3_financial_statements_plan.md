@@ -23,6 +23,8 @@ Slice 3G-D adds AP payment reversals and manual settlement matching.
 Slice 3H adds stored export binaries/packages and saved report presets.
 Slice 3I adds persisted close checklists and optional reviewer approval gates
 for period close/reopen.
+Slice 3J adds cash statement batches, manual matching, and reconciliation
+exceptions for cash-equivalent accounts.
 
 ## Slice 3A Implemented
 
@@ -311,6 +313,24 @@ Implemented:
 - Regression coverage was added for checklist persistence plus close/reopen
   approval gates.
 
+## Slice 3J Implemented
+
+Implemented:
+
+- `CashStatementImport` stores manual bank, wallet, or gateway statement batches
+  for cash-equivalent accounts.
+- `CashStatementLine` stores statement rows with inflow/outflow direction and
+  unmatched, matched, or exception status.
+- `CashReconciliationMatch` links a statement row one-to-one with a posted GL
+  cash line only when account, direction, and amount agree.
+- `CashReconciliationException` records unmatched receipts, unmatched
+  disbursements, and timing items rather than forcing false matches.
+- A cash reconciliation workspace lists statement rows, exact GL match
+  candidates, and exception actions; cashier role presets receive read-only
+  access.
+- Regression coverage was added for match validation, batch status transitions,
+  and exception resolution.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -350,8 +370,8 @@ Implemented:
   dimensions.
 - AR Aging is not historical-payment accurate yet because invoice balances are
   current-state operational balances.
-- AP payment settlement matching is manual only; full bank/wallet/gateway import
-  reconciliation is still future work.
+- AP payment settlement matching is manual only; the new cash reconciliation
+  workspace does not yet auto-link AP settlement records.
 - AP Aging selects the post-live AP bill subledger ahead of cutover/opening
   fallbacks; a merged historical cutover plus post-live AP view is still future
   work.
@@ -360,9 +380,8 @@ Implemented:
 
 ## Next Slice Candidate
 
-Slice 3J should start the next reconciliation layer before BIR/NTC books:
+Slice 3K should deepen reconciliation before BIR/NTC books:
 
-- Bank/wallet/gateway statement import records.
-- Matching workspace for cash-equivalent transactions versus posted source
-  journals.
-- Manual exceptions for unmatched receipts, disbursements, and timing items.
+- CSV/XLSX statement file ingestion into reconciliation batches.
+- Auto-match suggestions using date/reference tolerances.
+- GL-side timing-item handling and settlement links for AP payments.

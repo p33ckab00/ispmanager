@@ -638,6 +638,267 @@ class AccountingReportPreset(models.Model):
         return f"{self.report_key}: {self.name}"
 
 
+class CashStatementImport(models.Model):
+    PROVIDER_TYPE_CHOICES = [
+        ('bank', 'Bank'),
+        ('wallet', 'Wallet'),
+        ('gateway', 'Gateway'),
+    ]
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('reconciling', 'Reconciling'),
+        ('reconciled', 'Reconciled'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='cash_statement_imports',
+    )
+    cash_account = models.ForeignKey(
+        ChartOfAccount,
+        on_delete=models.PROTECT,
+        related_name='cash_statement_imports',
+    )
+    provider_type = models.CharField(max_length=20, choices=PROVIDER_TYPE_CHOICES)
+    statement_reference = models.CharField(max_length=120)
+    statement_start_date = models.DateField()
+    statement_end_date = models.DateField()
+    source_filename = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    notes = models.TextField(blank=True)
+    imported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='imported_cash_statement_imports',
+    )
+    imported_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-statement_end_date', '-imported_at', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['entity', 'cash_account', 'statement_reference'],
+                name='accounting_unique_cash_statement_import',
+            ),
+        ]
+        permissions = [
+            ('manage_cashstatementimport', 'Can manage cash statement imports'),
+        ]
+
+    def clean(self):
+        if self.cash_account_id and self.entity_id and self.cash_account.entity_id != self.entity_id:
+            raise ValidationError('Cash statement import account must belong to the same accounting entity.')
+        if self.cash_account_id and self.cash_account.code not in ('1000', '1010', '1020'):
+            raise ValidationError('Cash statement imports must use a cash-equivalent account.')
+        if self.statement_start_date and self.statement_end_date and self.statement_end_date < self.statement_start_date:
+            raise ValidationError('Statement end date cannot be before statement start date.')
+
+    def __str__(self):
+        return f"{self.cash_account.code} {self.statement_reference}"
+
+
+class CashStatementLine(models.Model):
+    DIRECTION_CHOICES = [
+        ('inflow', 'Inflow'),
+        ('outflow', 'Outflow'),
+    ]
+    STATUS_CHOICES = [
+        ('unmatched', 'Unmatched'),
+        ('matched', 'Matched'),
+        ('exception', 'Exception'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='cash_statement_lines',
+    )
+    import_batch = models.ForeignKey(
+        CashStatementImport,
+        on_delete=models.CASCADE,
+        related_name='lines',
+    )
+    line_number = models.PositiveIntegerField(default=1)
+    transaction_date = models.DateField()
+    external_reference = models.CharField(max_length=120, blank=True)
+    description = models.CharField(max_length=255, blank=True)
+    direction = models.CharField(max_length=20, choices=DIRECTION_CHOICES)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='unmatched')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['import_batch', 'line_number', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['import_batch', 'line_number'],
+                name='accounting_unique_cash_statement_line_number',
+            ),
+        ]
+
+    def clean(self):
+        if self.import_batch_id and self.entity_id and self.import_batch.entity_id != self.entity_id:
+            raise ValidationError('Cash statement line must use the same accounting entity as its import batch.')
+        if (
+            self.import_batch_id
+            and self.transaction_date
+            and (
+                self.transaction_date < self.import_batch.statement_start_date
+                or self.transaction_date > self.import_batch.statement_end_date
+            )
+        ):
+            raise ValidationError('Cash statement line date must fall within the import statement range.')
+        if self.amount is not None and self.amount <= MONEY_ZERO:
+            raise ValidationError('Cash statement line amount must be greater than zero.')
+
+    def __str__(self):
+        return f"{self.import_batch} line {self.line_number}"
+
+
+class CashReconciliationMatch(models.Model):
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='cash_reconciliation_matches',
+    )
+    import_batch = models.ForeignKey(
+        CashStatementImport,
+        on_delete=models.CASCADE,
+        related_name='matches',
+    )
+    statement_line = models.OneToOneField(
+        CashStatementLine,
+        on_delete=models.CASCADE,
+        related_name='match',
+    )
+    journal_line = models.OneToOneField(
+        JournalLine,
+        on_delete=models.PROTECT,
+        related_name='cash_reconciliation_match',
+    )
+    matched_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='matched_cash_reconciliation_lines',
+    )
+    matched_at = models.DateTimeField(default=timezone.now)
+    note = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['-matched_at', '-id']
+
+    def clean(self):
+        if self.import_batch_id and self.entity_id and self.import_batch.entity_id != self.entity_id:
+            raise ValidationError('Cash reconciliation match must use the same accounting entity as its import batch.')
+        if self.statement_line_id and self.import_batch_id and self.statement_line.import_batch_id != self.import_batch_id:
+            raise ValidationError('Cash reconciliation match statement line must belong to the same import batch.')
+        if self.statement_line_id and self.entity_id and self.statement_line.entity_id != self.entity_id:
+            raise ValidationError('Cash reconciliation match statement line must belong to the same accounting entity.')
+        if self.journal_line_id and self.entity_id and self.journal_line.journal_entry.entity_id != self.entity_id:
+            raise ValidationError('Cash reconciliation match journal line must belong to the same accounting entity.')
+        if self.journal_line_id and self.import_batch_id and self.journal_line.account_id != self.import_batch.cash_account_id:
+            raise ValidationError('Cash reconciliation match journal line must use the import cash account.')
+        if self.journal_line_id and self.journal_line.journal_entry.status != 'posted':
+            raise ValidationError('Cash reconciliation matches require posted journal lines.')
+        if self.statement_line_id and self.journal_line_id:
+            journal_direction = 'inflow' if self.journal_line.debit > MONEY_ZERO else 'outflow'
+            journal_amount = self.journal_line.debit or self.journal_line.credit
+            if self.statement_line.direction != journal_direction or self.statement_line.amount != journal_amount:
+                raise ValidationError('Cash reconciliation matches require the same direction and amount.')
+
+    def __str__(self):
+        return f"{self.statement_line} matched to {self.journal_line}"
+
+
+class CashReconciliationException(models.Model):
+    EXCEPTION_TYPE_CHOICES = [
+        ('unmatched_receipt', 'Unmatched Receipt'),
+        ('unmatched_disbursement', 'Unmatched Disbursement'),
+        ('timing_item', 'Timing Item'),
+    ]
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('resolved', 'Resolved'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='cash_reconciliation_exceptions',
+    )
+    import_batch = models.ForeignKey(
+        CashStatementImport,
+        on_delete=models.CASCADE,
+        related_name='exceptions',
+    )
+    statement_line = models.ForeignKey(
+        CashStatementLine,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='exceptions',
+    )
+    journal_line = models.ForeignKey(
+        JournalLine,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cash_reconciliation_exceptions',
+    )
+    exception_type = models.CharField(max_length=30, choices=EXCEPTION_TYPE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    note = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_cash_reconciliation_exceptions',
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='resolved_cash_reconciliation_exceptions',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+    def clean(self):
+        if not self.statement_line_id and not self.journal_line_id:
+            raise ValidationError('Cash reconciliation exceptions require a statement line or journal line.')
+        if self.import_batch_id and self.entity_id and self.import_batch.entity_id != self.entity_id:
+            raise ValidationError('Cash reconciliation exception must use the same accounting entity as its import batch.')
+        if self.statement_line_id and self.import_batch_id and self.statement_line.import_batch_id != self.import_batch_id:
+            raise ValidationError('Cash reconciliation exception statement line must belong to the same import batch.')
+        if self.statement_line_id and self.entity_id and self.statement_line.entity_id != self.entity_id:
+            raise ValidationError('Cash reconciliation exception statement line must belong to the same accounting entity.')
+        if self.journal_line_id and self.entity_id and self.journal_line.journal_entry.entity_id != self.entity_id:
+            raise ValidationError('Cash reconciliation exception journal line must belong to the same accounting entity.')
+        if self.journal_line_id and self.import_batch_id and self.journal_line.account_id != self.import_batch.cash_account_id:
+            raise ValidationError('Cash reconciliation exception journal line must use the import cash account.')
+        if self.statement_line_id and self.exception_type == 'unmatched_receipt' and self.statement_line.direction != 'inflow':
+            raise ValidationError('Unmatched receipt exceptions require an inflow statement line.')
+        if self.statement_line_id and self.exception_type == 'unmatched_disbursement' and self.statement_line.direction != 'outflow':
+            raise ValidationError('Unmatched disbursement exceptions require an outflow statement line.')
+        if self.status == 'resolved' and not self.resolved_at:
+            raise ValidationError('Resolved cash reconciliation exceptions require a resolved timestamp.')
+
+    def __str__(self):
+        return f"{self.get_exception_type_display()} - {self.status}"
+
+
 class APVendor(models.Model):
     TAX_CLASSIFICATION_CHOICES = [
         ('unknown', 'Unknown'),

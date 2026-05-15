@@ -23,6 +23,10 @@ from apps.accounting.models import (
     APVendorBill,
     APVendorBillAttachment,
     APVendorPayment,
+    CashReconciliationException,
+    CashReconciliationMatch,
+    CashStatementImport,
+    CashStatementLine,
     ChartOfAccount,
     CutoverBalanceSchedule,
     CutoverPlan,
@@ -31,6 +35,7 @@ from apps.accounting.models import (
     ExpenseRecord,
     IncomeRecord,
     JournalEntry,
+    JournalLine,
     OpeningBalanceImport,
     WithholdingTaxClass,
 )
@@ -44,6 +49,9 @@ from apps.accounting.forms import (
     APVendorPaymentForm,
     APVendorPaymentSettlementForm,
     APVendorPaymentVoidForm,
+    CashReconciliationExceptionForm,
+    CashStatementImportForm,
+    CashStatementLineForm,
     CutoverBalanceScheduleForm,
     CutoverBalanceScheduleLineForm,
     CutoverPlanForm,
@@ -64,6 +72,7 @@ from apps.accounting.services import (
     build_ar_aging_report,
     build_balance_sheet_report,
     build_cash_flow_report,
+    build_cash_reconciliation_workspace,
     build_changes_in_equity_report,
     build_period_close_preview,
     build_period_reopen_preview,
@@ -73,8 +82,11 @@ from apps.accounting.services import (
     create_ap_vendor_bill_attachment,
     create_ap_vendor_bill_void_draft,
     clear_ap_vendor_payment_settlement,
+    clear_cash_reconciliation_match,
     create_ap_vendor_payment_draft,
     create_ap_vendor_payment_void_draft,
+    create_cash_reconciliation_exception,
+    create_cash_statement_line,
     create_cutover_balance_schedule,
     create_cutover_plan,
     build_general_ledger_report,
@@ -90,10 +102,12 @@ from apps.accounting.services import (
     mark_accounting_live,
     mark_cutover_ready,
     match_ap_vendor_payment_settlement,
+    match_cash_statement_line,
     post_journal_entry,
     refresh_opening_balance_totals,
     refresh_ap_vendor_bill_status,
     refresh_ap_vendor_payment_status,
+    resolve_cash_reconciliation_exception,
     reopen_accounting_period,
     request_period_workflow_review,
     review_period_workflow_request,
@@ -1310,6 +1324,237 @@ def cash_flow(request):
         **_saved_report_preset_context(request, entity, 'cash_flow'),
         **_report_export_queries(request),
     })
+
+
+@login_required
+def cash_statement_import_list(request):
+    permission_check = _require_accounting_perm(request, 'accounting.view_cashstatementimport')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    qs = (
+        CashStatementImport.objects
+        .filter(entity=entity)
+        .select_related('cash_account', 'imported_by')
+        .order_by('-statement_end_date', '-imported_at', '-id')
+    )
+    paginator = Paginator(qs, 25)
+    page = paginator.get_page(request.GET.get('page', 1))
+    return render(request, 'accounting/cash_statement_import_list.html', {
+        'entity': entity,
+        'page_obj': page,
+    })
+
+
+@login_required
+def cash_statement_import_add(request):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cashstatementimport',
+        'accounting-cash-statement-import-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    if request.method == 'POST':
+        form = CashStatementImportForm(request.POST, entity=entity)
+        if form.is_valid():
+            import_batch = form.save(commit=False)
+            import_batch.entity = entity
+            import_batch.imported_by = request.user
+            import_batch.full_clean()
+            import_batch.save()
+            AuditLog.log('create', 'accounting', f"Cash statement import created: {import_batch}", user=request.user)
+            messages.success(request, 'Cash statement import created.')
+            return redirect('accounting-cash-statement-import-detail', pk=import_batch.pk)
+    else:
+        form = CashStatementImportForm(entity=entity)
+    return render(request, 'accounting/cash_statement_import_form.html', {
+        'entity': entity,
+        'form': form,
+    })
+
+
+@login_required
+def cash_statement_import_detail(request, pk):
+    permission_check = _require_accounting_perm(request, 'accounting.view_cashstatementimport')
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    import_batch = get_object_or_404(
+        CashStatementImport.objects.select_related('cash_account', 'imported_by'),
+        entity=entity,
+        pk=pk,
+    )
+    workspace = build_cash_reconciliation_workspace(import_batch)
+    return render(request, 'accounting/cash_statement_import_detail.html', {
+        'entity': entity,
+        'import_batch': import_batch,
+        'workspace': workspace,
+        'exception_type_choices': CashReconciliationException.EXCEPTION_TYPE_CHOICES,
+    })
+
+
+@login_required
+def cash_statement_line_add(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cashstatementimport',
+        'accounting-cash-statement-import-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    import_batch = get_object_or_404(CashStatementImport, entity=entity, pk=pk)
+    if request.method == 'POST':
+        form = CashStatementLineForm(request.POST)
+        if form.is_valid():
+            try:
+                line = create_cash_statement_line(
+                    import_batch,
+                    form.cleaned_data['transaction_date'],
+                    form.cleaned_data['direction'],
+                    form.cleaned_data['amount'],
+                    external_reference=form.cleaned_data['external_reference'],
+                    description=form.cleaned_data['description'],
+                )
+                AuditLog.log('create', 'accounting', f"Cash statement line created: {line}", user=request.user)
+                messages.success(request, 'Statement line added.')
+                return redirect('accounting-cash-statement-import-detail', pk=import_batch.pk)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    else:
+        form = CashStatementLineForm(initial={'transaction_date': import_batch.statement_start_date})
+    return render(request, 'accounting/cash_statement_line_form.html', {
+        'entity': entity,
+        'import_batch': import_batch,
+        'form': form,
+    })
+
+
+@login_required
+def cash_statement_line_match(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cashstatementimport',
+        'accounting-cash-statement-import-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    line = get_object_or_404(
+        CashStatementLine.objects.select_related('import_batch'),
+        entity=entity,
+        pk=pk,
+    )
+    if request.method == 'POST':
+        journal_line = get_object_or_404(JournalLine, pk=request.POST.get('journal_line'))
+        try:
+            match_cash_statement_line(line, journal_line, matched_by=request.user)
+            AuditLog.log('update', 'accounting', f"Cash statement line matched: {line}", user=request.user)
+            messages.success(request, 'Statement line matched.')
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-cash-statement-import-detail', pk=line.import_batch.pk)
+
+
+@login_required
+def cash_statement_line_unmatch(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cashstatementimport',
+        'accounting-cash-statement-import-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    match = get_object_or_404(
+        CashReconciliationMatch.objects.select_related('statement_line__import_batch'),
+        entity=entity,
+        statement_line_id=pk,
+    )
+    import_batch_id = match.import_batch_id
+    if request.method == 'POST':
+        line = clear_cash_reconciliation_match(match)
+        AuditLog.log('update', 'accounting', f"Cash statement line unmatched: {line}", user=request.user)
+        messages.success(request, 'Statement line match cleared.')
+    return redirect('accounting-cash-statement-import-detail', pk=import_batch_id)
+
+
+@login_required
+def cash_statement_line_exception(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cashstatementimport',
+        'accounting-cash-statement-import-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    line = get_object_or_404(
+        CashStatementLine.objects.select_related('import_batch'),
+        entity=entity,
+        pk=pk,
+    )
+    if request.method == 'POST':
+        form = CashReconciliationExceptionForm(request.POST, statement_line=line)
+        if form.is_valid():
+            try:
+                create_cash_reconciliation_exception(
+                    line.import_batch,
+                    form.cleaned_data['exception_type'],
+                    statement_line=line,
+                    note=form.cleaned_data['note'],
+                    created_by=request.user,
+                )
+                AuditLog.log('create', 'accounting', f"Cash statement exception created: {line}", user=request.user)
+                messages.success(request, 'Statement line exception recorded.')
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+        else:
+            messages.error(request, 'Exception details are invalid.')
+    return redirect('accounting-cash-statement-import-detail', pk=line.import_batch.pk)
+
+
+@login_required
+def cash_reconciliation_exception_resolve(request, pk):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_cashstatementimport',
+        'accounting-cash-statement-import-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    exception = get_object_or_404(
+        CashReconciliationException.objects.select_related('import_batch'),
+        entity=entity,
+        pk=pk,
+    )
+    if request.method == 'POST':
+        try:
+            resolve_cash_reconciliation_exception(exception, resolved_by=request.user)
+            AuditLog.log('update', 'accounting', f"Cash reconciliation exception resolved: {exception.pk}", user=request.user)
+            messages.success(request, 'Cash reconciliation exception resolved.')
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect('accounting-cash-statement-import-detail', pk=exception.import_batch.pk)
 
 
 @login_required

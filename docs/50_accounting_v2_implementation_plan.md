@@ -152,6 +152,9 @@ reusable report presets from the financial statement pages.
 Slice 3I is now implemented for close-workflow hardening: period-close previews
 persist checklist items, and close/reopen actions can require a separate
 reviewer approval before they proceed.
+Slice 3J is now implemented for the first post-live cash reconciliation layer:
+bank/wallet/gateway statement batches hold imported lines, posted cash lines can
+be matched one-to-one, and unmatched/timing exceptions are recorded explicitly.
 
 ## 2. Locked Decisions
 
@@ -483,7 +486,23 @@ Slice 3I is implemented as close-workflow hardening:
   and consumption after the approved workflow action is used.
 - A requester cannot approve their own workflow request, and stale requests
   cannot be decided after the period state has changed.
-- Remaining Slice 3 work starts with fuller bank/wallet/gateway reconciliation.
+
+Slice 3J is implemented as the first cash reconciliation layer:
+
+- `CashStatementImport` stores bank, wallet, or gateway statement batches for
+  one cash-equivalent account and statement date range.
+- `CashStatementLine` stores imported receipt/disbursement rows with workflow
+  states for unmatched, matched, and exception.
+- `CashReconciliationMatch` links one statement line to one posted cash GL line
+  after exact direction and amount checks.
+- `CashReconciliationException` records unmatched receipts, unmatched
+  disbursements, and timing items that explain a statement row without forcing a
+  false GL match.
+- The cash reconciliation workspace exposes open statement rows, exact-match GL
+  candidates, and exception resolution actions; cashier presets receive read-only
+  access.
+- Remaining Slice 3 work starts with richer statement ingestion and automated
+  matching heuristics.
 
 ### Slice 4 - BIR Books and Guides
 

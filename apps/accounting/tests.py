@@ -24,6 +24,7 @@ from apps.accounting.models import (
     APVendorBill,
     APVendorBillAttachment,
     APVendorPayment,
+    CashStatementImport,
     ChartOfAccount,
     CutoverBalanceSchedule,
     CutoverBalanceScheduleLine,
@@ -43,6 +44,7 @@ from apps.accounting.services import (
     build_ar_aging_report,
     build_balance_sheet_report,
     build_cash_flow_report,
+    build_cash_reconciliation_workspace,
     build_changes_in_equity_report,
     build_cutover_readiness,
     build_general_ledger_report,
@@ -58,6 +60,8 @@ from apps.accounting.services import (
     create_ap_vendor_payment_draft,
     create_ap_vendor_payment_void_draft,
     create_accounting_foundation,
+    create_cash_reconciliation_exception,
+    create_cash_statement_line,
     create_cutover_balance_schedule,
     create_cutover_plan,
     create_credit_adjustment_source_draft,
@@ -71,11 +75,13 @@ from apps.accounting.services import (
     mark_accounting_live,
     mark_cutover_ready,
     match_ap_vendor_payment_settlement,
+    match_cash_statement_line,
     post_journal_entry,
     refresh_ap_vendor_bill_status,
     refresh_ap_vendor_payment_status,
     refresh_opening_balance_totals,
     reopen_accounting_period,
+    resolve_cash_reconciliation_exception,
     request_period_workflow_review,
     review_period_workflow_request,
     validate_cutover_balance_schedule,
@@ -526,6 +532,117 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertEqual(equity['period_net_income'], Decimal('380.00'))
         self.assertEqual(equity['ending_equity'], Decimal('1380.00'))
         self.assertEqual(equity['difference'], Decimal('0.00'))
+
+    def test_cash_reconciliation_matches_statement_lines_and_tracks_exceptions(self):
+        entity, cash = self._post_sample_activity()
+        import_batch = CashStatementImport.objects.create(
+            entity=entity,
+            cash_account=cash,
+            provider_type='bank',
+            statement_reference='JAN-2026-BANK',
+            statement_start_date=date(2026, 1, 1),
+            statement_end_date=date(2026, 1, 31),
+        )
+        sale_line = create_cash_statement_line(
+            import_batch,
+            date(2026, 1, 10),
+            'inflow',
+            Decimal('500.00'),
+            external_reference='BANK-SALE',
+        )
+        utility_line = create_cash_statement_line(
+            import_batch,
+            date(2026, 1, 15),
+            'outflow',
+            Decimal('120.00'),
+            external_reference='BANK-UTILITY',
+        )
+        receipt_exception_line = create_cash_statement_line(
+            import_batch,
+            date(2026, 1, 20),
+            'inflow',
+            Decimal('50.00'),
+            external_reference='BANK-UNKNOWN',
+        )
+        timing_exception_line = create_cash_statement_line(
+            import_batch,
+            date(2026, 1, 25),
+            'outflow',
+            Decimal('75.00'),
+            external_reference='BANK-TIMING',
+        )
+        sale_cash_line = JournalLine.objects.get(account=cash, debit=Decimal('500.00'))
+        utility_cash_line = JournalLine.objects.get(account=cash, credit=Decimal('120.00'))
+
+        match_cash_statement_line(sale_line, sale_cash_line)
+        match_cash_statement_line(utility_line, utility_cash_line)
+        receipt_exception = create_cash_reconciliation_exception(
+            import_batch,
+            'unmatched_receipt',
+            statement_line=receipt_exception_line,
+            note='Needs source review',
+        )
+        create_cash_reconciliation_exception(
+            import_batch,
+            'timing_item',
+            statement_line=timing_exception_line,
+            note='Clears next month',
+        )
+        workspace = build_cash_reconciliation_workspace(import_batch)
+        import_batch.refresh_from_db()
+
+        self.assertEqual(import_batch.status, 'reconciled')
+        self.assertEqual(workspace['matched_line_count'], 2)
+        self.assertEqual(workspace['exception_line_count'], 2)
+        self.assertEqual(workspace['unmatched_line_count'], 0)
+        self.assertEqual(workspace['open_exception_count'], 2)
+
+        resolve_cash_reconciliation_exception(receipt_exception)
+        receipt_exception_line.refresh_from_db()
+        import_batch.refresh_from_db()
+
+        self.assertEqual(receipt_exception_line.status, 'unmatched')
+        self.assertEqual(import_batch.status, 'reconciling')
+
+    def test_cash_reconciliation_match_requires_same_amount_and_direction(self):
+        entity, cash = self._post_sample_activity()
+        import_batch = CashStatementImport.objects.create(
+            entity=entity,
+            cash_account=cash,
+            provider_type='bank',
+            statement_reference='JAN-2026-MISMATCH',
+            statement_start_date=date(2026, 1, 1),
+            statement_end_date=date(2026, 1, 31),
+        )
+        statement_line = create_cash_statement_line(
+            import_batch,
+            date(2026, 1, 10),
+            'inflow',
+            Decimal('50.00'),
+        )
+        capital_cash_line = JournalLine.objects.get(account=cash, debit=Decimal('1000.00'))
+
+        with self.assertRaisesMessage(ValidationError, 'same direction and amount'):
+            match_cash_statement_line(statement_line, capital_cash_line)
+
+    def test_cash_statement_lines_must_stay_inside_batch_range(self):
+        entity, cash = self._post_sample_activity()
+        import_batch = CashStatementImport.objects.create(
+            entity=entity,
+            cash_account=cash,
+            provider_type='bank',
+            statement_reference='JAN-2026-RANGE',
+            statement_start_date=date(2026, 1, 1),
+            statement_end_date=date(2026, 1, 31),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'fall within the import statement range'):
+            create_cash_statement_line(
+                import_batch,
+                date(2026, 2, 1),
+                'inflow',
+                Decimal('10.00'),
+            )
 
     def test_ar_aging_reconciles_invoice_schedule_to_ar_control(self):
         entity = self._foundation()

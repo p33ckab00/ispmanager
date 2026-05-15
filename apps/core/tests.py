@@ -35,6 +35,10 @@ class RolePresetTests(TestCase):
         self.assertIn('view_apvendorbill', permission_codenames)
         self.assertIn('view_apvendorbillattachment', permission_codenames)
         self.assertIn('view_apvendorpayment', permission_codenames)
+        self.assertIn('view_cashstatementimport', permission_codenames)
+        self.assertIn('view_cashstatementline', permission_codenames)
+        self.assertIn('view_cashreconciliationmatch', permission_codenames)
+        self.assertIn('view_cashreconciliationexception', permission_codenames)
 
     def test_read_only_auditor_gets_only_view_permissions(self):
         sync_permission_group_presets(replace=True)

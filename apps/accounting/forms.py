@@ -10,6 +10,9 @@ from apps.accounting.models import (
     APVendorBill,
     APVendorBillAttachment,
     APVendorPayment,
+    CashReconciliationException,
+    CashStatementImport,
+    CashStatementLine,
     ChartOfAccount,
     CutoverBalanceSchedule,
     CutoverBalanceScheduleLine,
@@ -377,6 +380,70 @@ class APVendorPaymentSettlementForm(forms.Form):
         widget=forms.TextInput(attrs={'placeholder': 'Bank statement, check clearing, or wallet settlement reference'}),
     )
     settlement_note = forms.CharField(max_length=255, required=False)
+
+
+class CashStatementImportForm(forms.ModelForm):
+    class Meta:
+        model = CashStatementImport
+        fields = [
+            'cash_account',
+            'provider_type',
+            'statement_reference',
+            'statement_start_date',
+            'statement_end_date',
+            'source_filename',
+            'notes',
+        ]
+        widgets = {
+            'statement_start_date': forms.DateInput(attrs={'type': 'date'}),
+            'statement_end_date': forms.DateInput(attrs={'type': 'date'}),
+            'notes': forms.Textarea(attrs={'rows': 3}),
+        }
+
+    def __init__(self, *args, entity=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['cash_account'].queryset = ChartOfAccount.objects.none()
+        if entity:
+            self.fields['cash_account'].queryset = ChartOfAccount.objects.filter(
+                entity=entity,
+                is_active=True,
+                code__in=['1000', '1010', '1020'],
+            ).order_by('code')
+
+
+class CashStatementLineForm(forms.ModelForm):
+    class Meta:
+        model = CashStatementLine
+        fields = [
+            'transaction_date',
+            'external_reference',
+            'description',
+            'direction',
+            'amount',
+        ]
+        widgets = {
+            'transaction_date': forms.DateInput(attrs={'type': 'date'}),
+        }
+
+
+class CashReconciliationExceptionForm(forms.ModelForm):
+    class Meta:
+        model = CashReconciliationException
+        fields = ['exception_type', 'note']
+
+    def __init__(self, *args, statement_line=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if statement_line:
+            allowed_types = ['timing_item']
+            if statement_line.direction == 'inflow':
+                allowed_types.insert(0, 'unmatched_receipt')
+            else:
+                allowed_types.insert(0, 'unmatched_disbursement')
+            self.fields['exception_type'].choices = [
+                choice
+                for choice in CashReconciliationException.EXCEPTION_TYPE_CHOICES
+                if choice[0] in allowed_types
+            ]
 
 
 class IncomeForm(forms.ModelForm):
