@@ -21,6 +21,8 @@ Slice 3G-B adds AP void/reversal handling and purchase tax breakdowns.
 Slice 3G-C adds AP vendor masters and bill attachment storage.
 Slice 3G-D adds AP payment reversals and manual settlement matching.
 Slice 3H adds stored export binaries/packages and saved report presets.
+Slice 3I adds persisted close checklists and optional reviewer approval gates
+for period close/reopen.
 
 ## Slice 3A Implemented
 
@@ -291,6 +293,24 @@ Implemented:
 - Regression coverage was added for archive storage/package contents and saved
   preset round trips.
 
+## Slice 3I Implemented
+
+Implemented:
+
+- `AccountingPeriodCloseChecklistItem` persists close-preview readiness checks
+  instead of leaving the evidence only in transient UI state.
+- Accounting setup can require reviewer approval before closing or reopening a
+  period.
+- `AccountingPeriodWorkflowReview` records close/reopen requests, approvals,
+  rejections, reviewers, timestamps, and consumed approvals.
+- Close previews show the persisted checklist plus close-review state; reopen
+  previews show reopen-review state.
+- Approved reviews are consumed when the close/reopen action completes, the
+  requester cannot self-approve, and stale requests cannot be decided after the
+  period state changes.
+- Regression coverage was added for checklist persistence plus close/reopen
+  approval gates.
+
 ## Report Rules
 
 - Only `posted` journal entries are included.
@@ -323,10 +343,6 @@ Implemented:
 
 ## Remaining Slice 3 Gaps
 
-- Period reopen/reverse-close is available, but does not yet have a separate
-  reviewer approval workflow.
-- Period close does not yet create a persisted close checklist beyond the audit
-  log and close metadata.
 - Department, area, service-type, and subscriber dimensions are not yet present
   in journal lines.
 - Cash Flow classification is GL-account based. It will become more exact once
@@ -344,9 +360,9 @@ Implemented:
 
 ## Next Slice Candidate
 
-Slice 3I should continue close-workflow hardening before BIR/NTC books:
+Slice 3J should start the next reconciliation layer before BIR/NTC books:
 
-- Persisted period-close checklist items.
-- Optional reviewer approval path before closing or reopening a period.
-- Full bank/wallet/gateway import reconciliation remains a later reconciliation
-  slice.
+- Bank/wallet/gateway statement import records.
+- Matching workspace for cash-equivalent transactions versus posted source
+  journals.
+- Manual exceptions for unmatched receipts, disbursements, and timing items.

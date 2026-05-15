@@ -13,6 +13,7 @@ from urllib.parse import parse_qsl, urlencode
 from apps.accounting.models import (
     AccountingEntity,
     AccountingPeriod,
+    AccountingPeriodWorkflowReview,
     AccountingReportArchive,
     AccountingReportPreset,
     AccountingSettings,
@@ -94,6 +95,8 @@ from apps.accounting.services import (
     refresh_ap_vendor_bill_status,
     refresh_ap_vendor_payment_status,
     reopen_accounting_period,
+    request_period_workflow_review,
+    review_period_workflow_request,
     retry_source_posting,
     sync_payments_to_income,
     get_monthly_summary,
@@ -614,6 +617,8 @@ def accounting_setup(request):
                 registered_address=form.cleaned_data['registered_address'],
                 template_key=form.cleaned_data['template_key'],
                 fiscal_year=form.cleaned_data['fiscal_year'],
+                require_period_close_review=form.cleaned_data['require_period_close_review'],
+                require_period_reopen_review=form.cleaned_data['require_period_reopen_review'],
             )
             AuditLog.log(
                 'update',
@@ -634,6 +639,8 @@ def accounting_setup(request):
                 'tin': entity.tin,
                 'registered_address': entity.registered_address,
                 'template_key': getattr(settings_obj, 'current_template_key', '') or 'isp_non_vat_sole_prop',
+                'require_period_close_review': getattr(settings_obj, 'require_period_close_review', False),
+                'require_period_reopen_review': getattr(settings_obj, 'require_period_reopen_review', False),
             })
         form = AccountingSetupForm(initial=initial)
 
@@ -709,6 +716,7 @@ def period_close(request, pk):
         'entity': entity,
         'period': period,
         'preview': preview,
+        'can_review_period_workflow': request.user.has_perm('accounting.review_accountingperiodworkflowreview'),
     })
 
 
@@ -753,7 +761,63 @@ def period_reopen(request, pk):
         'entity': entity,
         'period': period,
         'preview': preview,
+        'can_review_period_workflow': request.user.has_perm('accounting.review_accountingperiodworkflowreview'),
     })
+
+
+@login_required
+def period_workflow_review_request(request, pk, action):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.manage_accounting_periods',
+        'accounting-period-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    period = get_object_or_404(AccountingPeriod, entity=entity, pk=pk)
+    if action not in dict(AccountingPeriodWorkflowReview.ACTION_CHOICES):
+        messages.error(request, 'Unknown accounting period workflow action.')
+        return redirect('accounting-period-list')
+    route_name = 'accounting-period-close' if action == 'close' else 'accounting-period-reopen'
+    if request.method == 'POST':
+        try:
+            review = request_period_workflow_review(period, action, requested_by=request.user)
+            AuditLog.log('create', 'accounting', f"Period {action} review requested: {period.name}", user=request.user)
+            messages.success(request, f"{review.get_action_display()} review requested.")
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect(route_name, pk=period.pk)
+
+
+@login_required
+def period_workflow_review_decide(request, pk, decision):
+    permission_check = _require_accounting_perm(
+        request,
+        'accounting.review_accountingperiodworkflowreview',
+        'accounting-period-list',
+    )
+    if permission_check is not True:
+        return permission_check
+    entity = _require_entity(request)
+    if not isinstance(entity, AccountingEntity):
+        return entity
+    review = get_object_or_404(
+        AccountingPeriodWorkflowReview.objects.select_related('period'),
+        entity=entity,
+        pk=pk,
+    )
+    route_name = 'accounting-period-close' if review.action == 'close' else 'accounting-period-reopen'
+    if request.method == 'POST':
+        try:
+            review_period_workflow_request(review, decision, reviewed_by=request.user)
+            AuditLog.log('update', 'accounting', f"Period {review.action} review {decision}: {review.period.name}", user=request.user)
+            messages.success(request, f"Period {review.get_action_display().lower()} review {decision}.")
+        except ValidationError as exc:
+            messages.error(request, exc.messages[0] if hasattr(exc, 'messages') else str(exc))
+    return redirect(route_name, pk=review.period.pk)
 
 
 @login_required

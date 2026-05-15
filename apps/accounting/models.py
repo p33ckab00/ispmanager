@@ -91,6 +91,8 @@ class AccountingSettings(models.Model):
         default='not_started',
     )
     current_template_key = models.CharField(max_length=80, blank=True)
+    require_period_close_review = models.BooleanField(default=False)
+    require_period_reopen_review = models.BooleanField(default=False)
     setup_completed_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -174,6 +176,106 @@ class AccountingPeriod(models.Model):
 
     def __str__(self):
         return f"{self.entity} - {self.name}"
+
+
+class AccountingPeriodCloseChecklistItem(models.Model):
+    STATUS_CHOICES = [
+        ('passed', 'Passed'),
+        ('failed', 'Failed'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='period_close_checklist_items',
+    )
+    period = models.ForeignKey(
+        AccountingPeriod,
+        on_delete=models.CASCADE,
+        related_name='close_checklist_items',
+    )
+    key = models.CharField(max_length=80)
+    label = models.CharField(max_length=255)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    detail = models.CharField(max_length=255, blank=True)
+    checked_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['key']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['period', 'key'],
+                name='accounting_unique_period_close_checklist_item',
+            ),
+        ]
+
+    def clean(self):
+        if self.period_id and self.entity_id and self.period.entity_id != self.entity_id:
+            raise ValidationError('Period close checklist item must use the same accounting entity as the period.')
+
+    def __str__(self):
+        return f"{self.period} {self.label}: {self.status}"
+
+
+class AccountingPeriodWorkflowReview(models.Model):
+    ACTION_CHOICES = [
+        ('close', 'Close'),
+        ('reopen', 'Reopen'),
+    ]
+    STATUS_CHOICES = [
+        ('requested', 'Requested'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('consumed', 'Consumed'),
+    ]
+
+    entity = models.ForeignKey(
+        AccountingEntity,
+        on_delete=models.CASCADE,
+        related_name='period_workflow_reviews',
+    )
+    period = models.ForeignKey(
+        AccountingPeriod,
+        on_delete=models.CASCADE,
+        related_name='workflow_reviews',
+    )
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='requested')
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='requested_accounting_period_workflow_reviews',
+    )
+    requested_at = models.DateTimeField(default=timezone.now)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_accounting_period_workflow_reviews',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    note = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['-requested_at', '-id']
+        permissions = [
+            ('review_accountingperiodworkflowreview', 'Can review accounting period workflow requests'),
+        ]
+
+    def clean(self):
+        if self.period_id and self.entity_id and self.period.entity_id != self.entity_id:
+            raise ValidationError('Period workflow review must use the same accounting entity as the period.')
+        if self.status in ('approved', 'rejected') and not self.reviewed_at:
+            raise ValidationError('Reviewed workflow requests require a reviewed timestamp.')
+        if self.status == 'consumed' and not self.consumed_at:
+            raise ValidationError('Consumed workflow requests require a consumed timestamp.')
+
+    def __str__(self):
+        return f"{self.period} {self.action}: {self.status}"
 
 
 class ChartOfAccount(models.Model):

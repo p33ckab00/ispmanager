@@ -25,6 +25,69 @@
 </div>
 {% endif %}
 
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-6">
+  <div class="px-4 py-3 border-b border-gray-100">
+    <h3 class="font-semibold text-gray-800">Close Checklist</h3>
+  </div>
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 border-b border-gray-100">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Check</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Status</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500">Detail</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-50">
+      {% for item in preview.checklist_items %}
+      <tr>
+        <td class="px-4 py-3">{{ item.label }}</td>
+        <td class="px-4 py-3">
+          <span class="px-2 py-0.5 rounded text-xs {% if item.status == 'passed' %}bg-green-50 text-green-700{% else %}bg-red-50 text-red-600{% endif %}">
+            {{ item.get_status_display }}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-gray-500">{{ item.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if preview.review_required %}
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-6">
+  <h3 class="font-semibold text-gray-800">Close Review</h3>
+  {% if preview.latest_review %}
+  <p class="text-sm text-gray-600 mt-1">
+    {{ preview.latest_review.get_status_display }}
+    {% if preview.latest_review.requested_by %} · requested by {{ preview.latest_review.requested_by.get_username }}{% endif %}
+    {% if preview.latest_review.reviewed_by %} · reviewed by {{ preview.latest_review.reviewed_by.get_username }}{% endif %}
+  </p>
+  {% else %}
+  <p class="text-sm text-gray-600 mt-1">No close review request yet.</p>
+  {% endif %}
+  <div class="flex flex-wrap gap-2 mt-3">
+    {% if not preview.approved_review %}
+    {% if not preview.latest_review or preview.latest_review.status == 'rejected' %}
+    <form method="post" action="{% url 'accounting-period-workflow-review-request' period.pk 'close' %}">
+      {% csrf_token %}
+      <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Request Review</button>
+    </form>
+    {% endif %}
+    {% endif %}
+    {% if preview.latest_review and preview.latest_review.status == 'requested' and can_review_period_workflow %}
+    <form method="post" action="{% url 'accounting-period-workflow-review-decide' preview.latest_review.pk 'approved' %}">
+      {% csrf_token %}
+      <button type="submit" class="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold px-4 py-2 rounded-lg">Approve</button>
+    </form>
+    <form method="post" action="{% url 'accounting-period-workflow-review-decide' preview.latest_review.pk 'rejected' %}">
+      {% csrf_token %}
+      <button type="submit" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg">Reject</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
   <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
     <p class="text-xs text-gray-400 uppercase">Net Income</p>

@@ -14,6 +14,8 @@ from django.utils import timezone
 
 from apps.accounting.models import (
     AccountingPeriod,
+    AccountingPeriodCloseChecklistItem,
+    AccountingPeriodWorkflowReview,
     AccountingReportArchive,
     AccountingReportPreset,
     AccountingSourcePosting,
@@ -74,6 +76,8 @@ from apps.accounting.services import (
     refresh_ap_vendor_payment_status,
     refresh_opening_balance_totals,
     reopen_accounting_period,
+    request_period_workflow_review,
+    review_period_workflow_request,
     validate_cutover_balance_schedule,
     retry_source_posting,
     seed_bir_atc_codes,
@@ -354,6 +358,46 @@ class AccountingV2FinancialStatementTests(TestCase):
         with self.assertRaisesMessage(ValidationError, 'draft journal'):
             close_accounting_period(period)
 
+    def test_period_close_checklist_persists_and_review_must_be_approved(self):
+        entity, _cash = self._post_sample_activity()
+        entity.settings.require_period_close_review = True
+        entity.settings.save(update_fields=['require_period_close_review', 'updated_at'])
+        period = AccountingPeriod.objects.get(entity=entity, period_number=1)
+        requester = get_user_model().objects.create_user(username='close-requester')
+        reviewer = get_user_model().objects.create_user(username='close-reviewer')
+
+        preview = build_period_close_preview(period)
+        checklist = {
+            item.key: item
+            for item in AccountingPeriodCloseChecklistItem.objects.filter(period=period)
+        }
+
+        self.assertFalse(preview['can_close'])
+        self.assertEqual(len(checklist), 6)
+        self.assertEqual(checklist['workflow_review_approved'].status, 'failed')
+        self.assertIn('approved workflow review', preview['blockers'][0])
+
+        review = request_period_workflow_review(period, 'close', requested_by=requester)
+        with self.assertRaisesMessage(ValidationError, 'different user'):
+            review_period_workflow_request(review, 'approved', reviewed_by=requester)
+        review_period_workflow_request(review, 'approved', reviewed_by=reviewer)
+
+        preview = build_period_close_preview(period)
+        self.assertTrue(preview['can_close'])
+        self.assertEqual(preview['approved_review'].pk, review.pk)
+        self.assertEqual(
+            AccountingPeriodCloseChecklistItem.objects.get(
+                period=period,
+                key='workflow_review_approved',
+            ).status,
+            'passed',
+        )
+
+        close_accounting_period(period)
+        review.refresh_from_db()
+
+        self.assertEqual(review.status, 'consumed')
+
     def test_period_reopen_posts_reversal_and_restores_unclosed_earnings(self):
         entity, _cash = self._post_sample_activity()
         period = AccountingPeriod.objects.get(entity=entity, period_number=1)
@@ -395,6 +439,30 @@ class AccountingV2FinancialStatementTests(TestCase):
         self.assertTrue(balance_sheet['is_balanced'])
         self.assertEqual(revenue_balance, Decimal('500.00'))
         self.assertEqual(expense_balance, Decimal('120.00'))
+
+    def test_period_reopen_review_must_be_approved_when_required(self):
+        entity, _cash = self._post_sample_activity()
+        period = AccountingPeriod.objects.get(entity=entity, period_number=1)
+        close_accounting_period(period)
+        entity.settings.require_period_reopen_review = True
+        entity.settings.save(update_fields=['require_period_reopen_review', 'updated_at'])
+        requester = get_user_model().objects.create_user(username='reopen-requester')
+        reviewer = get_user_model().objects.create_user(username='reopen-reviewer')
+
+        preview = build_period_reopen_preview(period)
+        self.assertFalse(preview['can_reopen'])
+        self.assertIn('approved workflow review', preview['blockers'][0])
+
+        review = request_period_workflow_review(period, 'reopen', requested_by=requester)
+        review_period_workflow_request(review, 'approved', reviewed_by=reviewer)
+
+        preview = build_period_reopen_preview(period)
+        self.assertTrue(preview['can_reopen'])
+
+        reopen_accounting_period(period)
+        review.refresh_from_db()
+
+        self.assertEqual(review.status, 'consumed')
 
     def test_general_ledger_carries_opening_balance_into_date_range(self):
         entity, cash = self._post_sample_activity()

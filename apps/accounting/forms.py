@@ -35,6 +35,8 @@ class AccountingSetupForm(forms.Form):
     registered_address = forms.CharField(required=False, widget=forms.Textarea(attrs={'rows': 3}))
     template_key = forms.ChoiceField(label='COA template')
     fiscal_year = forms.IntegerField(min_value=2020, max_value=2099)
+    require_period_close_review = forms.BooleanField(required=False)
+    require_period_reopen_review = forms.BooleanField(required=False)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

@@ -149,6 +149,9 @@ pre-reversal history until the reversal journal date is reached.
 Slice 3H is now implemented for report/export hardening: report archives keep
 stored export binaries plus downloadable ZIP packages, and users can save
 reusable report presets from the financial statement pages.
+Slice 3I is now implemented for close-workflow hardening: period-close previews
+persist checklist items, and close/reopen actions can require a separate
+reviewer approval before they proceed.
 
 ## 2. Locked Decisions
 
@@ -468,8 +471,19 @@ Slice 3H is implemented as export archive and preset hardening:
   Balance, GL, financial statements, AR/AP Aging, and Tax Ledger pages.
 - Saved presets intentionally exclude one-off export `format` parameters so a
   reusable report view does not reopen as an accidental download.
-- Remaining Slice 3 work starts with close-review/checklist hardening and fuller
-  bank/wallet/gateway reconciliation.
+
+Slice 3I is implemented as close-workflow hardening:
+
+- Period-close previews now persist readiness checklist items for period state,
+  close-journal presence, draft journals, source-review blockers, closing-line
+  balance, and required workflow review approval.
+- Accounting setup can require reviewer approval before period close and/or
+  period reopen.
+- Close/reopen review requests track requester, reviewer, timestamps, decision,
+  and consumption after the approved workflow action is used.
+- A requester cannot approve their own workflow request, and stale requests
+  cannot be decided after the period state has changed.
+- Remaining Slice 3 work starts with fuller bank/wallet/gateway reconciliation.
 
 ### Slice 4 - BIR Books and Guides
 

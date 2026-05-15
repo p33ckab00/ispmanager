@@ -41,6 +41,17 @@
       {{ form.registered_address }}
       {% if form.registered_address.errors %}<p class="text-red-500 text-xs mt-1">{{ form.registered_address.errors.0 }}</p>{% endif %}
     </div>
+    <div class="border border-gray-100 rounded-lg p-4 space-y-3">
+      <p class="text-sm font-medium text-gray-700">Period Workflow Review</p>
+      <label class="flex items-center gap-2 text-sm text-gray-700">
+        {{ form.require_period_close_review }}
+        Require reviewer approval before closing a period
+      </label>
+      <label class="flex items-center gap-2 text-sm text-gray-700">
+        {{ form.require_period_reopen_review }}
+        Require reviewer approval before reopening a period
+      </label>
+    </div>
     <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-lg text-sm transition">
       Save Foundation
     </button>

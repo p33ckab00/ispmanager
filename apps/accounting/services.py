@@ -20,6 +20,8 @@ from apps.accounting.models import (
     APVendorBill,
     APVendorBillAttachment,
     APVendorPayment,
+    AccountingPeriodCloseChecklistItem,
+    AccountingPeriodWorkflowReview,
     ChartOfAccount,
     CUTOVER_LOCKED_STATUSES,
     CutoverBalanceSchedule,
@@ -288,6 +290,8 @@ def create_accounting_foundation(
     legal_name='',
     tin='',
     registered_address='',
+    require_period_close_review=False,
+    require_period_reopen_review=False,
 ):
     template = get_coa_template(template_key)
     entity = AccountingEntity.objects.filter(is_active=True).first()
@@ -305,6 +309,13 @@ def create_accounting_foundation(
         entity_created = True
 
     settings_obj, _ = AccountingSettings.objects.get_or_create(entity=entity)
+    settings_obj.require_period_close_review = bool(require_period_close_review)
+    settings_obj.require_period_reopen_review = bool(require_period_reopen_review)
+    settings_obj.save(update_fields=[
+        'require_period_close_review',
+        'require_period_reopen_review',
+        'updated_at',
+    ])
     if settings_obj.setup_status != 'live' and (
         entity.taxpayer_type != template['taxpayer_type']
         or entity.tax_classification != template['tax_classification']
@@ -3010,6 +3021,121 @@ def _period_source_review_blockers(period):
     ).count()
 
 
+def _period_workflow_review_required(period, action):
+    try:
+        settings_obj = period.entity.settings
+    except AccountingSettings.DoesNotExist:
+        return False
+    if action == 'close':
+        return settings_obj.require_period_close_review
+    if action == 'reopen':
+        return settings_obj.require_period_reopen_review
+    raise ValidationError('Unknown accounting period workflow action.')
+
+
+def latest_period_workflow_review(period, action):
+    return (
+        AccountingPeriodWorkflowReview.objects
+        .filter(period=period, action=action)
+        .order_by('-requested_at', '-id')
+        .first()
+    )
+
+
+def _approved_period_workflow_review(period, action):
+    return (
+        AccountingPeriodWorkflowReview.objects
+        .filter(period=period, action=action, status='approved')
+        .order_by('-requested_at', '-id')
+        .first()
+    )
+
+
+def _sync_period_close_checklist(period, checks):
+    items = []
+    checked_at = timezone.now()
+    for check in checks:
+        item, _ = AccountingPeriodCloseChecklistItem.objects.update_or_create(
+            period=period,
+            key=check['key'],
+            defaults={
+                'entity': period.entity,
+                'label': check['label'],
+                'status': 'passed' if check['passed'] else 'failed',
+                'detail': check.get('detail', ''),
+                'checked_at': checked_at,
+            },
+        )
+        items.append(item)
+    return items
+
+
+@transaction.atomic
+def request_period_workflow_review(period, action, requested_by=None, note=''):
+    period = AccountingPeriod.objects.select_for_update().select_related('entity').get(pk=period.pk)
+    if action not in dict(AccountingPeriodWorkflowReview.ACTION_CHOICES):
+        raise ValidationError('Unknown accounting period workflow action.')
+    if action == 'close' and period.status != 'open':
+        raise ValidationError('Only open periods can request close review.')
+    if action == 'reopen' and period.status != 'closed':
+        raise ValidationError('Only closed periods can request reopen review.')
+    latest_review = latest_period_workflow_review(period, action)
+    if latest_review and latest_review.status in ('requested', 'approved'):
+        return latest_review
+    review = AccountingPeriodWorkflowReview(
+        entity=period.entity,
+        period=period,
+        action=action,
+        requested_by=requested_by if getattr(requested_by, 'is_authenticated', False) else None,
+        note=note,
+    )
+    review.full_clean()
+    review.save()
+    return review
+
+
+@transaction.atomic
+def review_period_workflow_request(review, decision, reviewed_by=None, note=''):
+    review = (
+        AccountingPeriodWorkflowReview.objects
+        .select_for_update()
+        .select_related('period')
+        .get(pk=review.pk)
+    )
+    if review.status != 'requested':
+        raise ValidationError('Only requested period workflow reviews can be decided.')
+    if decision not in ('approved', 'rejected'):
+        raise ValidationError('Unknown period workflow review decision.')
+    if review.action == 'close' and review.period.status != 'open':
+        raise ValidationError('Close reviews can be decided only while the period is open.')
+    if review.action == 'reopen' and review.period.status != 'closed':
+        raise ValidationError('Reopen reviews can be decided only while the period is closed.')
+    if (
+        reviewed_by
+        and getattr(reviewed_by, 'is_authenticated', False)
+        and review.requested_by_id == reviewed_by.id
+    ):
+        raise ValidationError('Period workflow review must be decided by a different user.')
+    review.status = decision
+    review.reviewed_by = reviewed_by if getattr(reviewed_by, 'is_authenticated', False) else None
+    review.reviewed_at = timezone.now()
+    review.note = note or review.note
+    review.full_clean()
+    review.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'note'])
+    return review
+
+
+def _consume_period_workflow_review(period, action):
+    review = _approved_period_workflow_review(period, action)
+    if not review:
+        return None
+    review.status = 'consumed'
+    review.consumed_at = timezone.now()
+    review.full_clean()
+    review.save(update_fields=['status', 'consumed_at'])
+    return review
+
+
 def build_period_close_preview(period):
     period = AccountingPeriod.objects.select_related(
         'entity',
@@ -3070,6 +3196,51 @@ def build_period_close_preview(period):
         blockers.append(f"{draft_journal_count} draft journal(s) still need posting or deletion.")
     if source_review_count:
         blockers.append(f"{source_review_count} source posting(s) are still draft or blocked for this period.")
+    review_required = _period_workflow_review_required(period, 'close')
+    latest_review = latest_period_workflow_review(period, 'close')
+    approved_review = _approved_period_workflow_review(period, 'close')
+    if review_required and not approved_review:
+        blockers.append('Period close requires approved workflow review.')
+    checklist_checks = [
+        {
+            'key': 'period_open',
+            'label': 'Period is open',
+            'passed': period.status == 'open',
+            'detail': period.get_status_display(),
+        },
+        {
+            'key': 'closing_journal_absent',
+            'label': 'No existing closing journal',
+            'passed': not existing_closing_journal,
+            'detail': existing_closing_journal.entry_number if existing_closing_journal else 'None',
+        },
+        {
+            'key': 'draft_journals_clear',
+            'label': 'Draft journals cleared',
+            'passed': draft_journal_count == 0,
+            'detail': f"{draft_journal_count} draft journal(s)",
+        },
+        {
+            'key': 'source_review_clear',
+            'label': 'Source review queue clear',
+            'passed': source_review_count == 0,
+            'detail': f"{source_review_count} draft or blocked source posting(s)",
+        },
+        {
+            'key': 'closing_lines_balanced',
+            'label': 'Closing lines balanced',
+            'passed': debit_total == credit_total,
+            'detail': f"Debit {debit_total} / Credit {credit_total}",
+        },
+    ]
+    if review_required:
+        checklist_checks.append({
+            'key': 'workflow_review_approved',
+            'label': 'Workflow review approved',
+            'passed': bool(approved_review),
+            'detail': latest_review.get_status_display() if latest_review else 'No review request',
+        })
+    checklist_items = _sync_period_close_checklist(period, checklist_checks)
 
     return {
         'period': period,
@@ -3085,6 +3256,10 @@ def build_period_close_preview(period):
         'draft_journal_count': draft_journal_count,
         'source_review_count': source_review_count,
         'existing_closing_journal': existing_closing_journal,
+        'checklist_items': checklist_items,
+        'review_required': review_required,
+        'latest_review': latest_review,
+        'approved_review': approved_review,
         'blockers': blockers,
         'can_close': not blockers and debit_total == credit_total,
     }
@@ -3139,6 +3314,7 @@ def close_accounting_period(period, closed_by=None):
         'closed_by',
         'closing_journal_entry',
     ])
+    _consume_period_workflow_review(period, 'close')
     return {
         'period': period,
         'closing_journal': closing_journal,
@@ -3168,6 +3344,11 @@ def build_period_reopen_preview(period):
         blockers.append(f"{later_closed_count} later closed or locked period(s) must be handled first.")
     if closing_journal and reversal_journal:
         blockers.append('The closing journal already has a posted reversal.')
+    review_required = _period_workflow_review_required(period, 'reopen')
+    latest_review = latest_period_workflow_review(period, 'reopen')
+    approved_review = _approved_period_workflow_review(period, 'reopen')
+    if review_required and not approved_review:
+        blockers.append('Period reopen requires approved workflow review.')
 
     reversal_lines = []
     debit_total = Decimal('0.00')
@@ -3194,6 +3375,9 @@ def build_period_reopen_preview(period):
         'credit_total': credit_total,
         'is_balanced': debit_total == credit_total,
         'later_closed_count': later_closed_count,
+        'review_required': review_required,
+        'latest_review': latest_review,
+        'approved_review': approved_review,
         'blockers': blockers,
         'can_reopen': not blockers and debit_total == credit_total,
     }
@@ -3249,6 +3433,7 @@ def reopen_accounting_period(period, reopened_by=None):
         'closed_by',
         'closing_journal_entry',
     ])
+    _consume_period_workflow_review(period, 'reopen')
     return {
         'period': period,
         'reversal_journal': reversal_journal,
