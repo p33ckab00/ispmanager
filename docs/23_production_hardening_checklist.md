@@ -38,6 +38,7 @@ Confirm:
 - restore tests stay disabled unless same-instance temporary DB creation is explicitly approved
 - if restore tests are enabled, PostgreSQL client tools are present and a recent restore-test report is reviewed
 - Restore Preflight is reviewed before any future production restore execution work
+- persisted production restore plan records the approved window, rollback plan, validation plan, and operator confirmations
 - restore workflow has been tested
 
 ## 3. Service Hardening

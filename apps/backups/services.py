@@ -13,7 +13,7 @@ from django.conf import settings as django_settings
 from django.db import connection
 from django.utils import timezone
 
-from apps.backups.models import BackupJob
+from apps.backups.models import BackupJob, ProductionRestorePlan
 from apps.core.models import AuditLog
 from apps.settings_app.models import BackupSettings
 
@@ -1245,6 +1245,211 @@ def production_restore_preflight(source_job):
         'ready_for_future_execution_slice': not blockers,
         'generated_at': timezone.now(),
     }
+
+
+def _restore_plan_check(key, label, passed, detail):
+    return {
+        'key': key,
+        'label': label,
+        'passed': bool(passed),
+        'detail': detail,
+    }
+
+
+def production_restore_plan_status(plan):
+    preflight = production_restore_preflight(plan.source_backup_job)
+    now = timezone.now()
+    pinned_checksum_matches = bool(
+        plan.source_checksum_sha256
+        and plan.source_checksum_sha256 == plan.source_backup_job.checksum_sha256
+    )
+    maintenance_window_is_usable = bool(
+        plan.maintenance_window_starts_at
+        and plan.maintenance_window_ends_at
+        and plan.maintenance_window_ends_at > now
+    )
+    manual_checks = [
+        _restore_plan_check(
+            'pinned_checksum',
+            'Pinned backup checksum still matches',
+            pinned_checksum_matches,
+            (
+                'Plan checksum matches the selected backup artifact.'
+                if pinned_checksum_matches
+                else 'Selected backup checksum changed after this plan was created.'
+            ),
+        ),
+        _restore_plan_check(
+            'maintenance_window_details',
+            'Maintenance window recorded',
+            maintenance_window_is_usable,
+            (
+                'Maintenance window start and end are recorded, and the window has not ended.'
+                if maintenance_window_is_usable
+                else 'Record a maintenance window whose end time has not passed.'
+            ),
+        ),
+        _restore_plan_check(
+            'authorized_by',
+            'Authorization recorded',
+            bool(plan.authorized_by_name.strip()),
+            (
+                f'Authorized by {plan.authorized_by_name}.'
+                if plan.authorized_by_name.strip()
+                else 'Record who authorized the production restore.'
+            ),
+        ),
+        _restore_plan_check(
+            'rollback_plan',
+            'Rollback plan documented',
+            bool(plan.rollback_plan.strip()),
+            (
+                'Rollback plan text is recorded.'
+                if plan.rollback_plan.strip()
+                else 'Document the rollback plan.'
+            ),
+        ),
+        _restore_plan_check(
+            'post_restore_validation_plan',
+            'Post-restore validation documented',
+            bool(plan.post_restore_validation_plan.strip()),
+            (
+                'Post-restore validation plan text is recorded.'
+                if plan.post_restore_validation_plan.strip()
+                else 'Document the post-restore validation plan.'
+            ),
+        ),
+        _restore_plan_check(
+            'current_state_backup_confirmed',
+            'Fresh current-state backup confirmed',
+            plan.current_state_backup_confirmed,
+            (
+                'Operator confirmed a fresh current-state backup exists before destructive restore work.'
+                if plan.current_state_backup_confirmed
+                else 'Confirm a fresh current-state backup before destructive restore work.'
+            ),
+        ),
+        _restore_plan_check(
+            'maintenance_window_confirmed',
+            'Maintenance window confirmed',
+            plan.maintenance_window_confirmed,
+            (
+                'Operator confirmed the maintenance window is approved.'
+                if plan.maintenance_window_confirmed
+                else 'Confirm the approved maintenance window.'
+            ),
+        ),
+        _restore_plan_check(
+            'scheduler_stop_confirmed',
+            'Scheduler stop confirmed',
+            plan.scheduler_stop_confirmed,
+            (
+                'Operator confirmed scheduler automation will be stopped before restore work.'
+                if plan.scheduler_stop_confirmed
+                else 'Confirm scheduler automation will be stopped before restore work.'
+            ),
+        ),
+        _restore_plan_check(
+            'writes_blocked_confirmed',
+            'Application writes stop confirmed',
+            plan.writes_blocked_confirmed,
+            (
+                'Operator confirmed app writes will be stopped before live data replacement.'
+                if plan.writes_blocked_confirmed
+                else 'Confirm application writes will be stopped before live data replacement.'
+            ),
+        ),
+        _restore_plan_check(
+            'rollback_plan_confirmed',
+            'Rollback plan confirmed',
+            plan.rollback_plan_confirmed,
+            (
+                'Operator confirmed the rollback plan is ready.'
+                if plan.rollback_plan_confirmed
+                else 'Confirm the rollback plan is ready.'
+            ),
+        ),
+        _restore_plan_check(
+            'post_restore_validation_confirmed',
+            'Post-restore validation confirmed',
+            plan.post_restore_validation_confirmed,
+            (
+                'Operator confirmed the validation checklist is ready.'
+                if plan.post_restore_validation_confirmed
+                else 'Confirm the validation checklist is ready.'
+            ),
+        ),
+    ]
+    blockers = [
+        *preflight['blockers'],
+        *[item for item in manual_checks if not item['passed']],
+    ]
+    return {
+        'plan': plan,
+        'preflight': preflight,
+        'manual_checks': manual_checks,
+        'blockers': blockers,
+        'ready': not blockers,
+        'effective_status_label': 'Ready' if not blockers else 'Draft',
+    }
+
+
+def get_or_create_production_restore_plan(source_job, user=None):
+    if source_job.job_type != 'export' or source_job.profile != 'full':
+        raise BackupError('Production restore plans require a full database export backup.')
+    if source_job.status != 'completed':
+        raise BackupError('Production restore plans require a completed database export backup.')
+    if not source_job.checksum_sha256:
+        raise BackupError('Production restore plans require a recorded backup checksum.')
+
+    plan = ProductionRestorePlan.objects.filter(
+        source_backup_job=source_job,
+        source_checksum_sha256=source_job.checksum_sha256,
+    ).order_by('-updated_at', '-created_at').first()
+    if plan:
+        return plan, False
+
+    plan = ProductionRestorePlan.objects.create(
+        source_backup_job=source_job,
+        source_checksum_sha256=source_job.checksum_sha256,
+        created_by=user if getattr(user, 'is_authenticated', False) else None,
+        updated_by=user if getattr(user, 'is_authenticated', False) else None,
+    )
+    save_production_restore_plan(plan, user=user)
+    AuditLog.log(
+        'system',
+        'backups',
+        f"Production restore plan created for backup #{source_job.pk}: {source_job.file_name}",
+        user=user,
+    )
+    return plan, True
+
+
+def save_production_restore_plan(plan, user=None):
+    status = production_restore_plan_status(plan)
+    now = timezone.now()
+    plan.preflight_snapshot_json = {
+        'generated_at': status['preflight']['generated_at'].isoformat(),
+        'automatic_checks': status['preflight']['automatic_checks'],
+        'advisory_checks': status['preflight']['advisory_checks'],
+        'ready_for_future_execution_slice': status['preflight']['ready_for_future_execution_slice'],
+    }
+    plan.updated_by = user if getattr(user, 'is_authenticated', False) else plan.updated_by
+    if status['ready']:
+        if plan.status != 'ready':
+            plan.ready_at = now
+        plan.status = 'ready'
+    else:
+        plan.status = 'draft'
+        plan.ready_at = None
+    plan.save(update_fields=[
+        'status',
+        'preflight_snapshot_json',
+        'updated_by',
+        'ready_at',
+        'updated_at',
+    ])
+    return production_restore_plan_status(plan)
 
 
 def run_database_backup(profile='full', user=None, trigger='manual'):

@@ -61,3 +61,59 @@ class BackupJob(models.Model):
 
     def __str__(self):
         return f"{self.get_job_type_display()} - {self.get_profile_display()} - {self.get_status_display()}"
+
+
+class ProductionRestorePlan(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('ready', 'Ready'),
+    ]
+
+    source_backup_job = models.ForeignKey(
+        BackupJob,
+        on_delete=models.PROTECT,
+        related_name='production_restore_plans',
+    )
+    source_checksum_sha256 = models.CharField(max_length=64)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    maintenance_window_starts_at = models.DateTimeField(null=True, blank=True)
+    maintenance_window_ends_at = models.DateTimeField(null=True, blank=True)
+    authorized_by_name = models.CharField(max_length=255, blank=True)
+    authorization_reference = models.CharField(max_length=255, blank=True)
+    rollback_plan = models.TextField(blank=True)
+    post_restore_validation_plan = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
+    current_state_backup_confirmed = models.BooleanField(default=False)
+    maintenance_window_confirmed = models.BooleanField(default=False)
+    scheduler_stop_confirmed = models.BooleanField(default=False)
+    writes_blocked_confirmed = models.BooleanField(default=False)
+    rollback_plan_confirmed = models.BooleanField(default=False)
+    post_restore_validation_confirmed = models.BooleanField(default=False)
+    preflight_snapshot_json = models.JSONField(default=dict, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_production_restore_plans',
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='updated_production_restore_plans',
+    )
+    ready_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at', '-created_at']
+        permissions = [
+            ('view_production_restore_plan', 'Can view production restore plans'),
+            ('change_production_restore_plan', 'Can change production restore plans'),
+        ]
+
+    def __str__(self):
+        return f"Production restore plan #{self.pk} for backup #{self.source_backup_job_id}"

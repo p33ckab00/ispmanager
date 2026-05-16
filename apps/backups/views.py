@@ -5,21 +5,25 @@ from django.http import FileResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from apps.backups.forms import BackupImportValidationForm
-from apps.backups.models import BackupJob
+from apps.backups.forms import BackupImportValidationForm, ProductionRestorePlanForm
+from apps.backups.models import BackupJob, ProductionRestorePlan
 from apps.backups.services import (
     BackupError,
     backup_download_path,
     cleanup_backup_retention,
     delete_backup_file,
+    get_or_create_production_restore_plan,
     partial_backup_profile_options,
     production_restore_preflight,
+    production_restore_plan_status,
     run_full_database_backup,
     run_partial_database_backup,
     run_restore_test,
+    save_production_restore_plan,
     validate_backup_upload,
     verify_backup_file,
 )
+from apps.core.models import AuditLog
 from apps.settings_app.models import BackupSettings
 
 
@@ -173,7 +177,63 @@ def production_restore_preflight_view(request, pk):
         raise PermissionDenied
     source_job = get_object_or_404(BackupJob, pk=pk)
     context = production_restore_preflight(source_job)
+    context['existing_plan'] = ProductionRestorePlan.objects.filter(
+        source_backup_job=source_job,
+        source_checksum_sha256=source_job.checksum_sha256,
+    ).order_by('-updated_at', '-created_at').first()
     return render(request, 'backups/production_restore_preflight.html', context)
+
+
+@login_required
+@require_POST
+def create_production_restore_plan_view(request, pk):
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    source_job = get_object_or_404(BackupJob, pk=pk)
+    try:
+        plan, created = get_or_create_production_restore_plan(source_job, user=request.user)
+    except BackupError as exc:
+        messages.error(request, str(exc))
+        return redirect('backups-production-restore-preflight', pk=source_job.pk)
+    if created:
+        messages.success(request, 'Production restore plan draft created.')
+    else:
+        messages.info(request, 'Opened the existing production restore plan for this backup checksum.')
+    return redirect('backups-production-restore-plan', pk=plan.pk)
+
+
+@login_required
+def production_restore_plan_view(request, pk):
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    plan = get_object_or_404(
+        ProductionRestorePlan.objects.select_related('source_backup_job', 'created_by', 'updated_by'),
+        pk=pk,
+    )
+    if request.method == 'POST':
+        form = ProductionRestorePlanForm(request.POST, instance=plan)
+        if form.is_valid():
+            form.save()
+            status = save_production_restore_plan(plan, user=request.user)
+            AuditLog.log(
+                'update',
+                'backups',
+                f"Production restore plan #{plan.pk} saved with status {plan.status}",
+                user=request.user,
+            )
+            if status['ready']:
+                messages.success(request, 'Production restore plan is ready for a future execution slice.')
+            else:
+                messages.success(request, 'Production restore plan draft saved.')
+            return redirect('backups-production-restore-plan', pk=plan.pk)
+    else:
+        form = ProductionRestorePlanForm(instance=plan)
+    status = production_restore_plan_status(plan)
+    return render(request, 'backups/production_restore_plan.html', {
+        'plan': plan,
+        'form': form,
+        **status,
+    })
 
 
 @login_required

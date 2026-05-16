@@ -904,3 +904,25 @@ restore wizard must require:
 Later execution slices should remain separate from preflight and should not be
 implemented until the team decides how production downtime, write blocking, and
 rollback authority will be enforced.
+
+#### Slice 12B: Persisted Restore Plan
+
+- Add a superuser-only persisted restore plan linked to one completed full backup
+  checksum.
+- Store:
+  - maintenance window start and end
+  - authorizer name and reference
+  - rollback plan text
+  - post-restore validation plan text
+  - operator notes
+  - explicit confirmations for fresh current-state backup, maintenance window,
+    scheduler stop, write stop, rollback readiness, and validation readiness
+  - the latest preflight snapshot used when the plan is saved
+- A plan may remain `draft` while information is incomplete.
+- A plan becomes `ready` only when:
+  - the pinned backup checksum still matches
+  - Slice 12A automatic preflight has no blockers
+  - all required planning fields are populated
+  - all explicit operator confirmations are checked
+- Slice 12B must not create a live restore job or run destructive PostgreSQL
+  commands against production.

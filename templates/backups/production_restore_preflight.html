@@ -11,16 +11,32 @@
 </div>
 
 <div class="mb-6 rounded-xl border {% if ready_for_future_execution_slice %}border-emerald-200 bg-emerald-50{% else %}border-amber-200 bg-amber-50{% endif %} p-5">
-  <p class="text-sm font-semibold {% if ready_for_future_execution_slice %}text-emerald-800{% else %}text-amber-800{% endif %}">
-    {% if ready_for_future_execution_slice %}
-    Automatic checks passed for this backup candidate.
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <p class="text-sm font-semibold {% if ready_for_future_execution_slice %}text-emerald-800{% else %}text-amber-800{% endif %}">
+        {% if ready_for_future_execution_slice %}
+        Automatic checks passed for this backup candidate.
+        {% else %}
+        {{ blockers|length }} automatic blocker{{ blockers|length|pluralize }} still need attention.
+        {% endif %}
+      </p>
+      <p class="mt-2 text-sm {% if ready_for_future_execution_slice %}text-emerald-700{% else %}text-amber-700{% endif %}">
+        Future restore execution must still require the manual checklist below before any destructive action exists.
+      </p>
+    </div>
+    {% if existing_plan %}
+    <a href="{% url 'backups-production-restore-plan' pk=existing_plan.pk %}" class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black">
+      Open Plan
+    </a>
     {% else %}
-    {{ blockers|length }} automatic blocker{{ blockers|length|pluralize }} still need attention.
+    <form method="post" action="{% url 'backups-create-production-restore-plan' pk=source_job.pk %}">
+      {% csrf_token %}
+      <button type="submit" class="inline-flex items-center justify-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black">
+        Create Plan Draft
+      </button>
+    </form>
     {% endif %}
-  </p>
-  <p class="mt-2 text-sm {% if ready_for_future_execution_slice %}text-emerald-700{% else %}text-amber-700{% endif %}">
-    Future restore execution must still require the manual checklist below before any destructive action exists.
-  </p>
+  </div>
 </div>
 
 <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
