@@ -15,7 +15,13 @@ from django_apscheduler.models import DjangoJob, DjangoJobExecution
 
 from apps.accounting.models import ExpenseRecord, IncomeRecord
 from apps.backups.models import BackupJob
-from apps.backups.services import BackupError, encryption_status, remote_copy_status, resolve_pg_dump_path
+from apps.backups.services import (
+    BackupError,
+    encryption_status,
+    remote_copy_status,
+    resolve_pg_dump_path,
+    restore_test_status,
+)
 from apps.billing.models import BillingSnapshot, Invoice, Payment
 from apps.core.models import AuditLog
 from apps.data_exchange.models import DataExchangeJob
@@ -455,6 +461,21 @@ def get_incident_resolution_context(incident):
                 {'label': 'Backups', 'href': '/backups/'},
                 {'label': 'Backup settings', 'href': '/settings/backup/'},
             ],
+        ),
+        'backups.restore_test.not_ready': _manual_guide(
+            'Complete restore-test setup',
+            'Restore tests are enabled but the app cannot yet create and remove a separate temporary PostgreSQL database.',
+            steps=[
+                'Open Backup & Restore settings and review restore-test readiness.',
+                'Confirm postgresql-client tools are installed so pg_restore, createdb, and dropdb are available.',
+                'Grant CREATEDB only if this production role is intentionally allowed to run same-instance restore tests.',
+                'Keep restore tests disabled if the organization requires them to run only on a separate PostgreSQL host.',
+            ],
+            commands=[
+                'command -v pg_restore createdb dropdb',
+                'sudo -u postgres psql -c "ALTER ROLE ispmanager CREATEDB;"',
+            ],
+            links=[{'label': 'Backup settings', 'href': '/settings/backup/'}],
         ),
     }
 
@@ -1333,6 +1354,7 @@ def _get_backup_health(now):
         pg_dump_error = str(exc)
     backup_encryption_status = encryption_status()
     backup_remote_status = remote_copy_status(backup_settings)
+    backup_restore_test_status = restore_test_status(backup_settings)
     latest_success = BackupJob.objects.filter(
         job_type='export',
         status='completed',
@@ -1391,6 +1413,9 @@ def _get_backup_health(now):
         'remote_copy_host': backup_remote_status['host'],
         'remote_copy_user': backup_remote_status['user'],
         'remote_copy_dir': backup_remote_status['remote_dir'],
+        'restore_test_enabled': backup_settings.restore_test_enabled,
+        'restore_test_ready': backup_restore_test_status['ready'],
+        'restore_test_error': backup_restore_test_status['error'],
         'encryption_enabled': backup_settings.encryption_enabled,
         'encryption_ready': backup_encryption_status['ok'],
         'encryption_error': backup_encryption_status['error'],
@@ -1624,6 +1649,15 @@ def _build_alerts(snapshot):
             'warning',
             'Remote backup copy is enabled but not ready',
             backups['remote_copy_error'],
+            href='/settings/backup/',
+            source='backups',
+        ))
+    if backups['restore_test_enabled'] and not backups['restore_test_ready']:
+        alerts.append(_make_alert(
+            'backups.restore_test.not_ready',
+            'warning',
+            'Restore tests are enabled but not ready',
+            backups['restore_test_error'],
             href='/settings/backup/',
             source='backups',
         ))

@@ -205,6 +205,31 @@ sudo systemctl restart ispmanager-web ispmanager-scheduler
 The app copies the finalized local artifact. If encrypted backups are enabled,
 the remote file is the encrypted `.dump.enc` file.
 
+### Optional Same-Instance Restore Tests
+
+Restore tests in `Settings > Backup & Restore` use `pg_restore`, `createdb`, and
+`dropdb` from `postgresql-client`. They restore a completed local backup into a
+generated temporary database, collect a validation report, and then drop that
+temporary database.
+
+If you intentionally want to run restore tests on the production PostgreSQL
+instance, the configured PostgreSQL role must be able to create temporary
+databases:
+
+```bash
+sudo -u postgres psql -c "ALTER ROLE ispmanager CREATEDB;"
+```
+
+Use that privilege only when the operational policy accepts same-instance
+restore tests. If restore drills must run on a separate host, leave `Allow
+restore test jobs` disabled on production.
+
+Optional maintenance database override:
+
+```bash
+BACKUP_RESTORE_TEST_MAINTENANCE_DB=postgres
+```
+
 ## Recommended Runtime Paths
 
 - app user: `ispmanager`

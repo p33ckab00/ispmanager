@@ -13,7 +13,7 @@
   {% endif %}
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
   <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
     <p class="text-xs uppercase tracking-wide text-gray-400 mb-1">Manual Backups</p>
     <p class="text-lg font-semibold text-gray-800">{% if backup_settings.manual_backups_enabled %}Enabled{% else %}Disabled{% endif %}</p>
@@ -32,6 +32,15 @@
       {% if latest_failure %}{{ latest_failure.completed_at|default:latest_failure.created_at|date:"M d, Y H:i" }}{% else %}None{% endif %}
     </p>
     <p class="text-xs text-gray-500 mt-2">{{ latest_failure.error_report|truncatechars:80|default:"No failed backup recorded." }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+    <p class="text-xs uppercase tracking-wide text-gray-400 mb-1">Last Restore Test</p>
+    <p class="text-lg font-semibold text-gray-800">
+      {% if latest_restore_test %}{{ latest_restore_test.completed_at|default:latest_restore_test.created_at|date:"M d, Y H:i" }}{% else %}None{% endif %}
+    </p>
+    <p class="text-xs {% if latest_restore_test.status == 'failed' %}text-amber-700{% else %}text-gray-500{% endif %} mt-2">
+      {% if latest_restore_test %}{{ latest_restore_test.get_status_display }}{% else %}No restore test recorded.{% endif %}
+    </p>
   </div>
 </div>
 
@@ -120,6 +129,32 @@
 <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
   <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
     <div>
+      <h3 class="font-semibold text-gray-800">Restore Test</h3>
+      <p class="text-sm text-gray-500 mt-1">Restores a completed local backup into a temporary database, validates it, then removes the temporary database.</p>
+      {% if running_restore_test %}
+      <p class="text-xs text-blue-700 mt-2">A restore test started at {{ running_restore_test.started_at|date:"M d, Y H:i" }} is still marked running.</p>
+      {% elif not backup_settings.restore_test_enabled %}
+      <p class="text-xs text-amber-700 mt-2">Restore tests are disabled in Backup & Restore settings.</p>
+      {% elif not request.user.is_superuser and not perms.backups.run_restore_test %}
+      <p class="text-xs text-amber-700 mt-2">Your account does not have permission to run restore tests.</p>
+      {% endif %}
+    </div>
+    {% if latest_restore_test and latest_restore_test.summary_json.validation %}
+    <div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+      <p class="font-semibold text-gray-800">Latest report</p>
+      <p class="mt-1">{{ latest_restore_test.summary_json.validation.table_count }} table{{ latest_restore_test.summary_json.validation.table_count|pluralize }} restored</p>
+      <p class="mt-1">{{ latest_restore_test.summary_json.validation.foreign_key_count }} foreign key{{ latest_restore_test.summary_json.validation.foreign_key_count|pluralize }} checked</p>
+      {% for row in latest_restore_test.summary_json.validation.key_table_counts %}
+      <p class="mt-1">{{ row.label }}: {{ row.row_count }}</p>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 mb-6">
+  <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+    <div>
       <h3 class="font-semibold text-gray-800">Retention Cleanup</h3>
       <p class="text-sm text-gray-500 mt-1">Deletes older completed backup files while keeping the newest {{ backup_settings.retention_keep_last }} file{{ backup_settings.retention_keep_last|pluralize }}.</p>
       {% if not can_delete_backups %}
@@ -168,7 +203,12 @@
             {{ job.get_status_display }}
           </span>
         </td>
-        <td class="px-4 py-3 text-xs text-gray-600">{{ job.file_name|default:"-" }}</td>
+        <td class="px-4 py-3 text-xs text-gray-600">
+          {{ job.file_name|default:"-" }}
+          {% if job.job_type == 'restore_test' and job.summary_json.validation %}
+          <p class="mt-1 text-[11px] text-gray-500">{{ job.summary_json.validation.table_count }} table{{ job.summary_json.validation.table_count|pluralize }} restored</p>
+          {% endif %}
+        </td>
         <td class="px-4 py-3 text-xs text-gray-600">{{ job.file_size_bytes|filesizeformat }}</td>
         <td class="px-4 py-3 text-xs text-gray-500 font-mono">
           {{ job.checksum_sha256|truncatechars:18|default:"-" }}
@@ -195,6 +235,12 @@
             <form method="post" action="{% url 'backups-delete' pk=job.pk %}" onsubmit="return confirm('Delete this backup file from disk? The job history will remain.');">
               {% csrf_token %}
               <button type="submit" class="text-xs text-red-600 hover:text-red-800">Delete</button>
+            </form>
+            {% endif %}
+            {% if job.job_type == 'export' and can_run_restore_tests %}
+            <form method="post" action="{% url 'backups-run-restore-test' pk=job.pk %}" onsubmit="return confirm('Run a restore test into a temporary database now?');">
+              {% csrf_token %}
+              <button type="submit" class="text-xs text-emerald-700 hover:text-emerald-900">Test Restore</button>
             </form>
             {% endif %}
           </div>

@@ -7,7 +7,13 @@ from apps.settings_app.forms import (
     TelegramSettingsForm, RouterSettingsForm
 )
 from apps.core.models import SystemSetup, AuditLog
-from apps.backups.services import BackupError, encryption_status, remote_copy_status, resolve_pg_dump_path
+from apps.backups.services import (
+    BackupError,
+    encryption_status,
+    remote_copy_status,
+    resolve_pg_dump_path,
+    restore_test_status,
+)
 
 NAV_ITEMS = [
     ('/settings/system/', 'System Info', 'fa-building', 'system'),
@@ -273,4 +279,5 @@ def backup_settings(request):
         ctx['pg_dump_detection_error'] = str(exc)
     ctx['encryption_status'] = encryption_status()
     ctx['remote_copy_status'] = remote_copy_status(obj)
+    ctx['restore_test_status'] = restore_test_status(obj)
     return render(request, 'settings_app/backup_settings.html', ctx)

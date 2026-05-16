@@ -160,7 +160,7 @@
           <span>Allow restore test jobs</span>
         </label>
       </div>
-      <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="mt-4 grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div class="rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
           <p class="font-semibold text-gray-800">Remote copy readiness</p>
           {% if remote_copy_status.enabled %}
@@ -182,6 +182,19 @@
           <p class="mt-1 text-amber-700">{{ encryption_status.error }}</p>
           {% endif %}
           <p class="mt-2">Set {{ encryption_status.env_var }} in the web and scheduler service environment before enabling encrypted backups.</p>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-4 text-xs text-gray-600">
+          <p class="font-semibold text-gray-800">Restore-test readiness</p>
+          {% if restore_test_status.enabled %}
+            {% if restore_test_status.ready %}
+            <p class="mt-1 text-emerald-700">Ready. PostgreSQL tools detected and the configured role can create temporary databases.</p>
+            {% else %}
+            <p class="mt-1 text-amber-700">{{ restore_test_status.error }}</p>
+            {% endif %}
+          {% else %}
+          <p class="mt-1 text-gray-500">Disabled.</p>
+          {% endif %}
+          <p class="mt-2">Uses a separate temporary database and optional {{ restore_test_status.env_var }} override for the maintenance database name.</p>
         </div>
       </div>
     </section>

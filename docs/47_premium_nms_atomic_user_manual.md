@@ -263,12 +263,14 @@ Use Backups for PostgreSQL-native database export and backup validation.
 8. Use import validation to inspect backup files without restoring them.
 9. Enable encrypted backups only after `BACKUP_ENCRYPTION_PASSPHRASE` is configured.
 10. Enable SFTP remote copy only after the SFTP environment variables, SSH key, remote directory, and known_hosts are ready.
-11. Check Diagnostics for stale backup, failed backup, remote-copy, encryption, and storage warnings.
+11. Enable restore-test jobs only when same-instance temporary database creation has been approved.
+12. Check Diagnostics for stale backup, failed backup, restore-test, remote-copy, encryption, and storage warnings.
 
 NMS impact:
 
 - backups protect router, subscriber, billing, accounting, and NMS topology data
 - database import validation does not restore or overwrite production data
+- restore tests use a temporary database and do not replace production data
 - production restore remains a maintenance/runbook action, not a normal NMS workflow
 
 ### NMS

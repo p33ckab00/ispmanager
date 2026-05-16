@@ -841,6 +841,32 @@ Implementation notes:
 - Run validation checks.
 - Produce an operator report.
 
+Implementation notes:
+
+- Restore tests must be disabled by default and require the `run_restore_test`
+  permission or superuser access.
+- The first implementation should run only from completed local
+  `DB Export / Backup` jobs in PostgreSQL custom format. It should not accept an
+  arbitrary uploaded file as a one-click restore source.
+- The restore-test workflow should:
+  1. verify the stored backup checksum
+  2. decrypt to a temporary local file only when the source artifact is encrypted
+  3. create a generated temporary database name
+  4. run `pg_restore --exit-on-error` into that temporary database
+  5. collect an operator report with restored table counts and selected
+     business-table row counts
+  6. drop the temporary database even when validation fails
+- Restore tests use `pg_restore`, `createdb`, and `dropdb` from
+  `postgresql-client`.
+- Same-instance restore tests require the configured PostgreSQL role to have
+  `CREATEDB`. If policy does not allow that on the live server, keep restore
+  tests disabled and run recovery drills on a separate PostgreSQL host instead.
+- `BACKUP_RESTORE_TEST_MAINTENANCE_DB` may override the maintenance database
+  name used by `createdb` and `dropdb`; it defaults to `postgres`.
+- A successful restore test proves that the backup can be restored into a
+  separate database and that selected validation queries ran. It still is not a
+  production restore action.
+
 ### Slice 12: Production Restore Wizard
 
 Only consider this after the restore test workflow is proven. A production

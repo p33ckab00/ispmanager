@@ -35,6 +35,8 @@ Confirm:
 - remote backup copy is tested and Diagnostics shows no remote-copy warning
 - manual full database backup completes successfully
 - backup checksum verification succeeds
+- restore tests stay disabled unless same-instance temporary DB creation is explicitly approved
+- if restore tests are enabled, PostgreSQL client tools are present and a recent restore-test report is reviewed
 - restore workflow has been tested
 
 ## 3. Service Hardening

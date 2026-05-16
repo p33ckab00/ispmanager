@@ -170,6 +170,7 @@ This replaces the older loose approach where the dashboard inferred health from 
 - encrypted backup readiness when encryption is enabled
 - SFTP remote-copy readiness when remote copy is enabled
 - failed remote-copy attempts in the last 7 days
+- restore-test readiness when restore tests are enabled
 
 ## Alerts model
 
@@ -195,6 +196,7 @@ Examples:
 - encrypted backups enabled without OpenSSL or the passphrase environment variable
 - remote backup copy enabled without complete SFTP configuration
 - recent local backups whose off-host SFTP copy failed
+- restore tests enabled without the required PostgreSQL tools or database-creation capability
 
 These alerts roll up into:
 

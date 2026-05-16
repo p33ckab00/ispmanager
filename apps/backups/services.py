@@ -6,8 +6,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import psycopg
+from psycopg import sql
 from django.apps import apps as django_apps
 from django.conf import settings as django_settings
+from django.db import connection
 from django.utils import timezone
 
 from apps.backups.models import BackupJob
@@ -27,6 +30,7 @@ REMOTE_SFTP_DIR_ENV = 'BACKUP_REMOTE_SFTP_DIR'
 REMOTE_SFTP_PORT_ENV = 'BACKUP_REMOTE_SFTP_PORT'
 REMOTE_SFTP_KEY_ENV = 'BACKUP_REMOTE_SFTP_KEY'
 REMOTE_SFTP_KNOWN_HOSTS_ENV = 'BACKUP_REMOTE_SFTP_KNOWN_HOSTS'
+RESTORE_TEST_MAINTENANCE_DB_ENV = 'BACKUP_RESTORE_TEST_MAINTENANCE_DB'
 
 
 PARTIAL_BACKUP_PROFILES = {
@@ -106,6 +110,20 @@ PARTIAL_BACKUP_PROFILES = {
 }
 
 
+RESTORE_TEST_KEY_MODELS = [
+    ('core', 'SystemSetup', 'System setup'),
+    ('subscribers', 'Subscriber', 'Subscribers'),
+    ('billing', 'Invoice', 'Invoices'),
+    ('billing', 'Payment', 'Payments'),
+    ('billing', 'PaymentAllocation', 'Payment allocations'),
+    ('billing', 'BillingSnapshot', 'Billing snapshots'),
+    ('accounting', 'IncomeRecord', 'Income records'),
+    ('accounting', 'ExpenseRecord', 'Expense records'),
+    ('routers', 'Router', 'Routers'),
+    ('subscribers', 'NetworkNode', 'Network nodes'),
+]
+
+
 def partial_backup_profile_options():
     return [
         {
@@ -159,6 +177,39 @@ def resolve_pg_dump_path(configured_path):
     )
 
 
+def resolve_postgres_tool_path(tool_name, backup_settings=None):
+    backup_settings = backup_settings or BackupSettings.get_settings()
+    if tool_name == 'pg_dump':
+        return resolve_pg_dump_path(backup_settings.pg_dump_path)
+
+    candidates = []
+    try:
+        candidates.append(Path(resolve_pg_dump_path(backup_settings.pg_dump_path)).with_name(tool_name))
+    except BackupError:
+        pass
+
+    found = shutil.which(tool_name)
+    if found:
+        candidates.append(Path(found))
+
+    candidates.extend([
+        Path('/usr/bin') / tool_name,
+        Path('/usr/local/bin') / tool_name,
+    ])
+    postgres_bin_root = Path('/usr/lib/postgresql')
+    if postgres_bin_root.exists():
+        candidates.extend(sorted(postgres_bin_root.glob(f'*/bin/{tool_name}'), reverse=True))
+
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    raise BackupError(
+        f"PostgreSQL restore-test tool {tool_name} was not found. "
+        "Install postgresql-client before enabling restore tests."
+    )
+
+
 def resolve_openssl_path():
     found = shutil.which('openssl')
     if found:
@@ -194,6 +245,55 @@ def encryption_status():
         'error': error,
         'env_var': ENCRYPTION_PASSPHRASE_ENV,
     }
+
+
+def restore_test_status(backup_settings=None):
+    backup_settings = backup_settings or BackupSettings.get_settings()
+    status = {
+        'enabled': backup_settings.restore_test_enabled,
+        'ok': False,
+        'ready': False,
+        'error': '',
+        'maintenance_database': '',
+        'can_create_database': False,
+        'tools': {},
+        'env_var': RESTORE_TEST_MAINTENANCE_DB_ENV,
+    }
+    if not backup_settings.restore_test_enabled:
+        status.update({'ok': True, 'error': 'Restore tests are disabled.'})
+        return status
+
+    try:
+        _database_config()
+        tools = {
+            tool_name: resolve_postgres_tool_path(tool_name, backup_settings)
+            for tool_name in ('pg_restore', 'createdb', 'dropdb')
+        }
+        maintenance_database = _clean_env_value(RESTORE_TEST_MAINTENANCE_DB_ENV) or 'postgres'
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COALESCE(rolcreatedb OR rolsuper, FALSE)
+                FROM pg_roles
+                WHERE rolname = current_user
+                """
+            )
+            row = cursor.fetchone()
+        can_create_database = bool(row and row[0])
+        if not can_create_database:
+            raise BackupError(
+                'Restore tests require the configured PostgreSQL role to have CREATEDB capability.'
+            )
+        status.update({
+            'ok': True,
+            'ready': True,
+            'maintenance_database': maintenance_database,
+            'can_create_database': can_create_database,
+            'tools': tools,
+        })
+    except Exception as exc:
+        status['error'] = str(exc)
+    return status
 
 
 def _resolve_sftp_path():
@@ -451,6 +551,39 @@ def _encrypt_backup_file(source_path, encrypted_temp_path):
     return status
 
 
+def _decrypt_backup_file(source_path, decrypted_temp_path):
+    status = encryption_status()
+    if not status['ok']:
+        raise BackupError(f"Encrypted restore test is not ready: {status['error']}")
+
+    process = subprocess.run(
+        [
+            status['openssl_path'],
+            'enc',
+            '-d',
+            '-aes-256-cbc',
+            '-pbkdf2',
+            '-iter',
+            '200000',
+            '-in',
+            str(source_path),
+            '-out',
+            str(decrypted_temp_path),
+            '-pass',
+            f'env:{ENCRYPTION_PASSPHRASE_ENV}',
+        ],
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if process.returncode != 0:
+        raise BackupError(_safe_process_error(process, tool_name='openssl'))
+    if not decrypted_temp_path.exists() or decrypted_temp_path.stat().st_size <= 0:
+        raise BackupError('OpenSSL completed but did not produce a non-empty decrypted backup file.')
+    return status
+
+
 def _copy_backup_remote(local_path, backup_settings):
     status = remote_copy_status(backup_settings)
     started_at = timezone.now()
@@ -594,6 +727,344 @@ def _profile_table_names(profile):
     if not table_names:
         raise BackupError('Partial backup profile did not resolve to any database tables.')
     return sorted(table_names)
+
+
+def _postgres_cli_connection_args(database):
+    args = []
+    if database.get('HOST'):
+        args.extend(['--host', str(database['HOST'])])
+    if database.get('PORT'):
+        args.extend(['--port', str(database['PORT'])])
+    if database.get('USER'):
+        args.extend(['--username', str(database['USER'])])
+    return args
+
+
+def _run_postgres_command(command, database, tool_name, timeout):
+    try:
+        process = subprocess.run(
+            command,
+            env=_pg_environment(database),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BackupError(f'{tool_name} timed out after {timeout} seconds.') from exc
+    if process.returncode != 0:
+        raise BackupError(_safe_process_error(process, tool_name=tool_name))
+    return process
+
+
+def _restore_test_database_name(job_id):
+    timestamp = timezone.localtime(timezone.now()).strftime('%Y%m%d%H%M%S')
+    return f'ispmanager_restoretest_{job_id}_{timestamp}'
+
+
+def _restore_test_key_table_specs():
+    specs = []
+    for app_label, model_name, label in RESTORE_TEST_KEY_MODELS:
+        try:
+            model = django_apps.get_model(app_label, model_name)
+        except LookupError:
+            continue
+        specs.append({
+            'label': label,
+            'table_name': model._meta.db_table,
+        })
+    return specs
+
+
+def _restore_test_connection_kwargs(database, database_name):
+    kwargs = {
+        'dbname': database_name,
+        'connect_timeout': 15,
+    }
+    mapping = {
+        'USER': 'user',
+        'PASSWORD': 'password',
+        'HOST': 'host',
+        'PORT': 'port',
+    }
+    for config_key, connection_key in mapping.items():
+        value = database.get(config_key)
+        if value not in (None, ''):
+            kwargs[connection_key] = str(value)
+    return kwargs
+
+
+def _collect_restore_validation(database, target_database, expected_tables=None):
+    with psycopg.connect(**_restore_test_connection_kwargs(database, target_database)) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT tablename
+                FROM pg_catalog.pg_tables
+                WHERE schemaname = 'public'
+                ORDER BY tablename
+                """
+            )
+            table_names = [row[0] for row in cursor.fetchall()]
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM pg_catalog.pg_constraint c
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.connamespace
+                WHERE n.nspname = 'public'
+                  AND c.contype = 'f'
+                """
+            )
+            foreign_key_count = int(cursor.fetchone()[0])
+
+            key_table_counts = []
+            for spec in _restore_test_key_table_specs():
+                if spec['table_name'] not in table_names:
+                    continue
+                cursor.execute(
+                    sql.SQL('SELECT COUNT(*) FROM {}').format(sql.Identifier(spec['table_name']))
+                )
+                key_table_counts.append({
+                    **spec,
+                    'row_count': int(cursor.fetchone()[0]),
+                })
+
+            migration_count = None
+            if 'django_migrations' in table_names:
+                cursor.execute('SELECT COUNT(*) FROM django_migrations')
+                migration_count = int(cursor.fetchone()[0])
+
+    expected_tables = sorted(set(expected_tables or []))
+    missing_expected_tables = sorted(set(expected_tables) - set(table_names))
+    missing_key_tables = [
+        spec for spec in _restore_test_key_table_specs()
+        if spec['table_name'] not in table_names
+    ]
+    return {
+        'table_count': len(table_names),
+        'public_tables': table_names,
+        'foreign_key_count': foreign_key_count,
+        'migration_count': migration_count,
+        'key_table_counts': key_table_counts,
+        'missing_key_tables': missing_key_tables,
+        'expected_table_count': len(expected_tables),
+        'missing_expected_tables': missing_expected_tables,
+    }
+
+
+def _create_restore_test_database(database, backup_settings, target_database):
+    status = restore_test_status(backup_settings)
+    if not status['ok']:
+        raise BackupError(f"Restore test is enabled but not ready: {status['error']}")
+    command = [
+        status['tools']['createdb'],
+        *_postgres_cli_connection_args(database),
+        '--maintenance-db',
+        status['maintenance_database'],
+        '--template',
+        'template0',
+        target_database,
+    ]
+    _run_postgres_command(command, database, tool_name='createdb', timeout=60)
+    return status
+
+
+def _drop_restore_test_database(database, restore_status, target_database):
+    command = [
+        restore_status['tools']['dropdb'],
+        *_postgres_cli_connection_args(database),
+        '--maintenance-db',
+        restore_status['maintenance_database'],
+        '--if-exists',
+        target_database,
+    ]
+    _run_postgres_command(command, database, tool_name='dropdb', timeout=60)
+
+
+def _restore_backup_into_database(database, restore_status, target_database, restore_path):
+    command = [
+        restore_status['tools']['pg_restore'],
+        *_postgres_cli_connection_args(database),
+        '--no-owner',
+        '--no-privileges',
+        '--exit-on-error',
+        '--dbname',
+        target_database,
+        str(restore_path),
+    ]
+    _run_postgres_command(command, database, tool_name='pg_restore', timeout=1800)
+
+
+def _materialize_restore_source(source_job, source_path):
+    encrypted = bool(
+        source_path.name.endswith('.enc')
+        or source_job.summary_json.get('encryption', {}).get('enabled')
+    )
+    if not encrypted:
+        return source_path, None, False
+
+    handle = tempfile.NamedTemporaryFile(
+        prefix='ispmanager-restore-test-',
+        suffix='.dump',
+        delete=False,
+    )
+    temp_path = Path(handle.name)
+    handle.close()
+    try:
+        _decrypt_backup_file(source_path, temp_path)
+        try:
+            temp_path.chmod(0o600)
+        except OSError:
+            pass
+    except Exception:
+        if temp_path.exists():
+            temp_path.unlink()
+        raise
+    return temp_path, temp_path, True
+
+
+def run_restore_test(source_job, user=None):
+    backup_settings = BackupSettings.get_settings()
+    if not backup_settings.restore_test_enabled:
+        raise BackupError('Restore tests are disabled in Backup & Restore settings.')
+    if source_job.job_type != 'export':
+        raise BackupError('Restore tests can only run from database export backup jobs.')
+    if source_job.status != 'completed':
+        raise BackupError('Restore tests require a completed database export backup.')
+    if source_job.pg_dump_format != 'custom':
+        raise BackupError('Restore tests currently support PostgreSQL custom-format backups only.')
+    if BackupJob.objects.filter(status='running', job_type='restore_test').exists():
+        raise BackupError('Another restore test is already running.')
+    if BackupJob.objects.filter(status='running', job_type='export').exists():
+        raise BackupError('Wait for the running database backup to finish before starting a restore test.')
+
+    database = _database_config()
+    job = BackupJob.objects.create(
+        job_type='restore_test',
+        profile=source_job.profile,
+        status='running',
+        file_name=source_job.file_name,
+        file_size_bytes=source_job.file_size_bytes,
+        checksum_sha256=source_job.checksum_sha256,
+        pg_dump_format=source_job.pg_dump_format,
+        source_database=source_job.source_database,
+        created_by=user if getattr(user, 'is_authenticated', False) else None,
+        started_at=timezone.now(),
+        summary_json={
+            'source_backup_job_id': source_job.pk,
+            'source_file_name': source_job.file_name,
+            'source_checksum_sha256': source_job.checksum_sha256,
+            'temporary_database': True,
+            'production_database_unchanged': True,
+        },
+    )
+    target_database = _restore_test_database_name(job.pk)
+    job.summary_json = {
+        **job.summary_json,
+        'target_database': target_database,
+    }
+    job.save(update_fields=['summary_json'])
+
+    restore_status = None
+    restore_path = None
+    temporary_restore_path = None
+    database_created = False
+    checksum_verified = False
+    source_encrypted = False
+    validation = {}
+    failure = None
+    cleanup_error = ''
+
+    try:
+        source_path = _backup_file_path(source_job, backup_settings)
+        actual_checksum = _sha256_file(source_path)
+        if source_job.checksum_sha256 and actual_checksum != source_job.checksum_sha256:
+            raise BackupError('Backup checksum mismatch; restore test was not started.')
+        checksum_verified = bool(source_job.checksum_sha256)
+        restore_path, temporary_restore_path, source_encrypted = _materialize_restore_source(
+            source_job,
+            source_path,
+        )
+        restore_status = _create_restore_test_database(database, backup_settings, target_database)
+        database_created = True
+        _restore_backup_into_database(database, restore_status, target_database, restore_path)
+        validation = _collect_restore_validation(
+            database,
+            target_database,
+            expected_tables=source_job.summary_json.get('tables', []),
+        )
+        if validation['table_count'] <= 0:
+            raise BackupError('Restore test completed but no public tables were restored.')
+        if validation['missing_expected_tables']:
+            raise BackupError(
+                'Restore test is missing expected table(s): '
+                + ', '.join(validation['missing_expected_tables'])
+            )
+    except Exception as exc:
+        failure = exc
+    finally:
+        if database_created and restore_status:
+            try:
+                _drop_restore_test_database(database, restore_status, target_database)
+            except Exception as exc:
+                cleanup_error = str(exc)
+        if temporary_restore_path and temporary_restore_path.exists():
+            temporary_restore_path.unlink()
+
+    completed_at = timezone.now()
+    cleanup_summary = {
+        'attempted': database_created,
+        'completed': bool(database_created and not cleanup_error),
+        'error': cleanup_error,
+    }
+    report = {
+        'completed_at': completed_at.isoformat(),
+        'target_database': target_database,
+        'source_encrypted': source_encrypted,
+        'checksum_verified_before_restore': checksum_verified,
+        'validation': validation,
+        'cleanup': cleanup_summary,
+    }
+
+    if failure or cleanup_error:
+        message_parts = []
+        if failure:
+            message_parts.append(str(failure))
+        if cleanup_error:
+            message_parts.append(f'Temporary database cleanup failed: {cleanup_error}')
+        message = ' '.join(message_parts)
+        job.status = 'failed'
+        job.error_report = message[:4000]
+        job.completed_at = completed_at
+        job.summary_json = {
+            **job.summary_json,
+            **report,
+        }
+        job.save(update_fields=['status', 'error_report', 'completed_at', 'summary_json'])
+        AuditLog.log(
+            'system',
+            'backups',
+            f"Restore test failed for {source_job.file_name}: {message[:500]}",
+            user=user,
+        )
+        if isinstance(failure, BackupError):
+            raise failure
+        raise BackupError(message) from failure
+
+    job.status = 'completed'
+    job.completed_at = completed_at
+    job.summary_json = {
+        **job.summary_json,
+        **report,
+    }
+    job.save(update_fields=['status', 'completed_at', 'summary_json'])
+    AuditLog.log(
+        'system',
+        'backups',
+        f"Restore test completed for {source_job.file_name}: {validation['table_count']} table(s) restored",
+        user=user,
+    )
+    return job
 
 
 def run_database_backup(profile='full', user=None, trigger='manual'):
