@@ -10,6 +10,7 @@ urlpatterns = [
     path('validate-upload/', views.validate_backup_upload_view, name='backups-validate-upload'),
     path('retention/cleanup/', views.cleanup_retention, name='backups-cleanup-retention'),
     path('<int:pk>/restore-test/', views.run_restore_test_view, name='backups-run-restore-test'),
+    path('<int:pk>/production-restore/preflight/', views.production_restore_preflight_view, name='backups-production-restore-preflight'),
     path('<int:pk>/download/', views.download_backup, name='backups-download'),
     path('<int:pk>/verify/', views.verify_backup, name='backups-verify'),
     path('<int:pk>/delete/', views.delete_backup, name='backups-delete'),

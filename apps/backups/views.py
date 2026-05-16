@@ -13,6 +13,7 @@ from apps.backups.services import (
     cleanup_backup_retention,
     delete_backup_file,
     partial_backup_profile_options,
+    production_restore_preflight,
     run_full_database_backup,
     run_partial_database_backup,
     run_restore_test,
@@ -103,6 +104,7 @@ def dashboard(request):
                 or request.user.has_perm('backups.run_restore_test')
             )
         ),
+        'can_view_production_restore_preflight': request.user.is_superuser,
     })
 
 
@@ -163,6 +165,15 @@ def run_restore_test_view(request, pk):
     else:
         messages.success(request, f"Restore test completed for {source_job.file_name}.")
     return redirect('backups-dashboard')
+
+
+@login_required
+def production_restore_preflight_view(request, pk):
+    if not request.user.is_superuser:
+        raise PermissionDenied
+    source_job = get_object_or_404(BackupJob, pk=pk)
+    context = production_restore_preflight(source_job)
+    return render(request, 'backups/production_restore_preflight.html', context)
 
 
 @login_required

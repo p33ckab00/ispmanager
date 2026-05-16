@@ -243,6 +243,9 @@
               <button type="submit" class="text-xs text-emerald-700 hover:text-emerald-900">Test Restore</button>
             </form>
             {% endif %}
+            {% if job.job_type == 'export' and job.profile == 'full' and can_view_production_restore_preflight %}
+            <a href="{% url 'backups-production-restore-preflight' pk=job.pk %}" class="text-xs text-slate-700 hover:text-slate-900">Restore Preflight</a>
+            {% endif %}
           </div>
           {% else %}
           <span class="text-xs text-gray-400">-</span>

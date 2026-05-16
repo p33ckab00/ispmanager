@@ -37,6 +37,7 @@ Confirm:
 - backup checksum verification succeeds
 - restore tests stay disabled unless same-instance temporary DB creation is explicitly approved
 - if restore tests are enabled, PostgreSQL client tools are present and a recent restore-test report is reviewed
+- Restore Preflight is reviewed before any future production restore execution work
 - restore workflow has been tested
 
 ## 3. Service Hardening

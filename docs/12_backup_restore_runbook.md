@@ -879,3 +879,28 @@ restore wizard must require:
 - app write lock or downtime
 - rollback plan confirmation
 - post-restore validation checklist
+
+#### Slice 12A: Production Restore Preflight
+
+- Add a superuser-only, read-only preflight page from completed full backup jobs.
+- Show whether the selected backup has:
+  - completed full-export status
+  - a local artifact inside the backup root
+  - a recorded checksum
+  - a completed matching restore test for the same checksum
+  - no running backup or restore-test jobs
+- Show advisory signals such as artifact encryption and remote-copy status.
+- Show the manual requirements that future destructive restore execution must
+  still collect:
+  - fresh current-state backup
+  - approved maintenance window
+  - scheduler stopped
+  - application writes stopped
+  - rollback plan ready
+  - post-restore validation checklist ready
+- Slice 12A must not create, truncate, drop, or replace the live production
+  database.
+
+Later execution slices should remain separate from preflight and should not be
+implemented until the team decides how production downtime, write blocking, and
+rollback authority will be enforced.

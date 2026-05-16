@@ -463,10 +463,13 @@ def _backup_file_path(job, backup_settings):
     path = Path(job.file_path).expanduser()
     if not path.is_absolute():
         raise BackupError('Backup file path is not absolute.')
-    if not root.exists():
-        raise BackupError('Configured backup root does not exist.')
-    if not path.exists() or not path.is_file():
-        raise BackupError('Backup file is missing from disk.')
+    try:
+        if not root.exists():
+            raise BackupError('Configured backup root does not exist.')
+        if not path.exists() or not path.is_file():
+            raise BackupError('Backup file is missing from disk.')
+    except OSError as exc:
+        raise BackupError(f'Backup file is not accessible: {exc}') from exc
     if not _path_within_root(path, root):
         raise BackupError('Backup file path is outside the configured backup root.')
     return path
@@ -1065,6 +1068,183 @@ def run_restore_test(source_job, user=None):
         user=user,
     )
     return job
+
+
+def _preflight_check(key, label, passed, detail, category='automatic'):
+    return {
+        'key': key,
+        'label': label,
+        'passed': bool(passed),
+        'detail': detail,
+        'category': category,
+    }
+
+
+def production_restore_preflight(source_job):
+    backup_settings = BackupSettings.get_settings()
+    latest_matching_restore_test = BackupJob.objects.filter(
+        job_type='restore_test',
+        status='completed',
+        summary_json__source_backup_job_id=source_job.pk,
+    ).order_by('-completed_at', '-created_at').first()
+    running_exports = BackupJob.objects.filter(status='running', job_type='export').count()
+    running_restore_tests = BackupJob.objects.filter(status='running', job_type='restore_test').count()
+
+    file_path = None
+    file_error = ''
+    if source_job.job_type == 'export' and source_job.status == 'completed':
+        try:
+            file_path = _backup_file_path(source_job, backup_settings)
+        except BackupError as exc:
+            file_error = str(exc)
+
+    restore_test_matches_checksum = bool(
+        latest_matching_restore_test
+        and latest_matching_restore_test.summary_json.get('source_checksum_sha256')
+        and latest_matching_restore_test.summary_json.get('source_checksum_sha256') == source_job.checksum_sha256
+    )
+    remote_copy_summary = source_job.summary_json.get('remote_copy', {})
+    encryption_summary = source_job.summary_json.get('encryption', {})
+
+    automatic_checks = [
+        _preflight_check(
+            'superuser_required',
+            'Superuser authorization',
+            True,
+            'This page is accessible only to a superuser session.',
+        ),
+        _preflight_check(
+            'full_export',
+            'Full database export selected',
+            source_job.job_type == 'export' and source_job.profile == 'full',
+            (
+                'Selected backup is a full database export.'
+                if source_job.job_type == 'export' and source_job.profile == 'full'
+                else 'Production restore candidates must be completed full database exports.'
+            ),
+        ),
+        _preflight_check(
+            'completed_export',
+            'Backup job completed',
+            source_job.status == 'completed',
+            (
+                'Selected backup completed successfully.'
+                if source_job.status == 'completed'
+                else 'Selected backup is not completed.'
+            ),
+        ),
+        _preflight_check(
+            'local_artifact',
+            'Local backup artifact available',
+            bool(file_path),
+            (
+                f'Artifact is available at {file_path}.'
+                if file_path
+                else file_error or 'Local artifact is not available.'
+            ),
+        ),
+        _preflight_check(
+            'checksum_recorded',
+            'Checksum recorded',
+            bool(source_job.checksum_sha256),
+            (
+                'A SHA-256 checksum is recorded for the selected artifact.'
+                if source_job.checksum_sha256
+                else 'No recorded checksum exists for this artifact.'
+            ),
+        ),
+        _preflight_check(
+            'matching_restore_test',
+            'Matching restore test completed',
+            restore_test_matches_checksum,
+            (
+                f"Restore test #{latest_matching_restore_test.pk} completed for this exact checksum."
+                if restore_test_matches_checksum
+                else 'No completed restore test for this exact backup checksum was found.'
+            ),
+        ),
+        _preflight_check(
+            'no_running_backup_jobs',
+            'No backup or restore-test job is running',
+            running_exports == 0 and running_restore_tests == 0,
+            (
+                'No export or restore-test jobs are currently running.'
+                if running_exports == 0 and running_restore_tests == 0
+                else f'{running_exports} export job(s) and {running_restore_tests} restore-test job(s) are still running.'
+            ),
+        ),
+    ]
+
+    advisory_checks = [
+        _preflight_check(
+            'artifact_encryption',
+            'Artifact encryption status',
+            encryption_summary.get('enabled', False),
+            (
+                'Selected artifact is encrypted.'
+                if encryption_summary.get('enabled', False)
+                else 'Selected artifact is not encrypted.'
+            ),
+            category='advisory',
+        ),
+        _preflight_check(
+            'remote_copy',
+            'Remote copy status',
+            remote_copy_summary.get('status') == 'completed',
+            (
+                'Selected artifact has a completed remote copy record.'
+                if remote_copy_summary.get('status') == 'completed'
+                else 'No completed remote copy record is attached to this artifact.'
+            ),
+            category='advisory',
+        ),
+    ]
+
+    manual_requirements = [
+        {
+            'key': 'current_state_backup',
+            'label': 'Fresh current-state backup',
+            'detail': 'Take a new full backup immediately before any destructive restore so rollback has a recovery point.',
+        },
+        {
+            'key': 'maintenance_window',
+            'label': 'Maintenance window approved',
+            'detail': 'Confirm the outage window, approver, and operator responsible for the restore.',
+        },
+        {
+            'key': 'scheduler_stopped',
+            'label': 'Scheduler stopped',
+            'detail': 'Stop scheduler automation before write-bearing restore work begins.',
+        },
+        {
+            'key': 'writes_blocked',
+            'label': 'Application writes stopped',
+            'detail': 'Place the app in downtime or otherwise prevent writes before replacing live data.',
+        },
+        {
+            'key': 'rollback_plan',
+            'label': 'Rollback plan ready',
+            'detail': 'Document how to return to the pre-restore state if validation fails.',
+        },
+        {
+            'key': 'post_restore_validation',
+            'label': 'Post-restore validation ready',
+            'detail': 'Prepare the subscriber, billing, payment, settings, and smoke-test checklist.',
+        },
+    ]
+
+    blockers = [item for item in automatic_checks if not item['passed']]
+    return {
+        'source_job': source_job,
+        'file_path': file_path,
+        'latest_matching_restore_test': latest_matching_restore_test,
+        'automatic_checks': automatic_checks,
+        'advisory_checks': advisory_checks,
+        'manual_requirements': manual_requirements,
+        'blockers': blockers,
+        'ready_for_future_execution_slice': not blockers,
+        'generated_at': timezone.now(),
+    }
 
 
 def run_database_backup(profile='full', user=None, trigger='manual'):
